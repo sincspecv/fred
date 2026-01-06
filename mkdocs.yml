@@ -1,10 +1,10 @@
 site_name: Fred Documentation
 site_description: A flexible framework for building AI agents with intent-based routing
 site_author: Fred Framework
-site_url: https://yourusername.github.io/fred
+site_url: https://sincspecv.github.io/fred
 
 repo_name: fred
-repo_url: https://github.com/yourusername/fred
+repo_url: https://github.com/sincspecv/fred
 edit_uri: edit/main/docs/
 
 theme:
