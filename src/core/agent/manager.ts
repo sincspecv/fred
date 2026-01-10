@@ -2,6 +2,7 @@ import { AgentConfig, AgentInstance } from './agent';
 import { AgentFactory } from './factory';
 import { AIProvider } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
+import { semanticMatch } from '../../utils/semantic';
 
 /**
  * Agent manager for lifecycle management
@@ -88,6 +89,74 @@ export class AgentManager {
    */
   clear(): void {
     this.agents.clear();
+  }
+
+  /**
+   * Match a message against agent utterances
+   * Returns the matching agent ID if found, null otherwise
+   * Uses the same hybrid strategy as IntentMatcher: exact → regex → semantic
+   */
+  async matchAgentByUtterance(
+    message: string,
+    semanticMatcher?: (message: string, utterances: string[]) => Promise<{ matched: boolean; confidence: number; utterance?: string }>
+  ): Promise<{ agentId: string; confidence: number; matchType: 'exact' | 'regex' | 'semantic' } | null> {
+    const normalizedMessage = message.toLowerCase().trim();
+
+    // Get all agents with utterances
+    const agentsWithUtterances = Array.from(this.agents.values()).filter(
+      agent => agent.config.utterances && agent.config.utterances.length > 0
+    );
+
+    // Try exact match first
+    for (const agent of agentsWithUtterances) {
+      const utterances = agent.config.utterances!;
+      for (const utterance of utterances) {
+        if (normalizedMessage === utterance.toLowerCase().trim()) {
+          return {
+            agentId: agent.id,
+            confidence: 1.0,
+            matchType: 'exact',
+          };
+        }
+      }
+    }
+
+    // Try regex match
+    for (const agent of agentsWithUtterances) {
+      const utterances = agent.config.utterances!;
+      for (const utterance of utterances) {
+        try {
+          const regex = new RegExp(utterance, 'i');
+          if (regex.test(message)) {
+            return {
+              agentId: agent.id,
+              confidence: 0.8,
+              matchType: 'regex',
+            };
+          }
+        } catch {
+          // Invalid regex, skip
+          continue;
+        }
+      }
+    }
+
+    // Try semantic matching if provided
+    if (semanticMatcher) {
+      for (const agent of agentsWithUtterances) {
+        const utterances = agent.config.utterances!;
+        const result = await semanticMatcher(message, utterances);
+        if (result.matched) {
+          return {
+            agentId: agent.id,
+            confidence: result.confidence,
+            matchType: 'semantic',
+          };
+        }
+      }
+    }
+
+    return null;
   }
 }
 

@@ -43,6 +43,7 @@ export interface AgentConfig {
   tools?: string[]; // Array of tool IDs to assign to this agent
   temperature?: number; // Optional temperature setting
   maxTokens?: number; // Optional max tokens setting
+  utterances?: string[]; // Phrases that trigger this agent directly (bypasses intent matching)
 }
 
 /**
