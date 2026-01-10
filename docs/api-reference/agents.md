@@ -7,10 +7,11 @@ API reference for agent configuration and management.
 ```typescript
 interface AgentConfig {
   id: string;                    // Unique agent identifier
-  systemMessage: string;         // System message defining agent behavior
+  systemMessage: string;         // System message (string or file path to .md file)
   platform: AIPlatform;          // AI platform ('openai', 'groq', etc.)
   model: string;                 // Model identifier
   tools?: string[];              // Array of tool IDs
+  utterances?: string[];         // Phrases for direct routing (bypasses intents)
   temperature?: number;          // Temperature (0-1)
   maxTokens?: number;            // Maximum tokens
 }
@@ -48,6 +49,12 @@ interface AgentResponse {
     args: Record<string, any>;
     result?: any;
   }>;
+  handoff?: {
+    type: 'handoff';
+    agentId: string;
+    message: string;
+    context?: Record<string, any>;
+  };
 }
 ```
 

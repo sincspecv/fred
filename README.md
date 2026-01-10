@@ -7,7 +7,11 @@ Fred is a flexible framework for building AI agents with intent-based routing, c
 ## Features
 
 - **Intent-Based Routing**: Match user messages to intents using exact, regex, or semantic matching
+- **Agent-Level Utterances**: Define utterances directly on agents for direct routing (bypasses intent matching)
 - **Configurable Agents**: Define agents with system messages, AI platform integration, and tool assignments
+- **Markdown System Prompts**: Store system prompts in markdown files for better organization
+- **Dynamic Agent Handoff**: Agents can transfer conversations to other agents via tool calls
+- **Pipeline Hooks**: Intercept and modify the message pipeline at 12 strategic points
 - **Tool Registry**: Reusable tools that can be shared across multiple agents
 - **Multi-Platform Support**: Supports all @ai-sdk providers (OpenAI, Groq, Anthropic, Google, Mistral, Cohere, Vercel, Azure, Fireworks, XAI, Ollama, and 10+ more)
 - **Flexible Configuration**: Use programmatic API or JSON/YAML config files
@@ -74,13 +78,14 @@ fred.registerTool({
   },
 });
 
-// Create an agent
+// Create an agent with markdown system prompt
 await fred.createAgent({
   id: 'math-agent',
-  systemMessage: 'You are a helpful math assistant.',
+  systemMessage: './prompts/math-agent.md', // File path or string
   platform: 'openai',
   model: 'gpt-4',
   tools: ['calculator'],
+  utterances: ['calculate', 'math', 'compute'], // Direct routing via utterances
 });
 
 // Set a default agent (handles unmatched messages)
@@ -111,45 +116,45 @@ console.log(response.content);
 
 ### Config File Usage
 
-Create a config file (`config.json`):
+Create a config file (`config.yaml` or `config.json`):
 
-```json
-{
-  "intents": [
-    {
-      "id": "greeting",
-      "utterances": ["hello", "hi"],
-      "action": {
-        "type": "agent",
-        "target": "greeting-agent"
-      }
-    }
-  ],
-  "agents": [
-    {
-      "id": "greeting-agent",
-      "systemMessage": "You are a friendly assistant.",
-      "platform": "openai",
-      "model": "gpt-3.5-turbo"
-    }
-  ],
-  "tools": [
-    {
-      "id": "calculator",
-      "name": "calculator",
-      "description": "Perform arithmetic",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "operation": { "type": "string" },
-          "a": { "type": "number" },
-          "b": { "type": "number" }
-        },
-        "required": ["operation", "a", "b"]
-      }
-    }
-  ]
-}
+```yaml
+intents:
+  - id: greeting
+    utterances:
+      - hello
+      - hi
+    action:
+      type: agent
+      target: greeting-agent
+
+agents:
+  - id: greeting-agent
+    systemMessage: ./prompts/greeting-agent.md  # File path or string
+    utterances:  # Direct routing (takes priority over intents)
+      - hello
+      - hi
+      - hey
+    platform: openai
+    model: gpt-3.5-turbo
+
+tools:
+  - id: calculator
+    name: calculator
+    description: Perform arithmetic
+    parameters:
+      type: object
+      properties:
+        operation:
+          type: string
+        a:
+          type: number
+        b:
+          type: number
+      required:
+        - operation
+        - a
+        - b
 ```
 
 Initialize from config:
@@ -280,6 +285,14 @@ Fred consists of three main layers:
 2. **Agent System**: Manages AI agents with system messages, platform integrations, and tools
 3. **Tool System**: Registry of reusable tools that can be assigned to agents
 
+### Routing Priority
+
+Fred routes messages in the following priority order:
+
+1. **Agent Utterances**: Direct routing via agent-level utterances (highest priority)
+2. **Intent Matching**: Match against registered intents
+3. **Default Agent**: Fallback to default agent if no match found
+
 ### Intent Matching
 
 Fred uses a hybrid matching strategy:
@@ -291,11 +304,14 @@ Fred uses a hybrid matching strategy:
 ### Agents
 
 Agents are configured with:
-- System message (defines behavior/personality)
-- AI platform (OpenAI, Groq)
+- System message (defines behavior/personality) - supports markdown files or strings
+- Utterances (optional) - phrases that trigger direct routing to this agent
+- AI platform (OpenAI, Groq, Anthropic, etc.)
 - Model identifier
 - Tool assignments
 - Optional temperature and max tokens
+
+Agents can also hand off conversations to other agents using the built-in `handoff_to_agent` tool.
 
 ### Tools
 
@@ -379,6 +395,58 @@ fred.registerDefaultProviders({
   groq: { apiKey: 'your_key' },
 });
 ```
+
+## Advanced Features
+
+### Markdown System Prompts
+
+Store system prompts in markdown files for better organization:
+
+```yaml
+agents:
+  - id: my-agent
+    systemMessage: ./prompts/my-agent.md  # File path
+    platform: openai
+    model: gpt-4
+```
+
+The `systemMessage` field accepts both file paths (relative to config file) and literal strings.
+
+### Agent-Level Utterances
+
+Define utterances directly on agents for direct routing (bypasses intent matching):
+
+```typescript
+await fred.createAgent({
+  id: 'math-agent',
+  systemMessage: 'You are a math assistant.',
+  utterances: ['calculate', 'math', 'compute'], // Direct routing
+  platform: 'openai',
+  model: 'gpt-4',
+});
+```
+
+### Dynamic Agent Handoff
+
+Agents can transfer conversations to other agents:
+
+```typescript
+// The handoff_to_agent tool is automatically available to all agents
+// Agents can call it in their responses to transfer to another agent
+```
+
+### Pipeline Hooks
+
+Intercept and modify the message pipeline at strategic points:
+
+```typescript
+fred.registerHook('beforeToolCalled', async (event) => {
+  console.log('Tool about to be called:', event.data);
+  return { context: { timestamp: Date.now() } };
+});
+```
+
+Available hook points: `beforeMessageReceived`, `afterMessageReceived`, `beforeIntentDetermined`, `afterIntentDetermined`, `beforeAgentSelected`, `afterAgentSelected`, `beforeToolCalled`, `afterToolCalled`, `beforeResponseGenerated`, `afterResponseGenerated`, `beforeContextInserted`, `afterContextInserted`.
 
 ## Default Agent & Global Context
 

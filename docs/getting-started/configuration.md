@@ -89,7 +89,11 @@ intents:
 
 agents:
   - id: greeting-agent
-    systemMessage: You are a friendly assistant.
+    systemMessage: ./prompts/greeting-agent.md  # File path or string
+    utterances:  # Optional: direct routing (takes priority over intents)
+      - hello
+      - hi
+      - hey
     platform: openai
     model: gpt-3.5-turbo
 

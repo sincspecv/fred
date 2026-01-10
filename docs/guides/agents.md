@@ -46,18 +46,41 @@ await fred.createAgent({
   platform: 'openai',
   model: 'gpt-4',
   tools: ['tool1', 'tool2'],
+  utterances: ['write', 'story', 'creative'], // Optional: direct routing
   temperature: 0.8,      // Creativity level (0-1)
   maxTokens: 2000,       // Maximum response length
 });
 ```
 
-## System Messages
+### Agent-Level Utterances
 
-System messages define the agent's personality and behavior:
+Agents can define utterances directly for automatic routing (bypasses intent matching):
 
 ```typescript
-// Friendly assistant
+await fred.createAgent({
+  id: 'math-agent',
+  systemMessage: 'You are a math assistant.',
+  utterances: ['calculate', 'math', 'compute', 'solve'], // Direct routing
+  platform: 'openai',
+  model: 'gpt-4',
+});
+
+// Messages matching these utterances route directly to math-agent
+// (takes priority over intent-based routing)
+```
+
+Routing priority: **Agent utterances → Intents → Default agent**
+
+## System Messages
+
+System messages define the agent's personality and behavior. You can use either string content or file paths to markdown files:
+
+```typescript
+// String content
 systemMessage: 'You are a friendly and helpful assistant.'
+
+// Markdown file path (relative to config file or current working directory)
+systemMessage: './prompts/my-agent.md'
 
 // Expert in a domain
 systemMessage: 'You are an expert software engineer specializing in TypeScript and AI.'
@@ -65,6 +88,38 @@ systemMessage: 'You are an expert software engineer specializing in TypeScript a
 // Specific role
 systemMessage: 'You are a customer support agent. Be professional and empathetic.'
 ```
+
+### Markdown System Prompts
+
+Store complex system prompts in markdown files for better organization:
+
+**prompts/math-agent.md:**
+```markdown
+# Math Assistant
+
+You are an expert mathematics assistant. Your role is to:
+
+- Help users solve mathematical problems
+- Explain mathematical concepts clearly
+- Use the calculator tool when needed for computations
+
+## Guidelines
+
+- Always show your work
+- Explain steps clearly
+- Double-check calculations
+```
+
+**config.yaml:**
+```yaml
+agents:
+  - id: math-agent
+    systemMessage: ./prompts/math-agent.md
+    platform: openai
+    model: gpt-4
+```
+
+The system automatically loads markdown files when a file path is detected (starts with `./`, `/`, or ends with `.md`/`.markdown`).
 
 ## Platform and Model Selection
 
@@ -154,6 +209,23 @@ const response = await agent.processMessage('Calculate 10 * 5');
 console.log(response.content);  // "The result is 50"
 console.log(response.toolCalls); // Array of tool calls if any
 ```
+
+## Dynamic Agent Handoff
+
+Agents can transfer conversations to other agents using the built-in `handoff_to_agent` tool. This tool is automatically available to all agents:
+
+```typescript
+// Agent A can hand off to Agent B
+// The handoff tool is called automatically when an agent decides to transfer
+// The system processes handoffs recursively (with max depth protection)
+```
+
+The handoff tool accepts:
+- `agentId` (required): The ID of the target agent
+- `message` (optional): Custom message for the target agent
+- `context` (optional): Additional context to pass along
+
+Handoffs are processed automatically in the message pipeline, allowing for seamless multi-agent conversations.
 
 ## Best Practices
 

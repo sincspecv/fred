@@ -120,6 +120,16 @@ fred.registerIntent({
 });
 ```
 
+## Routing Priority
+
+Fred routes messages in the following priority order:
+
+1. **Agent Utterances**: Direct routing via agent-level utterances (highest priority)
+2. **Intent Matching**: Match against registered intents
+3. **Default Agent**: Fallback to default agent if no match found
+
+Note: Agent-level utterances take priority over intent matching. If an agent defines utterances, messages matching those utterances will route directly to that agent, bypassing intent matching.
+
 ## Intent Priority
 
 Intents are matched in registration order. More specific intents should be registered first:

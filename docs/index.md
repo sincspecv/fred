@@ -65,6 +65,18 @@ Maintain conversation history across all agents for seamless multi-agent convers
 
 Standard `/v1/chat/completions` endpoint works with AI chat tools like Misty and Chatbox.
 
+### 📝 Markdown System Prompts
+
+Store complex system prompts in markdown files for better organization and maintainability.
+
+### 🔄 Dynamic Agent Handoff
+
+Agents can seamlessly transfer conversations to other agents when needed.
+
+### 🪝 Pipeline Hooks
+
+Intercept and modify the message processing pipeline at 12 strategic points for context injection, logging, and custom processing.
+
 ### ⚡ Embedded CLI
 
 Built-in CLI commands for managing providers, agents, and tools - no additional packages required.

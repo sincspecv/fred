@@ -63,6 +63,7 @@ nav:
     - guides/providers.md
     - guides/default-agent.md
     - guides/context-management.md
+    - guides/hooks.md
     - guides/chat-api.md
     - guides/dev-chat.md
     - guides/cli.md
