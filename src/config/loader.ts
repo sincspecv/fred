@@ -3,6 +3,7 @@ import { parseConfigFile } from './parser';
 import { Intent } from '../core/intent/intent';
 import { AgentConfig } from '../core/agent/agent';
 import { Tool } from '../core/tool/tool';
+import { loadPromptFile } from '../utils/prompt-loader';
 
 /**
  * Load configuration from a file
@@ -76,9 +77,21 @@ export function extractIntents(config: FrameworkConfig): Intent[] {
 
 /**
  * Extract agents from config
+ * @param config - Framework configuration
+ * @param basePath - Optional base path for resolving relative prompt file paths (usually config file path)
  */
-export function extractAgents(config: FrameworkConfig): AgentConfig[] {
-  return config.agents || [];
+export function extractAgents(config: FrameworkConfig, basePath?: string): AgentConfig[] {
+  const agents = config.agents || [];
+  
+  // If basePath is provided, resolve prompt file paths
+  if (basePath && agents.length > 0) {
+    return agents.map(agent => ({
+      ...agent,
+      systemMessage: loadPromptFile(agent.systemMessage, basePath),
+    }));
+  }
+  
+  return agents;
 }
 
 /**

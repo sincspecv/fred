@@ -261,26 +261,49 @@ export class Fred {
     };
     await this.contextManager.addMessage(conversationId, userMessage);
 
-    // Match intent
+    // Create semantic matcher if enabled
     const semanticMatcher = useSemantic
       ? async (msg: string, utterances: string[]) => {
           return semanticMatch(msg, utterances, threshold);
         }
       : undefined;
 
-    const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
-
     let response: AgentResponse;
 
-    if (match) {
-      // Route to matched intent's action
-      response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
-    } else if (this.defaultAgentId) {
-      // No intent matched - route to default agent
-      response = await this.intentRouter.routeToDefaultAgent(message, previousMessages) as AgentResponse;
+    // Routing priority: 1. Agent utterances, 2. Intent matching, 3. Default agent
+    // Check agent utterances first (direct routing)
+    const agentMatch = await this.agentManager.matchAgentByUtterance(message, semanticMatcher);
+    
+    if (agentMatch) {
+      // Route directly to matched agent
+      const agent = this.agentManager.getAgent(agentMatch.agentId);
+      if (agent) {
+        response = await agent.processMessage(message, previousMessages);
+      } else {
+        // Agent not found, fall through to intent matching
+        const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
+        if (match) {
+          response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
+        } else if (this.defaultAgentId) {
+          response = await this.intentRouter.routeToDefaultAgent(message, previousMessages) as AgentResponse;
+        } else {
+          return null;
+        }
+      }
     } else {
-      // No match and no default agent
-      return null;
+      // No agent utterance match, try intent matching
+      const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
+      
+      if (match) {
+        // Route to matched intent's action
+        response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
+      } else if (this.defaultAgentId) {
+        // No intent matched - route to default agent
+        response = await this.intentRouter.routeToDefaultAgent(message, previousMessages) as AgentResponse;
+      } else {
+        // No match and no default agent
+        return null;
+      }
     }
 
     // Process handoffs recursively (with max depth to prevent infinite loops)
@@ -426,8 +449,8 @@ export class Fred {
       this.registerIntents(intents);
     }
 
-    // Create agents
-    const agents = extractAgents(config);
+    // Create agents (resolve prompt files relative to config path)
+    const agents = extractAgents(config, configPath);
     for (const agentConfig of agents) {
       await this.createAgent(agentConfig);
     }
