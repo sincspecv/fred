@@ -14,6 +14,30 @@ interface AgentConfig {
   utterances?: string[];         // Phrases for direct routing (bypasses intents)
   temperature?: number;          // Temperature (0-1)
   maxTokens?: number;            // Maximum tokens
+  mcpServers?: MCPServerConfig[]; // MCP servers to connect to
+}
+```
+
+## MCPServerConfig
+
+```typescript
+interface MCPServerConfig {
+  id: string;                    // Unique identifier for this MCP server
+  name?: string;                 // Optional display name
+  transport: 'stdio' | 'http' | 'sse';
+  
+  // For stdio transport
+  command?: string;              // Command to run (e.g., 'npx', 'node')
+  args?: string[];               // Arguments
+  env?: Record<string, string>;  // Environment variables
+  
+  // For HTTP/SSE transport
+  url?: string;                  // Server URL
+  headers?: Record<string, string>; // Optional headers
+  
+  // Optional configuration
+  enabled?: boolean;             // Enable/disable (default: true)
+  timeout?: number;              // Connection timeout in ms (default: 30000)
 }
 ```
 

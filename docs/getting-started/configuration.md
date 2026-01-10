@@ -96,6 +96,15 @@ agents:
       - hey
     platform: openai
     model: gpt-3.5-turbo
+    mcpServers:  # Optional: MCP servers for this agent
+      - id: filesystem
+        name: File System
+        transport: stdio
+        command: npx
+        args:
+          - -y
+          - @modelcontextprotocol/server-filesystem
+          - /allowed/path
 
 tools:
   - id: calculator

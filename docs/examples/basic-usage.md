@@ -124,5 +124,6 @@ Response: Why don't scientists trust atoms? Because they make up everything!
 
 - Try the [Default Agent Example](default-agent.md)
 - Explore [Chat Tool Integration](chat-tool-integration.md)
+- Learn about [MCP Server Integration](mcp-server-integration.md)
 - Check [Server Mode](server-mode.md)
 

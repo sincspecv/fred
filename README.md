@@ -12,6 +12,7 @@ Fred is a flexible framework for building AI agents with intent-based routing, c
 - **Markdown System Prompts**: Store system prompts in markdown files for better organization
 - **Dynamic Agent Handoff**: Agents can transfer conversations to other agents via tool calls
 - **Pipeline Hooks**: Intercept and modify the message pipeline at 12 strategic points
+- **MCP Server Integration**: Connect agents to MCP (Model Context Protocol) servers for automatic tool discovery
 - **Tool Registry**: Reusable tools that can be shared across multiple agents
 - **Multi-Platform Support**: Supports all @ai-sdk providers (OpenAI, Groq, Anthropic, Google, Mistral, Cohere, Vercel, Azure, Fireworks, XAI, Ollama, and 10+ more)
 - **Flexible Configuration**: Use programmatic API or JSON/YAML config files

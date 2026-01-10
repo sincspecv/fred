@@ -78,6 +78,7 @@ nav:
     - examples/basic-usage.md
     - examples/default-agent.md
     - examples/chat-tool-integration.md
+    - examples/mcp-server-integration.md
     - examples/server-mode.md
   - Advanced:
     - advanced/custom-providers.md

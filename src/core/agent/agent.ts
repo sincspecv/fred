@@ -1,4 +1,5 @@
 import { Action } from '../intent/intent';
+import { MCPServerConfig } from '../mcp/types';
 
 /**
  * Supported AI platforms
@@ -44,6 +45,7 @@ export interface AgentConfig {
   temperature?: number; // Optional temperature setting
   maxTokens?: number; // Optional max tokens setting
   utterances?: string[]; // Phrases that trigger this agent directly (bypasses intent matching)
+  mcpServers?: MCPServerConfig[]; // MCP servers to connect to for this agent
 }
 
 /**

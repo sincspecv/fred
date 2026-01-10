@@ -12,6 +12,7 @@ Fred is a powerful framework that allows you to:
 - **Markdown System Prompts**: Store system prompts in markdown files for better organization
 - **Dynamic Agent Handoff**: Agents can seamlessly transfer conversations to other agents
 - **Pipeline Hooks**: Intercept and modify the message pipeline at 12 strategic points
+- **MCP Server Integration**: Connect agents to MCP (Model Context Protocol) servers for automatic tool discovery
 - **Multi-Platform Support**: Use any AI provider supported by the Vercel AI SDK (OpenAI, Anthropic, Google, Groq, and 20+ more)
 - **Tool Integration**: Assign reusable tools to agents for extended capabilities
 - **Global Context**: Maintain conversation context across multiple agents seamlessly
@@ -80,6 +81,10 @@ Agents can seamlessly transfer conversations to other agents when needed.
 ### 🪝 Pipeline Hooks
 
 Intercept and modify the message processing pipeline at 12 strategic points for context injection, logging, and custom processing.
+
+### 🔌 MCP Server Integration
+
+Connect agents to MCP (Model Context Protocol) servers to automatically discover and use tools, resources, and prompts. MCP tools are seamlessly integrated with the AI SDK.
 
 ### ⚡ Embedded CLI
 

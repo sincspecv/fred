@@ -4,6 +4,7 @@ import { AIProvider } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
 import { createHandoffTool, HandoffResult } from '../tool/handoff';
 import { loadPromptFile } from '../../utils/prompt-loader';
+import { MCPClientImpl, createAISDKToolsFromMCP, convertMCPToolsToFredTools } from '../mcp';
 
 /**
  * Agent factory using Vercel AI SDK
@@ -14,6 +15,7 @@ export class AgentFactory {
     getAgent: (id: string) => any;
     getAvailableAgents: () => string[];
   };
+  private mcpClients: Map<string, MCPClientImpl> = new Map(); // Track MCP clients per agent
 
   constructor(toolRegistry: ToolRegistry) {
     this.toolRegistry = toolRegistry;
@@ -49,7 +51,51 @@ export class AgentFactory {
       tools.push(handoffTool);
     }
     
-    // Convert tools to AI SDK format
+    // Initialize MCP servers and discover tools
+    const mcpTools: Record<string, any> = {};
+    const mcpClientInstances: MCPClientImpl[] = [];
+    
+    if (config.mcpServers && config.mcpServers.length > 0) {
+      for (const mcpConfig of config.mcpServers) {
+        // Skip disabled servers
+        if (mcpConfig.enabled === false) {
+          continue;
+        }
+
+        try {
+          // Create and initialize MCP client
+          const mcpClient = new MCPClientImpl(mcpConfig);
+          await mcpClient.initialize();
+          mcpClientInstances.push(mcpClient);
+          
+          // Store client for cleanup later
+          const clientKey = `${config.id}-${mcpConfig.id}`;
+          this.mcpClients.set(clientKey, mcpClient);
+          
+          // Discover tools from MCP server
+          const discoveredTools = await mcpClient.listTools();
+          
+          // Convert MCP tools to AI SDK format
+          const aiSdkTools = createAISDKToolsFromMCP(discoveredTools, mcpClient, mcpConfig.id);
+          Object.assign(mcpTools, aiSdkTools);
+          
+          // Also register MCP tools in the tool registry (for consistency)
+          const fredTools = convertMCPToolsToFredTools(discoveredTools, mcpClient, mcpConfig.id);
+          for (const fredTool of fredTools) {
+            // Only register if not already registered (avoid conflicts)
+            if (!this.toolRegistry.hasTool(fredTool.id)) {
+              this.toolRegistry.registerTool(fredTool);
+            }
+          }
+        } catch (error) {
+          // Log error but don't fail agent creation
+          console.error(`Failed to initialize MCP server "${mcpConfig.id}":`, error);
+          // Continue with other MCP servers
+        }
+      }
+    }
+    
+    // Convert regular tools to AI SDK format
     const sdkTools: Record<string, any> = {};
     for (const toolDef of tools) {
       sdkTools[toolDef.id] = tool({
@@ -58,6 +104,9 @@ export class AgentFactory {
         execute: toolDef.execute,
       });
     }
+    
+    // Merge MCP tools with regular tools
+    Object.assign(sdkTools, mcpTools);
 
     // Create the agent processing function
     const processMessage = async (

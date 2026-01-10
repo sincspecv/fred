@@ -227,6 +227,110 @@ The handoff tool accepts:
 
 Handoffs are processed automatically in the message pipeline, allowing for seamless multi-agent conversations.
 
+## MCP Server Integration
+
+Agents can connect to MCP (Model Context Protocol) servers to automatically discover and use tools, resources, and prompts from external MCP servers. MCP tools are seamlessly integrated with the AI SDK and work just like regular tools.
+
+### Configuring MCP Servers
+
+#### stdio Transport (Local Servers)
+
+Connect to local MCP servers running as subprocesses:
+
+```typescript
+await fred.createAgent({
+  id: 'code-agent',
+  systemMessage: 'You are a coding assistant.',
+  platform: 'openai',
+  model: 'gpt-4',
+  mcpServers: [
+    {
+      id: 'filesystem',
+      name: 'File System',
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/allowed/path'],
+      env: {
+        // Optional environment variables
+      },
+    },
+  ],
+});
+```
+
+#### HTTP/SSE Transport (Remote Servers)
+
+Connect to remote MCP servers via HTTP:
+
+```typescript
+await fred.createAgent({
+  id: 'github-agent',
+  systemMessage: 'You are a GitHub assistant.',
+  platform: 'openai',
+  model: 'gpt-4',
+  mcpServers: [
+    {
+      id: 'github',
+      name: 'GitHub',
+      transport: 'http',
+      url: 'https://mcp-server.example.com',
+      headers: {
+        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+      },
+      timeout: 30000, // Optional timeout in ms
+    },
+  ],
+});
+```
+
+### MCP Tools
+
+MCP tools are automatically discovered and made available to the agent. They work seamlessly with the AI SDK's tool calling system:
+
+- Tools are discovered when the agent is created
+- Tool IDs are prefixed with `mcp-{serverId}-{toolName}` to avoid conflicts
+- Tools are registered in the tool registry and can be referenced by ID
+- AI SDK's `generateText` automatically handles MCP tool calls
+
+### MCP Configuration Options
+
+```typescript
+interface MCPServerConfig {
+  id: string;                    // Unique identifier
+  name?: string;                 // Optional display name
+  transport: 'stdio' | 'http' | 'sse';
+  
+  // For stdio transport
+  command?: string;              // Command to run
+  args?: string[];               // Command arguments
+  env?: Record<string, string>;  // Environment variables
+  
+  // For HTTP/SSE transport
+  url?: string;                  // Server URL
+  headers?: Record<string, string>; // Optional headers
+  
+  // Optional configuration
+  enabled?: boolean;             // Enable/disable (default: true)
+  timeout?: number;              // Connection timeout in ms (default: 30000)
+}
+```
+
+### Error Handling
+
+MCP server connection failures are handled gracefully:
+- If an MCP server fails to connect, the agent is still created
+- Errors are logged but don't prevent agent creation
+- Connection retries are automatic (up to 3 attempts with exponential backoff)
+- Timeouts are configurable per server
+
+### Best Practices
+
+1. **Use stdio for local servers**: More efficient for local MCP servers
+2. **Use HTTP for remote servers**: Better for distributed setups
+3. **Set appropriate timeouts**: Adjust based on network conditions
+4. **Handle errors gracefully**: MCP servers are optional - agents work without them
+5. **Prefix tool IDs**: MCP tools are automatically prefixed to avoid conflicts
+
 ## Best Practices
 
 1. **Clear System Messages**: Be specific about the agent's role and behavior
@@ -240,4 +344,5 @@ Handoffs are processed automatically in the message pipeline, allowing for seaml
 - Learn about [Intents](intents.md)
 - Explore [Tools](tools.md)
 - Check [Default Agent](default-agent.md)
+- See [MCP Server Integration Example](../examples/mcp-server-integration.md)
 
