@@ -3,6 +3,8 @@ import { IntentMatcher } from './core/intent/matcher';
 import { IntentRouter } from './core/intent/router';
 import { AgentConfig, AgentInstance, AgentResponse } from './core/agent/agent';
 import { AgentManager } from './core/agent/manager';
+import { PipelineConfig, PipelineInstance } from './core/pipeline';
+import { PipelineManager } from './core/pipeline/manager';
 import { Tool } from './core/tool/tool';
 import { ToolRegistry } from './core/tool/registry';
 import { AIProvider, ProviderConfig } from './core/platform/provider';
@@ -10,7 +12,7 @@ import { OpenAIProvider } from './core/platform/openai';
 import { GroqProvider } from './core/platform/groq';
 import { createDynamicProvider } from './core/platform/dynamic';
 import { FrameworkConfig } from './config/types';
-import { loadConfig, validateConfig, extractIntents, extractAgents } from './config/loader';
+import { loadConfig, validateConfig, extractIntents, extractAgents, extractPipelines } from './config/loader';
 import { semanticMatch } from './utils/semantic';
 import { ContextManager } from './core/context/manager';
 import { CoreMessage, convertToCoreMessages } from 'ai';
@@ -19,6 +21,7 @@ import { Tracer, Span } from './core/tracing';
 import { NoOpTracer } from './core/tracing/noop-tracer';
 import { SpanKind } from './core/tracing/types';
 import { setActiveSpan, getActiveSpan } from './core/tracing/context';
+import { validateMessageLength } from './utils/validation';
 
 /**
  * Fred - Main class for building AI agents
@@ -26,6 +29,7 @@ import { setActiveSpan, getActiveSpan } from './core/tracing/context';
 export class Fred {
   private toolRegistry: ToolRegistry;
   private agentManager: AgentManager;
+  private pipelineManager: PipelineManager;
   private intentMatcher: IntentMatcher;
   private intentRouter: IntentRouter;
   private defaultAgentId?: string;
@@ -37,6 +41,7 @@ export class Fred {
     this.toolRegistry = new ToolRegistry();
     this.tracer = tracer;
     this.agentManager = new AgentManager(this.toolRegistry, tracer);
+    this.pipelineManager = new PipelineManager(this.agentManager, tracer);
     this.intentMatcher = new IntentMatcher();
     this.intentRouter = new IntentRouter(this.agentManager);
     this.contextManager = new ContextManager();
@@ -55,6 +60,7 @@ export class Fred {
   enableTracing(tracer?: Tracer): void {
     this.tracer = tracer || new NoOpTracer();
     this.agentManager.setTracer(this.tracer);
+    this.pipelineManager.setTracer(this.tracer);
     this.hookManager.setTracer(this.tracer);
   }
 
@@ -235,6 +241,34 @@ export class Fred {
   }
 
   /**
+   * Create a pipeline from configuration
+   */
+  async createPipeline(config: PipelineConfig): Promise<PipelineInstance> {
+    return this.pipelineManager.createPipeline(config);
+  }
+
+  /**
+   * Get a pipeline by ID
+   */
+  getPipeline(id: string): PipelineInstance | undefined {
+    return this.pipelineManager.getPipeline(id);
+  }
+
+  /**
+   * Get all pipelines
+   */
+  getAllPipelines(): PipelineInstance[] {
+    return this.pipelineManager.getAllPipelines();
+  }
+
+  /**
+   * Remove a pipeline
+   */
+  removePipeline(id: string): boolean {
+    return this.pipelineManager.removePipeline(id);
+  }
+
+  /**
    * Set the default agent (fallback for unmatched messages)
    */
   setDefaultAgent(agentId: string): void {
@@ -263,6 +297,9 @@ export class Fred {
       conversationId?: string;
     }
   ): Promise<AgentResponse | null> {
+    // Validate message input to prevent resource exhaustion
+    validateMessageLength(message);
+
     // Create root span for message processing
     const rootSpan = this.tracer?.startSpan('processMessage', {
       kind: SpanKind.SERVER,
@@ -314,7 +351,7 @@ export class Fred {
 
       let response: AgentResponse;
 
-      // Routing priority: 1. Agent utterances, 2. Intent matching, 3. Default agent
+      // Routing priority: 1. Agent utterances, 2. Pipeline utterances, 3. Intent matching, 4. Default agent
       // Create span for routing
       const routingSpan = this.tracer?.startSpan('routing', {
         kind: SpanKind.INTERNAL,
@@ -377,60 +414,93 @@ export class Fred {
               }
             }
           } else {
-            // Agent not found, fall through to intent matching
+            // Agent not found, fall through to pipeline matching
             if (routingSpan) {
               routingSpan.addEvent('agent.notFound', { 'agent.id': agentMatch.agentId });
             }
+            // Continue to pipeline matching below
+          }
+        }
+
+        // If no agent match, check pipeline utterances
+        if (!agentMatch || (agentMatch && !this.agentManager.getAgent(agentMatch.agentId))) {
+          const pipelineMatch = await this.pipelineManager.matchPipelineByUtterance(message, semanticMatcher);
+          
+          if (pipelineMatch) {
+            if (routingSpan) {
+              routingSpan.setAttributes({
+                'routing.method': 'pipeline.utterance',
+                'routing.pipelineId': pipelineMatch.pipelineId,
+                'routing.confidence': pipelineMatch.confidence,
+                'routing.matchType': pipelineMatch.matchType,
+              });
+            }
+
+            // Create span for pipeline execution
+            const pipelineSpan = this.tracer?.startSpan('pipeline.process', {
+              kind: SpanKind.INTERNAL,
+              attributes: {
+                'pipeline.id': pipelineMatch.pipelineId,
+                'pipeline.matchType': pipelineMatch.matchType,
+                'pipeline.confidence': pipelineMatch.confidence,
+              },
+            });
+
+            const previousPipelineSpan = this.tracer?.getActiveSpan();
+            if (pipelineSpan) {
+              this.tracer?.setActiveSpan(pipelineSpan);
+            }
+
+            try {
+              response = await this.pipelineManager.executePipeline(pipelineMatch.pipelineId, message, previousMessages);
+              if (pipelineSpan) {
+                pipelineSpan.setAttribute('response.length', response.content.length);
+                pipelineSpan.setAttribute('response.hasToolCalls', (response.toolCalls?.length ?? 0) > 0);
+                pipelineSpan.setStatus('ok');
+              }
+            } catch (error) {
+              if (pipelineSpan && error instanceof Error) {
+                pipelineSpan.recordException(error);
+                pipelineSpan.setStatus('error', error.message);
+              }
+              throw error;
+            } finally {
+              pipelineSpan?.end();
+              if (previousPipelineSpan) {
+                this.tracer?.setActiveSpan(previousPipelineSpan);
+              }
+            }
+          } else {
+            // No pipeline match, try intent matching
             const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
+            
             if (match) {
               if (routingSpan) {
-                routingSpan.setAttribute('routing.fallback', 'intent.matching');
-                routingSpan.setAttribute('routing.intentId', match.intent.id);
+                routingSpan.setAttributes({
+                  'routing.method': 'intent.matching',
+                  'routing.intentId': match.intent.id,
+                  'routing.confidence': match.confidence,
+                  'routing.matchType': match.matchType,
+                });
               }
+              // Route to matched intent's action
               response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
             } else if (this.defaultAgentId) {
               if (routingSpan) {
-                routingSpan.setAttribute('routing.fallback', 'default.agent');
-                routingSpan.setAttribute('routing.defaultAgentId', this.defaultAgentId);
+                routingSpan.setAttributes({
+                  'routing.method': 'default.agent',
+                  'routing.defaultAgentId': this.defaultAgentId,
+                });
               }
+              // No intent matched - route to default agent
               response = await this.intentRouter.routeToDefaultAgent(message, previousMessages) as AgentResponse;
             } else {
               if (routingSpan) {
                 routingSpan.setStatus('error', 'No routing target found');
               }
+              // No match and no default agent
               return null;
             }
-          }
-        } else {
-          // No agent utterance match, try intent matching
-          const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
-          
-          if (match) {
-            if (routingSpan) {
-              routingSpan.setAttributes({
-                'routing.method': 'intent.matching',
-                'routing.intentId': match.intent.id,
-                'routing.confidence': match.confidence,
-                'routing.matchType': match.matchType,
-              });
-            }
-            // Route to matched intent's action
-            response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
-          } else if (this.defaultAgentId) {
-            if (routingSpan) {
-              routingSpan.setAttributes({
-                'routing.method': 'default.agent',
-                'routing.defaultAgentId': this.defaultAgentId,
-              });
-            }
-            // No intent matched - route to default agent
-            response = await this.intentRouter.routeToDefaultAgent(message, previousMessages) as AgentResponse;
-          } else {
-            if (routingSpan) {
-              routingSpan.setStatus('error', 'No routing target found');
-            }
-            // No match and no default agent
-            return null;
           }
         }
 
@@ -692,6 +762,12 @@ export class Fred {
     const agents = extractAgents(config, configPath);
     for (const agentConfig of agents) {
       await this.createAgent(agentConfig);
+    }
+
+    // Create pipelines (resolve prompt files in inline agents relative to config path)
+    const pipelines = extractPipelines(config, configPath);
+    for (const pipelineConfig of pipelines) {
+      await this.createPipeline(pipelineConfig);
     }
   }
 
