@@ -61,17 +61,22 @@ export async function recordTrace(
   tracesDir: string,
   options?: { conversationId?: string }
 ): Promise<string> {
-  // Enable tracing
-  const tracer = new NoOpTracer();
+  // Create recorder with a base tracer
+  const baseTracer = new NoOpTracer();
+  const recorder = new GoldenTraceRecorder(baseTracer);
+  
+  // Create tracer with callback to automatically capture spans
+  const tracer = new NoOpTracer((span) => {
+    recorder.addSpan(span);
+  });
+  
+  // Enable tracing with the callback-enabled tracer
   fred.enableTracing(tracer);
-
-  // Create recorder
-  const recorder = new GoldenTraceRecorder(tracer);
 
   // Record message
   recorder.recordMessage(message);
 
-  // Process message
+  // Process message (spans will be automatically captured via callback)
   const response = await fred.processMessage(message, {
     conversationId: options?.conversationId,
   });
@@ -83,11 +88,7 @@ export async function recordTrace(
   // Record response
   recorder.recordResponse(response);
 
-  // TODO: Capture spans from tracer
-  // For now, this is a simplified implementation
-  // In a full implementation, you'd need to track spans as they're created
-
-  // Save trace
+  // Save trace (spans are already captured via callback)
   const filepath = await recorder.saveToFile(tracesDir);
   console.log(`✓ Recorded golden trace: ${filepath}`);
   
