@@ -162,28 +162,24 @@ export function extractTools(config: FrameworkConfig): Omit<Tool, 'execute'>[] {
 export function extractPipelines(config: FrameworkConfig, basePath?: string): PipelineConfig[] {
   const pipelines = config.pipelines || [];
   
-  // If basePath is provided, resolve prompt file paths in inline agent configs
-  // Paths are sandboxed to the config file's directory to prevent path traversal attacks
-  if (basePath && pipelines.length > 0) {
-    return pipelines.map(pipeline => ({
-      ...pipeline,
-      agents: pipeline.agents.map(agentRef => {
-        if (typeof agentRef === 'string') {
-          // String reference - return as is
-          return agentRef;
-        } else {
-          // Inline agent config - resolve systemMessage path if it's a file path
-          // Pass allowAbsolutePaths=false to prevent absolute path attacks
-          return {
-            ...agentRef,
-            systemMessage: loadPromptFile(agentRef.systemMessage, basePath, false),
-          };
-        }
-      }),
-    }));
-  }
-  
-  return pipelines;
+  // Always return a new array of deep-copied pipeline objects to prevent mutation
+  // of the original configuration
+  return pipelines.map(pipeline => ({
+    id: pipeline.id,
+    description: pipeline.description,
+    utterances: pipeline.utterances ? [...pipeline.utterances] : undefined,
+    agents: pipeline.agents.map(agentRef => {
+      if (typeof agentRef === 'string' || !basePath) {
+        return agentRef;
+      }
+      // Inline agent config - resolve systemMessage path
+      // Pass allowAbsolutePaths=false to prevent absolute path attacks
+      return {
+        ...agentRef,
+        systemMessage: loadPromptFile(agentRef.systemMessage, basePath, false),
+      };
+    }),
+  }));
 }
 
 
