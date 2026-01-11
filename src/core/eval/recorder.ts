@@ -40,6 +40,22 @@ export class GoldenTraceRecorder {
   }
 
   /**
+   * Set up automatic span capture using a callback-enabled tracer
+   * This should be called if you want spans to be automatically captured
+   * Returns a new tracer with the callback registered
+   */
+  createTracerWithCallback(): Tracer {
+    if (this.tracer instanceof NoOpTracer) {
+      // Create a new tracer with callback to capture spans
+      return new NoOpTracer((span) => {
+        this.addSpan(span);
+      });
+    }
+    // For other tracers, return the original
+    return this.tracer;
+  }
+
+  /**
    * Record a message being processed
    */
   recordMessage(message: string): void {
@@ -132,10 +148,18 @@ export class GoldenTraceRecorder {
 
   /**
    * Add a span to be recorded
+   * Called automatically when spans are created/ended if using NoOpTracer with callback
    */
   addSpan(span: Span): void {
     const spanId = span.context.spanId;
-    if (!this.spans.has(spanId)) {
+    const existing = this.spans.get(spanId);
+    
+    if (existing) {
+      // Update existing span (e.g., when it ends)
+      existing.endTime = span.getEndTime();
+      existing.span = span;
+    } else {
+      // Add new span
       this.spans.set(spanId, {
         span,
         startTime: span.getStartTime(),
@@ -168,6 +192,19 @@ export class GoldenTraceRecorder {
         events = (span as any).getEvents();
       }
 
+      // Get status (if available from NoOpSpan)
+      let status: { code: 'ok' | 'error' | 'unset'; message?: string } = {
+        code: 'ok',
+        message: undefined,
+      };
+      if ('getStatus' in span) {
+        const spanStatus = (span as any).getStatus();
+        status = {
+          code: spanStatus.code === 'ok' ? 'ok' : spanStatus.code === 'error' ? 'error' : 'unset',
+          message: spanStatus.message,
+        };
+      }
+
       spans.push({
         name: span.name,
         startTime,
@@ -175,10 +212,7 @@ export class GoldenTraceRecorder {
         duration,
         attributes,
         events,
-        status: {
-          code: 'ok', // Default, would need to track status
-          message: undefined,
-        },
+        status,
       });
     }
 

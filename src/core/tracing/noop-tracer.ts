@@ -14,11 +14,13 @@ class NoOpSpan implements Span {
   private _attributes: Record<string, any> = {};
   private _events: Array<{ name: string; time: number; attributes?: Record<string, any> }> = [];
   private _status: { code: SpanStatus; message?: string } = { code: SpanStatus.UNSET };
+  private _onEnded?: (span: NoOpSpan) => void;
 
-  constructor(name: string, context: SpanContext, startTime?: number) {
+  constructor(name: string, context: SpanContext, startTime?: number, onEnded?: (span: NoOpSpan) => void) {
     this.name = name;
     this.context = context;
     this._startTime = startTime ?? Date.now();
+    this._onEnded = onEnded;
   }
 
   setAttribute(key: string, value: any): void {
@@ -62,6 +64,10 @@ class NoOpSpan implements Span {
   end(endTime?: number): void {
     if (this._endTime === undefined) {
       this._endTime = endTime ?? Date.now();
+      // Notify callback if registered
+      if (this._onEnded) {
+        this._onEnded(this);
+      }
     }
   }
 
@@ -97,6 +103,13 @@ class NoOpSpan implements Span {
   getEvents(): Array<{ name: string; time: number; attributes?: Record<string, any> }> {
     return [...this._events];
   }
+
+  /**
+   * Get span status (for golden traces)
+   */
+  getStatus(): { code: SpanStatus; message?: string } {
+    return { ...this._status };
+  }
 }
 
 /**
@@ -106,9 +119,11 @@ class NoOpSpan implements Span {
 export class NoOpTracer implements Tracer {
   private traceId: string;
   private spanCounter: number = 0;
+  private onSpanCreated?: (span: Span) => void;
 
-  constructor() {
+  constructor(onSpanCreated?: (span: Span) => void) {
     this.traceId = this.generateTraceId();
+    this.onSpanCreated = onSpanCreated;
   }
 
   private generateTraceId(): string {
@@ -130,11 +145,25 @@ export class NoOpTracer implements Tracer {
       isRemote: false,
     };
 
-    const span = new NoOpSpan(name, context, options?.startTime);
+    // Store reference to callback for use in onEnded
+    const onSpanCreated = this.onSpanCreated;
+
+    // Create callback for when span ends
+    const onEnded = onSpanCreated ? (span: NoOpSpan) => {
+      // Re-notify when span ends so recorder can update endTime
+      onSpanCreated(span);
+    } : undefined;
+
+    const span = new NoOpSpan(name, context, options?.startTime, onEnded);
     
     // Set attributes if provided
     if (options?.attributes) {
       span.setAttributes(options.attributes);
+    }
+
+    // Notify callback if registered (when span is created)
+    if (onSpanCreated) {
+      onSpanCreated(span);
     }
 
     return span;
