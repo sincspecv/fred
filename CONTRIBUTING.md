@@ -66,9 +66,22 @@ If you prefer not to use Flox:
    ```
 
 2. **Install Bun** (if not already installed)
+   
+   **Recommended**: Use your system's package manager or download from [bun.sh](https://bun.sh).
+   
+   **Manual installation** (safer than pipe-to-shell):
    ```bash
-   curl -fsSL https://bun.sh/install | bash
+   # 1. Download the installer
+   curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
+   
+   # 2. Review the script contents
+   cat /tmp/bun-install.sh
+   
+   # 3. If satisfied, execute it
+   bash /tmp/bun-install.sh
    ```
+   
+   **Security Note**: Avoid piping downloads directly to shell (`curl | bash`). Always download, review, then execute installation scripts to prevent remote code execution risks.
 
 3. **Install dependencies**
    ```bash

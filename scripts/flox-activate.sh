@@ -14,9 +14,11 @@ if ! command -v flox &> /dev/null; then
     echo ""
     echo "Install Flox:"
     echo "  macOS: brew install flox"
-    echo "  Linux: curl -fsSL https://flox.dev/install | bash"
+    echo "  Linux: Download from https://flox.dev/docs/install-flox/install/"
+    echo "         (Review the installer before executing for security)"
     echo ""
-    echo "Or visit: https://flox.dev/docs/install-flox/install/"
+    echo "For detailed installation instructions, visit:"
+    echo "  https://flox.dev/docs/install-flox/install/"
     return 1
 fi
 

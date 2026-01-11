@@ -18,16 +18,28 @@ Flox is a package manager and development environment tool built on Nix that pro
 Follow the [official Flox installation guide](https://flox.dev/docs/install-flox/install/):
 
 ```bash
-# macOS (using Homebrew)
+# macOS (using Homebrew - recommended)
 brew install flox
 
-# Linux (using the install script)
-curl -fsSL https://flox.dev/install | bash
+# Linux (using package manager - recommended)
+# Check your distribution's package manager or use the official installer
+
+# Linux (manual installation - safer than pipe-to-shell)
+# 1. Download the installer script
+curl -fsSL https://flox.dev/install -o /tmp/flox-install.sh
+
+# 2. Review the script contents
+cat /tmp/flox-install.sh
+
+# 3. If satisfied, execute it
+bash /tmp/flox-install.sh
 
 # Or use Nix
 nix profile install --experimental-features "nix-command flakes" \
   --accept-flake-config 'github:flox/flox/latest'
 ```
+
+**Security Note**: Avoid piping downloads directly to shell (`curl | bash`). Always download, review, then execute installation scripts to prevent remote code execution risks from compromised downloads or MITM attacks.
 
 ## Using Flox with Fred
 
