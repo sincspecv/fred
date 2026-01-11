@@ -14,13 +14,15 @@ class NoOpSpan implements Span {
   private _attributes: Record<string, any> = {};
   private _events: Array<{ name: string; time: number; attributes?: Record<string, any> }> = [];
   private _status: { code: SpanStatus; message?: string } = { code: SpanStatus.UNSET };
+  private _kind?: string;
   private _onEnded?: (span: NoOpSpan) => void;
 
-  constructor(name: string, context: SpanContext, startTime?: number, onEnded?: (span: NoOpSpan) => void) {
+  constructor(name: string, context: SpanContext, startTime?: number, onEnded?: (span: NoOpSpan) => void, kind?: string) {
     this.name = name;
     this.context = context;
     this._startTime = startTime ?? Date.now();
     this._onEnded = onEnded;
+    this._kind = kind;
   }
 
   setAttribute(key: string, value: any): void {
@@ -110,6 +112,13 @@ class NoOpSpan implements Span {
   getStatus(): { code: SpanStatus; message?: string } {
     return { ...this._status };
   }
+
+  /**
+   * Get span kind (for golden traces)
+   */
+  getKind(): string | undefined {
+    return this._kind;
+  }
 }
 
 /**
@@ -154,7 +163,10 @@ export class NoOpTracer implements Tracer {
       onSpanCreated(span);
     } : undefined;
 
-    const span = new NoOpSpan(name, context, options?.startTime, onEnded);
+    // Get kind as string if provided
+    const kind = options?.kind ? String(options.kind) : undefined;
+
+    const span = new NoOpSpan(name, context, options?.startTime, onEnded, kind);
     
     // Set attributes if provided
     if (options?.attributes) {

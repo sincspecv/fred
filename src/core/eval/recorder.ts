@@ -199,10 +199,22 @@ export class GoldenTraceRecorder {
       };
       if ('getStatus' in span) {
         const spanStatus = (span as any).getStatus();
+        // Convert SpanStatus enum to string if needed
+        const statusCode = typeof spanStatus.code === 'string' 
+          ? spanStatus.code 
+          : (spanStatus.code === 'ok' || spanStatus.code === 0 ? 'ok' 
+             : spanStatus.code === 'error' || spanStatus.code === 1 ? 'error' 
+             : 'unset');
         status = {
-          code: spanStatus.code === 'ok' ? 'ok' : spanStatus.code === 'error' ? 'error' : 'unset',
+          code: statusCode as 'ok' | 'error' | 'unset',
           message: spanStatus.message,
         };
+      }
+
+      // Get kind (if available from NoOpSpan)
+      let kind: string | undefined;
+      if ('getKind' in span) {
+        kind = (span as any).getKind();
       }
 
       spans.push({
@@ -213,6 +225,7 @@ export class GoldenTraceRecorder {
         attributes,
         events,
         status,
+        kind,
       });
     }
 
