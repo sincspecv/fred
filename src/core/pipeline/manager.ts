@@ -208,7 +208,7 @@ export class PipelineManager {
 
   /**
    * Execute a pipeline by chaining agents together
-   * Each agent receives the original message plus all previous agent responses
+   * Each agent receives the most recent message as primary input and preceding messages as history
    */
   async executePipeline(
     pipelineId: string,
@@ -242,18 +242,10 @@ export class PipelineManager {
     }
 
     try {
-      // Build accumulated message history
-      // Start with previous messages (conversation history)
-      const accumulatedMessages: AgentMessage[] = [...previousMessages];
-      
-      // Add the original user message
-      accumulatedMessages.push({
-        role: 'user',
-        content: message,
-      });
-
-      // Validate accumulated message count
-      validatePipelineMessageCount(accumulatedMessages.length);
+      // Current message to pass to the next agent (starts with original user message)
+      let currentMessage = message;
+      // History to pass to the next agent (starts with conversation history)
+      let currentHistory: AgentMessage[] = [...previousMessages];
 
       let finalResponse: AgentResponse | null = null;
 
@@ -284,8 +276,9 @@ export class PipelineManager {
             throw new Error(`Agent "${agentId}" not found in pipeline "${pipelineId}"`);
           }
 
-          // Process message through agent with accumulated context
-          const response = await agent.processMessage(message, accumulatedMessages);
+          // Process message through agent: pass most recent message as primary input,
+          // and preceding messages as history
+          const response = await agent.processMessage(currentMessage, currentHistory);
 
           if (agentSpan) {
             agentSpan.setAttributes({
@@ -299,14 +292,24 @@ export class PipelineManager {
           // Validate response content length
           validateMessageLength(response.content);
 
-          // Add agent's response to accumulated messages
-          accumulatedMessages.push({
+          // Update for next agent:
+          // - Add the current message (input to this agent) to history
+          currentHistory.push({
+            role: 'user',
+            content: currentMessage,
+          });
+          
+          // - Add this agent's response to history
+          currentHistory.push({
             role: 'assistant',
             content: response.content,
           });
 
+          // - The next agent's primary message is this agent's response
+          currentMessage = response.content;
+
           // Validate accumulated message count after each agent
-          validatePipelineMessageCount(accumulatedMessages.length);
+          validatePipelineMessageCount(currentHistory.length);
 
           // Store response (will be overwritten by next agent, final one is what we return)
           finalResponse = response;
