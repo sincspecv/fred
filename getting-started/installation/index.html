@@ -549,6 +549,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#development-environment-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development Environment Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Development Environment Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-flox-recommended-for-contributors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using Flox (Recommended for Contributors)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#install-fred" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1724,6 +1763,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#development-environment-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development Environment Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Development Environment Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-flox-recommended-for-contributors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using Flox (Recommended for Contributors)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#install-fred" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1899,12 +1977,26 @@
 <ul>
 <li><strong>Bun</strong>: Version 1.0 or higher (<a href="https://bun.sh">Install Bun</a>)</li>
 <li><strong>Node.js</strong>: Optional, if using npm instead of Bun</li>
+<li><strong>Flox</strong>: Optional, for consistent development environments (<a href="https://flox.dev">Install Flox</a>)</li>
 <li><strong>API Keys</strong>: At least one AI provider API key (OpenAI, Groq, etc.)</li>
 </ul>
+<h2 id="development-environment-setup">Development Environment Setup</h2>
+<h3 id="using-flox-recommended-for-contributors">Using Flox (Recommended for Contributors)</h3>
+<p>Flox provides a consistent, reproducible development environment. If you're contributing to Fred or want a standardized setup:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Activate the Flox development environment</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>flox<span class="w"> </span>activate
+</code></pre></div>
+<p>This automatically provides:
+- Bun (latest version)
+- Essential development tools
+- Consistent environment across all machines</p>
+<p>See the <a href="../../advanced/flox-integration/">Flox Integration Guide</a> for more details.</p>
+<h3 id="manual-setup">Manual Setup</h3>
+<p>If you prefer not to use Flox, install Bun directly from <a href="https://bun.sh">bun.sh</a>.</p>
 <h2 id="install-fred">Install Fred</h2>
 <h3 id="using-create-fred-recommended">Using create-fred (Recommended)</h3>
 <p>The easiest way to get started is using <code>create-fred</code>, which sets up a complete project with all dependencies:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>bunx<span class="w"> </span>create-fred<span class="w"> </span>my-project
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>bunx<span class="w"> </span>create-fred<span class="w"> </span>my-project
 </code></pre></div>
 <p>This will:
 - Create a new Fred project
@@ -1915,59 +2007,59 @@
 <h3 id="manual-installation">Manual Installation</h3>
 <p>If you prefer to install Fred in an existing project:</p>
 <h4 id="using-bun">Using Bun</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>bun<span class="w"> </span>add<span class="w"> </span>fred
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>bun<span class="w"> </span>add<span class="w"> </span>fred
 </code></pre></div>
 <h4 id="using-npm">Using npm</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>npm<span class="w"> </span>install<span class="w"> </span>fred
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>npm<span class="w"> </span>install<span class="w"> </span>fred
 </code></pre></div>
 <h4 id="using-yarn">Using yarn</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>yarn<span class="w"> </span>add<span class="w"> </span>fred
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>yarn<span class="w"> </span>add<span class="w"> </span>fred
 </code></pre></div>
 <h2 id="install-provider-packages">Install Provider Packages</h2>
 <p>Fred supports all @ai-sdk providers. Install the ones you need:</p>
 <h3 id="using-the-embedded-cli-recommended">Using the Embedded CLI (Recommended)</h3>
 <p>If you created your project with <code>create-fred</code>, use the embedded CLI:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>fred<span class="w"> </span>provider<span class="w"> </span>add<span class="w"> </span>openai
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>fred<span class="w"> </span>provider<span class="w"> </span>add<span class="w"> </span>groq
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>fred<span class="w"> </span>provider<span class="w"> </span>add<span class="w"> </span>anthropic
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>fred<span class="w"> </span>provider<span class="w"> </span>add<span class="w"> </span>openai
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>fred<span class="w"> </span>provider<span class="w"> </span>add<span class="w"> </span>groq
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>fred<span class="w"> </span>provider<span class="w"> </span>add<span class="w"> </span>anthropic
 </code></pre></div>
 <p>This automatically installs the package and updates your configuration.</p>
 <h3 id="manual-installation_1">Manual Installation</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># OpenAI</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/openai
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Groq</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/groq
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Anthropic</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/anthropic
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="c1"># Google</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/google
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="c1"># Or install multiple at once</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/openai<span class="w"> </span>@ai-sdk/groq<span class="w"> </span>@ai-sdk/anthropic
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># OpenAI</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/openai
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Groq</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/groq
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># Anthropic</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/anthropic
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="c1"># Google</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/google
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="c1"># Or install multiple at once</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>bun<span class="w"> </span>add<span class="w"> </span>@ai-sdk/openai<span class="w"> </span>@ai-sdk/groq<span class="w"> </span>@ai-sdk/anthropic
 </code></pre></div>
 <h2 id="verify-installation">Verify Installation</h2>
 <p>Create a simple test file to verify everything works:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">Fred</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;fred&#39;</span><span class="p">;</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kd">const</span><span class="w"> </span><span class="nx">fred</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">Fred</span><span class="p">();</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="s1">&#39;Fred installed successfully!&#39;</span><span class="p">);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">Fred</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;fred&#39;</span><span class="p">;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kd">const</span><span class="w"> </span><span class="nx">fred</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">Fred</span><span class="p">();</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="s1">&#39;Fred installed successfully!&#39;</span><span class="p">);</span>
 </code></pre></div>
 <p>Run it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>bun<span class="w"> </span>run<span class="w"> </span>test.ts
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>bun<span class="w"> </span>run<span class="w"> </span>test.ts
 </code></pre></div>
 <h2 id="environment-variables">Environment Variables</h2>
 <p>Set your API keys as environment variables:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>your_openai_key
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">GROQ_API_KEY</span><span class="o">=</span>your_groq_key
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>your_anthropic_key
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>your_openai_key
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">GROQ_API_KEY</span><span class="o">=</span>your_groq_key
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>your_anthropic_key
 </code></pre></div>
 <p>Or create a <code>.env</code> file:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>OPENAI_API_KEY=your_openai_key
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>GROQ_API_KEY=your_groq_key
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>ANTHROPIC_API_KEY=your_anthropic_key
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>OPENAI_API_KEY=your_openai_key
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>GROQ_API_KEY=your_groq_key
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>ANTHROPIC_API_KEY=your_anthropic_key
 </code></pre></div>
 <h2 id="next-steps">Next Steps</h2>
 <ul>
@@ -1997,7 +2089,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="January 11, 2026 05:00:04 UTC">January 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="January 11, 2026 05:47:46 UTC">January 11, 2026</span>
   </span>
 
     
@@ -2007,7 +2099,7 @@
     <span class="md-icon" title="Created">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="January 11, 2026 05:00:04 UTC">January 11, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="January 11, 2026 05:47:46 UTC">January 11, 2026</span>
   </span>
 
     

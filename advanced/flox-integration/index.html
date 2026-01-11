@@ -12,7 +12,7 @@
         <meta name="author" content="Fred Framework">
       
       
-        <link rel="canonical" href="https://sincspecv.github.io/fred/advanced/observability/">
+        <link rel="canonical" href="https://sincspecv.github.io/fred/advanced/flox-integration/">
       
       
       
@@ -25,7 +25,7 @@
     
     
       
-        <title>Observability & Tracing - Fred Documentation</title>
+        <title>Flox Development Environment - Fred Documentation</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#observability-tracing" class="md-skip">
+        <a href="#flox-development-environment" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Observability &amp; Tracing
+              Flox Development Environment
             
           </span>
         </div>
@@ -1496,10 +1496,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#overview" class="md-nav__link">
+  <a href="#what-is-flox" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Overview
+        What is Flox?
       
     </span>
   </a>
@@ -1507,57 +1507,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#basic-usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Basic Usage
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Basic Usage">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#enable-tracing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Enable Tracing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#using-with-processmessage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Using with processMessage
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#opentelemetry-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        OpenTelemetry Integration
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="OpenTelemetry Integration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
   <a href="#installation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1566,85 +1515,14 @@
     </span>
   </a>
   
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#using-opentelemetry-tracer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Using OpenTelemetry Tracer
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#full-opentelemetry-setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Full OpenTelemetry Setup
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#span-attributes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Span Attributes
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Span Attributes">
+    <nav class="md-nav" aria-label="Installation">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#routing-spans" class="md-nav__link">
+  <a href="#install-flox" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Routing Spans
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#model-call-spans" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Model Call Spans
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#tool-execution-spans" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tool Execution Spans
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#handoff-spans" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Handoff Spans
+        Install Flox
       
     </span>
   </a>
@@ -1657,10 +1535,205 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#custom-tracers" class="md-nav__link">
+  <a href="#using-flox-with-fred" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Custom Tracers
+        Using Flox with Fred
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Using Flox with Fred">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#activating-the-development-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Activating the Development Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#working-in-the-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Working in the Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exiting-the-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exiting the Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flox-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flox Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Flox Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#customizing-the-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customizing the Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#projects-created-with-create-fred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projects Created with create-fred
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Projects Created with create-fred">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-flox-in-your-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using Flox in Your Project
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benefits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benefits
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Benefits">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-contributors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For Contributors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-teams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For Teams
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flox-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flox not found
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-not-activating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment not activating
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bun-version-mismatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bun version mismatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alternatives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alternatives
       
     </span>
   </a>
@@ -1668,32 +1741,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#performance-considerations" class="md-nav__link">
+  <a href="#additional-resources" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Performance Considerations
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#best-practices" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Best Practices
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Examples
+        Additional Resources
       
     </span>
   </a>
@@ -1720,163 +1771,171 @@
   
 
 
-<h1 id="observability-tracing">Observability &amp; Tracing</h1>
-<p>Fred provides comprehensive observability through a lightweight tracing system that can optionally integrate with OpenTelemetry.</p>
-<h2 id="overview">Overview</h2>
-<p>The tracing system instruments the entire message processing pipeline, including:</p>
+<h1 id="flox-development-environment">Flox Development Environment</h1>
+<p>Fred includes Flox configuration for consistent, reproducible development environments across all contributors and machines.</p>
+<h2 id="what-is-flox">What is Flox?</h2>
+<p>Flox is a package manager and development environment tool built on Nix that provides:</p>
 <ul>
-<li><strong>Routing</strong>: Agent utterance matching and intent matching</li>
-<li><strong>Agent Selection</strong>: Which agent was selected and why</li>
-<li><strong>Model Calls</strong>: AI model invocations with timing and token usage</li>
-<li><strong>Tool Execution</strong>: Tool calls with arguments, results, and timing</li>
-<li><strong>Agent Handoffs</strong>: Transfers between agents with context</li>
-<li><strong>Hook Execution</strong>: Pipeline hook invocations</li>
+<li><strong>Reproducible environments</strong>: Same tools and versions for everyone</li>
+<li><strong>Easy onboarding</strong>: New contributors can get started with one command</li>
+<li><strong>Isolated environments</strong>: No conflicts with system packages</li>
+<li><strong>Team consistency</strong>: Share environments via FloxHub</li>
 </ul>
-<h2 id="basic-usage">Basic Usage</h2>
-<p>Tracing is <strong>opt-in</strong> and disabled by default for zero overhead when not needed.</p>
-<h3 id="enable-tracing">Enable Tracing</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">Fred</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;fred&#39;</span><span class="p">;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">NoOpTracer</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;fred/core/tracing&#39;</span><span class="p">;</span>
+<h2 id="installation">Installation</h2>
+<h3 id="install-flox">Install Flox</h3>
+<p>Follow the <a href="https://flox.dev/docs/install-flox/install/">official Flox installation guide</a>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># macOS (using Homebrew - recommended)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>brew<span class="w"> </span>install<span class="w"> </span>flox
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kd">const</span><span class="w"> </span><span class="nx">fred</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">Fred</span><span class="p">();</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1">// Enable tracing with default no-op tracer (zero overhead)</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="nx">fred</span><span class="p">.</span><span class="nx">enableTracing</span><span class="p">();</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1">// Or pass a custom tracer</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="nx">fred</span><span class="p">.</span><span class="nx">enableTracing</span><span class="p">(</span><span class="nx">customTracer</span><span class="p">);</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Linux (using package manager - recommended)</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Check your distribution&#39;s package manager or use the official installer</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Linux (manual installation - safer than pipe-to-shell)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># 1. Download the installer script</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://flox.dev/install<span class="w"> </span>-o<span class="w"> </span>/tmp/flox-install.sh
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># 2. Review the script contents</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>cat<span class="w"> </span>/tmp/flox-install.sh
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># 3. If satisfied, execute it</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>bash<span class="w"> </span>/tmp/flox-install.sh
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="c1"># Or use Nix</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>nix<span class="w"> </span>profile<span class="w"> </span>install<span class="w"> </span>--experimental-features<span class="w"> </span><span class="s2">&quot;nix-command flakes&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span>--accept-flake-config<span class="w"> </span><span class="s1">&#39;github:flox/flox/latest&#39;</span>
 </code></pre></div>
-<h3 id="using-with-processmessage">Using with processMessage</h3>
-<p>Tracing automatically captures spans when processing messages:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">fred</span><span class="p">.</span><span class="nx">processMessage</span><span class="p">(</span><span class="s1">&#39;Hello, world!&#39;</span><span class="p">);</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1">// Spans are automatically created for:</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1">// - processMessage (root span)</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1">// - routing</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1">// - agent.process</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1">// - model.call</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1">// - tool.execute (if tools are called)</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1">// - agent.handoff (if handoffs occur)</span>
+<p><strong>Security Note</strong>: Avoid piping downloads directly to shell (<code>curl | bash</code>). Always download, review, then execute installation scripts to prevent remote code execution risks from compromised downloads or MITM attacks.</p>
+<h2 id="using-flox-with-fred">Using Flox with Fred</h2>
+<h3 id="activating-the-development-environment">Activating the Development Environment</h3>
+<p>In the Fred repository root:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Activate the Flox environment</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>flox<span class="w"> </span>activate
 </code></pre></div>
-<h2 id="opentelemetry-integration">OpenTelemetry Integration</h2>
-<p>Fred can export traces to OpenTelemetry for integration with observability platforms.</p>
-<h3 id="installation">Installation</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>npm<span class="w"> </span>install<span class="w"> </span>@opentelemetry/api
+<p>This will:
+- Provide Bun (latest version)
+- Set up essential development tools
+- Configure environment variables
+- Display a welcome message with available commands</p>
+<h3 id="working-in-the-environment">Working in the Environment</h3>
+<p>Once activated, you can use all standard commands:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Install dependencies</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>bun<span class="w"> </span>install
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Build the project</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>bun<span class="w"> </span>run<span class="w"> </span>build
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Run tests</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>bun<span class="w"> </span><span class="nb">test</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># Start dev server</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>bun<span class="w"> </span>run<span class="w"> </span>dev
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="c1"># Run golden trace tests</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>fred<span class="w"> </span><span class="nb">test</span>
 </code></pre></div>
-<h3 id="using-opentelemetry-tracer">Using OpenTelemetry Tracer</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">Fred</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;fred&#39;</span><span class="p">;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">createOpenTelemetryTracer</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;fred/core/tracing/otel-exporter&#39;</span><span class="p">;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1">// Check if OpenTelemetry is available</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">isOpenTelemetryAvailable</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">otelTracer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">createOpenTelemetryTracer</span><span class="p">();</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">otelTracer</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nx">fred</span><span class="p">.</span><span class="nx">enableTracing</span><span class="p">(</span><span class="nx">otelTracer</span><span class="p">);</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="p">}</span>
+<h3 id="exiting-the-environment">Exiting the Environment</h3>
+<p>To exit the Flox environment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">exit</span>
 </code></pre></div>
-<h3 id="full-opentelemetry-setup">Full OpenTelemetry Setup</h3>
-<p>For a complete OpenTelemetry setup, you'll need to configure exporters:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">NodeSDK</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@opentelemetry/sdk-node&#39;</span><span class="p">;</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">getNodeAutoInstrumentations</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@opentelemetry/auto-instrumentations-node&#39;</span><span class="p">;</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">OTLPTraceExporter</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@opentelemetry/exporter-otlp-http&#39;</span><span class="p">;</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">Resource</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@opentelemetry/resources&#39;</span><span class="p">;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">SemanticResourceAttributes</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@opentelemetry/semantic-conventions&#39;</span><span class="p">;</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="kd">const</span><span class="w"> </span><span class="nx">sdk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">NodeSDK</span><span class="p">({</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nx">resource</span><span class="o">:</span><span class="w"> </span><span class="kt">new</span><span class="w"> </span><span class="nx">Resource</span><span class="p">({</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="p">[</span><span class="nx">SemanticResourceAttributes</span><span class="p">.</span><span class="nx">SERVICE_NAME</span><span class="p">]</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;fred-app&#39;</span><span class="p">,</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="p">}),</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">  </span><span class="nx">traceExporter</span><span class="o">:</span><span class="w"> </span><span class="kt">new</span><span class="w"> </span><span class="nx">OTLPTraceExporter</span><span class="p">({</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">    </span><span class="nx">url</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;http://localhost:4318/v1/traces&#39;</span><span class="p">,</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">  </span><span class="p">}),</span>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">  </span><span class="nx">instrumentations</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="nx">getNodeAutoInstrumentations</span><span class="p">()],</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="p">});</span>
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="nx">sdk</span><span class="p">.</span><span class="nx">start</span><span class="p">();</span>
-<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>
-<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="c1">// Then use Fred with OpenTelemetry</span>
-<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="kd">const</span><span class="w"> </span><span class="nx">otelTracer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">createOpenTelemetryTracer</span><span class="p">();</span>
-<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="nx">fred</span><span class="p">.</span><span class="nx">enableTracing</span><span class="p">(</span><span class="nx">otelTracer</span><span class="p">);</span>
+<p>Or press <code>Ctrl+D</code>.</p>
+<h2 id="flox-configuration">Flox Configuration</h2>
+<p>The Fred repository includes a <code>flox.nix</code> file that defines the development environment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  packages<span class="o">.</span><span class="nb">builtins</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="s2">&quot;bashInteractive&quot;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="s2">&quot;git&quot;</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="s2">&quot;curl&quot;</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>  <span class="p">];</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>  packages<span class="o">.</span><span class="ss">nixpkgs-flox</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="ss">bun</span> <span class="o">=</span> <span class="s2">&quot;latest&quot;</span><span class="p">;</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>  <span class="p">};</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>  <span class="ss">environmentVariables</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="ss">NODE_ENV</span> <span class="o">=</span> <span class="s2">&quot;development&quot;</span><span class="p">;</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>  <span class="p">};</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>  <span class="ss">shellHook</span> <span class="o">=</span> <span class="s s-Multiline">&#39;&#39;</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="s s-Multiline">    echo &quot;🐰 Fred development environment activated&quot;</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="s s-Multiline">    echo &quot;Bun version: $(bun --version)&quot;</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="s s-Multiline">  &#39;&#39;</span><span class="p">;</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="p">}</span>
 </code></pre></div>
-<h2 id="span-attributes">Span Attributes</h2>
-<p>Spans include rich attributes for debugging and analysis:</p>
-<h3 id="routing-spans">Routing Spans</h3>
+<h3 id="customizing-the-environment">Customizing the Environment</h3>
+<p>You can modify <code>flox.nix</code> to add additional tools or packages:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>packages<span class="o">.</span><span class="ss">nixpkgs-flox</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  <span class="ss">bun</span> <span class="o">=</span> <span class="s2">&quot;latest&quot;</span><span class="p">;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>  <span class="ss">nodejs</span> <span class="o">=</span> <span class="s2">&quot;20&quot;</span><span class="p">;</span>  <span class="c1"># Add Node.js if needed</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>  <span class="c1"># Add other packages as needed</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="p">};</span>
+</code></pre></div>
+<p>After modifying <code>flox.nix</code>, reactivate the environment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>flox<span class="w"> </span>activate
+</code></pre></div>
+<h2 id="projects-created-with-create-fred">Projects Created with create-fred</h2>
+<p>Projects generated with <code>create-fred</code> automatically include a <code>flox.nix</code> file, providing the same consistent development environment for your Fred projects.</p>
+<h3 id="using-flox-in-your-project">Using Flox in Your Project</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">cd</span><span class="w"> </span>my-fred-project
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Activate Flox environment</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>flox<span class="w"> </span>activate
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># Install dependencies</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>bun<span class="w"> </span>install
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># Start development</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>bun<span class="w"> </span>run<span class="w"> </span>dev
+</code></pre></div>
+<h2 id="benefits">Benefits</h2>
+<h3 id="for-contributors">For Contributors</h3>
 <ul>
-<li><code>routing.method</code>: <code>agent.utterance</code> | <code>intent.matching</code> | <code>default.agent</code></li>
-<li><code>routing.agentId</code>: Selected agent ID</li>
-<li><code>routing.confidence</code>: Match confidence (0-1)</li>
-<li><code>routing.matchType</code>: <code>exact</code> | <code>regex</code> | <code>semantic</code></li>
+<li><strong>Consistent setup</strong>: Everyone has the same Bun version</li>
+<li><strong>Easy onboarding</strong>: New contributors can start immediately</li>
+<li><strong>No conflicts</strong>: Isolated from system packages</li>
+<li><strong>Reproducible builds</strong>: Same environment = same results</li>
 </ul>
-<h3 id="model-call-spans">Model Call Spans</h3>
+<h3 id="for-teams">For Teams</h3>
 <ul>
-<li><code>agent.id</code>: Agent ID</li>
-<li><code>model.name</code>: Model identifier</li>
-<li><code>model.platform</code>: AI platform</li>
-<li><code>model.temperature</code>: Temperature setting</li>
-<li><code>response.length</code>: Response text length</li>
-<li><code>response.finishReason</code>: Finish reason</li>
-<li><code>usage.promptTokens</code>: Prompt tokens used</li>
-<li><code>usage.completionTokens</code>: Completion tokens used</li>
-<li><code>usage.totalTokens</code>: Total tokens used</li>
+<li><strong>Shared environments</strong>: Use FloxHub to share environments</li>
+<li><strong>Version control</strong>: Environment is versioned with your code</li>
+<li><strong>CI/CD ready</strong>: Same environment in CI as locally</li>
 </ul>
-<h3 id="tool-execution-spans">Tool Execution Spans</h3>
-<ul>
-<li><code>tool.id</code>: Tool identifier</li>
-<li><code>tool.name</code>: Tool name</li>
-<li><code>tool.args</code>: Tool arguments (JSON stringified)</li>
-<li><code>tool.result.type</code>: Result type</li>
-<li><code>tool.result.hasValue</code>: Whether result exists</li>
-</ul>
-<h3 id="handoff-spans">Handoff Spans</h3>
-<ul>
-<li><code>handoff.fromAgent</code>: Source agent ID</li>
-<li><code>handoff.toAgent</code>: Target agent ID</li>
-<li><code>handoff.depth</code>: Handoff depth in chain</li>
-<li><code>handoff.hasContext</code>: Whether context was passed</li>
-</ul>
-<h2 id="custom-tracers">Custom Tracers</h2>
-<p>You can implement your own tracer by implementing the <code>Tracer</code> interface:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">Tracer</span><span class="p">,</span><span class="w"> </span><span class="nx">Span</span><span class="p">,</span><span class="w"> </span><span class="nx">SpanOptions</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;fred/core/tracing&#39;</span><span class="p">;</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="kd">class</span><span class="w"> </span><span class="nx">CustomTracer</span><span class="w"> </span><span class="k">implements</span><span class="w"> </span><span class="nx">Tracer</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nx">startSpan</span><span class="p">(</span><span class="nx">name</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">options?</span><span class="o">:</span><span class="w"> </span><span class="kt">SpanOptions</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nx">Span</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="c1">// Create and return a custom span</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span><span class="nx">getActiveSpan</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nx">Span</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">undefined</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="c1">// Return current active span</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">  </span><span class="nx">setActiveSpan</span><span class="p">(</span><span class="nx">span</span><span class="o">:</span><span class="w"> </span><span class="kt">Span</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">undefined</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="ow">void</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="c1">// Set active span</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">  </span><span class="nx">getTraceId</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">undefined</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">    </span><span class="c1">// Return trace ID</span>
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="p">}</span>
-</code></pre></div>
-<h2 id="performance-considerations">Performance Considerations</h2>
-<ul>
-<li><strong>No-op tracer</strong>: Zero overhead when tracing is disabled</li>
-<li><strong>Span creation</strong>: Minimal overhead (~1-2ms per span)</li>
-<li><strong>Attribute recording</strong>: Negligible overhead</li>
-<li><strong>OpenTelemetry export</strong>: Depends on exporter configuration</li>
-</ul>
-<p>For production, consider:
-- Sampling traces (only record a percentage)
-- Using async exporters
-- Filtering low-value spans</p>
-<h2 id="best-practices">Best Practices</h2>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="flox-not-found">Flox not found</h3>
+<p>If <code>flox</code> command is not found:</p>
 <ol>
-<li><strong>Enable tracing in development</strong>: Use tracing to debug and understand agent behavior</li>
-<li><strong>Use OpenTelemetry in production</strong>: Export to your observability platform</li>
-<li><strong>Monitor key spans</strong>: Focus on <code>model.call</code> and <code>tool.execute</code> for performance</li>
-<li><strong>Track handoffs</strong>: Monitor handoff chains to optimize agent routing</li>
-<li><strong>Use attributes wisely</strong>: Don't log sensitive data in span attributes</li>
+<li>Verify Flox is installed: <code>which flox</code></li>
+<li>Check your PATH includes Flox</li>
+<li>Restart your terminal after installation</li>
 </ol>
-<h2 id="examples">Examples</h2>
-<p>See the <a href="../../examples/">examples directory</a> for complete tracing examples.</p>
+<h3 id="environment-not-activating">Environment not activating</h3>
+<p>If <code>flox activate</code> doesn't work:</p>
+<ol>
+<li>Ensure you're in the repository root (where <code>flox.nix</code> exists)</li>
+<li>Check <code>flox.nix</code> syntax is valid</li>
+<li>Try <code>flox init</code> to reinitialize if needed</li>
+</ol>
+<h3 id="bun-version-mismatch">Bun version mismatch</h3>
+<p>If you see version issues:</p>
+<ol>
+<li>The Flox environment provides Bun automatically</li>
+<li>Don't use system Bun when in Flox environment</li>
+<li>Verify with <code>which bun</code> (should point to Flox-provided Bun)</li>
+</ol>
+<h2 id="alternatives">Alternatives</h2>
+<p>Flox is <strong>optional</strong>. You can still:</p>
+<ul>
+<li>Use Bun directly from <a href="https://bun.sh">bun.sh</a></li>
+<li>Use system package managers</li>
+<li>Use other environment managers (nvm, asdf, etc.)</li>
+</ul>
+<p>Flox simply provides additional consistency and reproducibility.</p>
+<h2 id="additional-resources">Additional Resources</h2>
+<ul>
+<li><a href="https://flox.dev/docs/">Flox Documentation</a></li>
+<li><a href="https://flox.dev/floxhub/">FloxHub</a> - Share environments with your team</li>
+<li><a href="https://nixos.org/">Nix Package Manager</a> - Underlying technology</li>
+</ul>
 
 
 
