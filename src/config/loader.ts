@@ -70,12 +70,20 @@ export function validateConfig(config: FrameworkConfig): void {
   }
 
   if (config.pipelines) {
+    // Check for duplicate pipeline IDs
+    const seenPipelineIds = new Set<string>();
     for (const pipeline of config.pipelines) {
       if (!pipeline.id) {
         throw new Error('Pipeline must have an id');
       }
       // Validate pipeline ID format
       validateId(pipeline.id, 'Pipeline ID');
+      
+      // Check for duplicate IDs
+      if (seenPipelineIds.has(pipeline.id)) {
+        throw new Error(`Duplicate pipeline ID found: "${pipeline.id}"`);
+      }
+      seenPipelineIds.add(pipeline.id);
       
       if (!pipeline.agents || pipeline.agents.length === 0) {
         throw new Error(`Pipeline "${pipeline.id}" must have at least one agent`);
