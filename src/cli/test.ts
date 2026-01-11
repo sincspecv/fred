@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, mkdir } from 'fs/promises';
+import { readdir, readFile, writeFile, mkdir, unlink } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { existsSync } from 'fs';
 import { Fred } from '../index';
@@ -154,23 +154,28 @@ export async function updateTraces(
     ? traceFiles.filter(file => file.includes(pattern))
     : traceFiles;
 
+  let successCount = 0;
   for (const traceFile of filteredFiles) {
-    const trace = await loadGoldenTrace(traceFile);
-    const message = trace.trace.message;
+    try {
+      const trace = await loadGoldenTrace(traceFile);
+      const message = trace.trace.message;
 
-    console.log(`Updating trace for: "${message.substring(0, 50)}..."`);
+      console.log(`Updating trace for: "${message.substring(0, 50)}..."`);
 
-    // Re-record trace
-    await recordTrace(message, fred, tracesDir, {
-      conversationId: trace.metadata.config?.conversationId,
-    });
+      // Re-record trace
+      await recordTrace(message, fred, tracesDir, {
+        conversationId: trace.metadata.config?.conversationId,
+      });
 
-    // Remove old trace file
-    // Note: In practice, you might want to keep old traces for comparison
-    // await unlink(traceFile);
+      // Remove old trace file now that the new one is created
+      await unlink(traceFile);
+      successCount++;
+    } catch (error) {
+      console.error(`Failed to update trace file ${traceFile}:`, error instanceof Error ? error.message : String(error));
+    }
   }
 
-  console.log(`✓ Updated ${filteredFiles.length} trace(s)`);
+  console.log(`✓ Updated ${successCount} trace(s)`);
 }
 
 /**
