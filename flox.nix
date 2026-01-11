@@ -9,7 +9,7 @@
   ];
   
   packages.nixpkgs-flox = {
-    bun = "latest";
+    bun = "1.3.5";
   };
   
   # Environment variables
