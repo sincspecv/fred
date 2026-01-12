@@ -22,6 +22,8 @@
     "build": "bun build src/index.ts --outdir lib --target bun --format esm",
     "prepublishOnly": "bun run build",
     "test": "bun test",
+    "test:unit": "bun test tests/unit",
+    "test:all": "bun test",
     "docs:dev": "mkdocs serve",
     "docs:build": "mkdocs build",
     "docs:deploy": "mkdocs gh-deploy"
