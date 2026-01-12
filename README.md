@@ -591,8 +591,11 @@ This provides:
 If you prefer not to use Flox:
 
 ```bash
-# Run tests
-bun test
+# Run all tests (unit tests + golden trace tests)
+bun test:all
+
+# Run only unit tests
+bun test:unit
 
 # Build
 bun run build
@@ -600,6 +603,36 @@ bun run build
 # Run server in dev mode
 bun run dev
 ```
+
+### Testing
+
+Fred includes comprehensive unit tests for deterministic functionality:
+
+```bash
+# Run all tests
+bun test:all
+
+# Run only unit tests (fast, no external dependencies)
+bun test:unit
+
+# Run tests matching a pattern
+bun test tests/unit/core/tool
+
+# Run a specific test file
+bun test tests/unit/core/tool/registry.test.ts
+```
+
+The test suite covers:
+- Tool registry and management
+- Intent matching and routing
+- Context management
+- Hook system
+- Configuration parsing and validation
+- Validation utilities
+- Semantic matching algorithms
+- Path resolution and security
+
+Tests use Bun's built-in test framework and focus on deterministic functionality. Non-deterministic operations (AI model calls, external APIs) are mocked. See [CONTRIBUTING.md](./CONTRIBUTING.md) for testing guidelines.
 
 ## License
 

@@ -209,11 +209,100 @@ When adding new features, update:
 
 ## Testing
 
-Before submitting a pull request:
+Fred uses Bun's built-in test framework for unit tests. The test suite focuses on deterministic functionality and uses mocks for non-deterministic operations (AI model calls, external APIs, etc.).
+
+### Running Tests
+
+```bash
+# Run all tests (unit tests + golden trace tests)
+bun test:all
+
+# Run only unit tests
+bun test:unit
+
+# Run tests with specific pattern
+bun test tests/unit/core/tool
+
+# Run a specific test file
+bun test tests/unit/core/tool/registry.test.ts
+```
+
+### Test Structure
+
+Tests are organized in `tests/unit/` mirroring the `src/` structure:
+
+```
+tests/unit/
+├── helpers/           # Mock utilities
+│   ├── mock-agent.ts
+│   ├── mock-provider.ts
+│   ├── mock-storage.ts
+│   └── mock-file-system.ts
+├── core/              # Core functionality tests
+│   ├── tool/
+│   ├── intent/
+│   ├── context/
+│   ├── hooks/
+│   ├── agent/
+│   └── pipeline/
+├── config/             # Config parsing/loading tests
+└── utils/              # Utility function tests
+```
+
+### Writing Tests
+
+When adding new functionality, write tests for deterministic behavior:
+
+```typescript
+import { describe, test, expect, beforeEach } from 'bun:test';
+import { YourClass } from '../../../../src/path/to/your-class';
+
+describe('YourClass', () => {
+  let instance: YourClass;
+
+  beforeEach(() => {
+    instance = new YourClass();
+  });
+
+  test('should do something', () => {
+    const result = instance.doSomething();
+    expect(result).toBe(expectedValue);
+  });
+});
+```
+
+### Test Guidelines
+
+- **Test deterministic functionality only**: Don't test AI model calls, external APIs, or file I/O (unless mocked)
+- **Use mocks for non-deterministic operations**: Mock AI providers, agents, and external services
+- **Follow existing patterns**: Use the same structure and naming conventions as existing tests
+- **Keep tests fast**: Tests should run quickly without external dependencies
+- **Test edge cases**: Include tests for error conditions, boundary values, and edge cases
+
+### What to Test
+
+✅ **Do test:**
+- Validation logic
+- Data transformations
+- Routing and matching logic
+- CRUD operations
+- Configuration parsing
+- Utility functions
+- Error handling
+
+❌ **Don't test:**
+- AI model responses (non-deterministic)
+- External API calls (use mocks)
+- File I/O operations (unless mocked)
+- Real MCP server interactions
+
+### Before Submitting a Pull Request
 
 - [ ] Code compiles without errors: `bun run build`
+- [ ] All tests pass: `bun test:all`
+- [ ] New functionality has test coverage
 - [ ] No linter errors (if linter is configured)
-- [ ] Tested basic functionality
+- [ ] Tested basic functionality manually
 - [ ] Updated documentation if needed
 - [ ] Followed existing code patterns
 

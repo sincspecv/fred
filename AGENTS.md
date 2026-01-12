@@ -141,10 +141,36 @@ try {
 
 #### Before Committing
 
+**CRITICAL**: Always run tests before finalizing any changes:
+
+```bash
+# Run all tests (unit tests + golden trace tests)
+bun test:all
+
+# Or run only unit tests (faster)
+bun test:unit
+```
+
+**All tests must pass** before committing changes. If tests fail:
+- Fix the failing tests
+- Ensure new functionality has appropriate test coverage
+- Verify existing tests still pass
+
+Additional checks:
 - Check for linter errors: `bun run lint` (if available)
 - Verify TypeScript compiles: `bun run build`
 - Test examples if applicable
 - Ensure no console errors in basic usage
+
+#### Writing Tests
+
+When adding new functionality:
+- Write tests for deterministic behavior
+- Use mocks for non-deterministic operations (AI calls, external APIs)
+- Follow existing test patterns in `tests/unit/`
+- Test edge cases and error conditions
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed testing guidelines.
 
 #### Testing MCP Servers
 
@@ -281,6 +307,7 @@ Examples:
 
 #### Before Pushing
 
+- **Run all tests**: `bun test:all` (must pass)
 - Ensure all changes are committed
 - Check git status: `git status`
 - Review diff: `git diff`
@@ -361,6 +388,12 @@ import { AIProvider } from '../platform/provider';
 # Build
 bun run build
 
+# Run all tests (REQUIRED before committing)
+bun test:all
+
+# Run only unit tests
+bun test:unit
+
 # Run examples
 bun run examples/basic/index.ts
 
@@ -391,8 +424,11 @@ Before completing any task:
 - [ ] Used AI SDK functions where applicable
 - [ ] Handled errors gracefully
 - [ ] Updated documentation if needed
+- [ ] **Ran all tests: `bun test:all` (all tests must pass)**
+- [ ] Added tests for new functionality (if applicable)
 - [ ] Tested basic functionality
 - [ ] Checked for linter errors
+- [ ] Verified TypeScript compiles: `bun run build`
 - [ ] Followed existing code patterns
 - [ ] Used proper TypeScript types
 - [ ] Committed with descriptive message
