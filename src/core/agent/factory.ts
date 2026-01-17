@@ -1,4 +1,4 @@
-import { generateText, tool, CoreMessage, jsonSchema } from 'ai';
+import { generateText, streamText, tool, ModelMessage, jsonSchema } from 'ai';
 import { AgentConfig, AgentMessage, AgentResponse } from './agent';
 import { AIProvider } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
@@ -48,6 +48,7 @@ export class AgentFactory {
     provider: AIProvider
   ): Promise<{
     processMessage: (message: string, messages?: AgentMessage[]) => Promise<AgentResponse>;
+    streamMessage: (message: string, messages?: AgentMessage[]) => AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown>;
   }> {
     const model = provider.getModel(config.model);
     
@@ -178,8 +179,8 @@ export class AgentFactory {
       message: string,
       previousMessages: AgentMessage[] = []
     ): Promise<AgentResponse> => {
-      // Convert previous messages to AI SDK CoreMessage format
-      const messages: CoreMessage[] = previousMessages.map(msg => ({
+      // Convert previous messages to AI SDK ModelMessage format
+      const messages: ModelMessage[] = previousMessages.map(msg => ({
         role: msg.role,
         content: msg.content,
       }));
@@ -190,7 +191,7 @@ export class AgentFactory {
       const systemMessage = loadPromptFile(config.systemMessage, undefined, false);
 
       // Generate response using AI SDK with tracing
-      const allMessages: CoreMessage[] = [
+      const allMessages: ModelMessage[] = [
         ...messages,
         { role: 'user', content: message },
       ];
@@ -256,11 +257,30 @@ export class AgentFactory {
       }
 
       // Extract tool calls if any
-      const toolCalls = result.toolCalls?.map(tc => ({
+      // The AI SDK's generateText should automatically execute tools and include results
+      // However, some providers may not populate results automatically, so we check and execute if needed
+      let toolCalls = result.toolCalls?.map(tc => ({
         toolId: tc.toolName,
         args: tc.args as Record<string, any>,
-        result: tc.result,
+        result: tc.result, // May be undefined if provider doesn't auto-execute
       }));
+
+      // If tool calls exist but don't have results, manually execute them
+      // This handles providers that don't automatically execute tools
+      if (toolCalls && toolCalls.length > 0 && toolCalls.some(tc => tc.result === undefined)) {
+        // Execute tools that don't have results
+        for (const toolCall of toolCalls) {
+          if (toolCall.result === undefined && sdkTools[toolCall.toolId]) {
+            try {
+              const toolResult = await sdkTools[toolCall.toolId].execute(toolCall.args);
+              toolCall.result = toolResult;
+            } catch (error) {
+              // If tool execution fails, set error as result
+              toolCall.result = error instanceof Error ? error.message : String(error);
+            }
+          }
+        }
+      }
 
       // Check for handoff tool calls
       const handoffCall = toolCalls?.find(tc => tc.toolId === 'handoff_to_agent');
@@ -273,13 +293,185 @@ export class AgentFactory {
         } as AgentResponse & { handoff?: HandoffResult };
       }
 
+      // If there are tool calls with results, we need to continue the conversation
+      // The AI SDK automatically executes tools, so results are already in toolCalls[].result
+      // We need to add tool results to the conversation and continue
+      if (toolCalls && toolCalls.length > 0 && toolCalls.some(tc => tc.result !== undefined)) {
+        // Tool calls were executed and have results
+        // Return the response with tool calls - the caller should continue the conversation
+        // by calling processMessage again with an empty message, which will include tool results
+        return {
+          content: result.text, // May be empty if only tool calls were made
+          toolCalls,
+        };
+      }
+
       return {
         content: result.text,
         toolCalls,
       };
     };
 
-    return { processMessage };
+    // Create streaming function for this agent
+    const streamMessage = async function* (
+      message: string,
+      previousMessages: AgentMessage[] = []
+    ): AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown> {
+      // Convert previous messages to AI SDK ModelMessage format
+      const messages: ModelMessage[] = previousMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      // Load system message
+      const systemMessage = loadPromptFile(config.systemMessage, undefined, false);
+
+      // Generate response using AI SDK with tracing
+      const allMessages: ModelMessage[] = [
+        ...messages,
+        { role: 'user', content: message },
+      ];
+      
+      // Use streamText for streaming
+      let stream;
+      try {
+        stream = await streamText({
+          model,
+          system: systemMessage,
+          messages: allMessages,
+          tools: Object.keys(sdkTools).length > 0 ? sdkTools : undefined,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+        });
+      } catch (streamError) {
+        console.error('[DEBUG] Error creating streamText:', streamError);
+        throw streamError;
+      }
+
+      let fullText = '';
+      let toolCalls: any[] | undefined;
+      let hasYieldedText = false;
+
+      // Stream text chunks as they arrive
+      try {
+        for await (const chunk of stream.textStream) {
+          // Ensure chunk is a string
+          const chunkText = typeof chunk === 'string' ? chunk : (chunk ? String(chunk) : '');
+          if (chunkText) {
+            hasYieldedText = true;
+            fullText += chunkText;
+            yield {
+              textDelta: chunkText,
+              fullText,
+              toolCalls,
+            };
+          }
+        }
+      } catch (streamError) {
+        // If textStream errors, log but continue to get final result
+        console.warn('Error reading textStream:', streamError);
+      }
+
+      // Get final result to extract tool calls and check for any remaining text
+      const result = await stream;
+      
+      // Ensure result.text is a string (it might be undefined, null, Promise, or other type)
+      let resultText = '';
+      if (result.text !== undefined && result.text !== null) {
+        if (typeof result.text === 'string') {
+          resultText = result.text;
+        } else if (result.text instanceof Promise) {
+          // If it's a Promise, await it
+          resultText = String(await result.text);
+        } else {
+          // Convert to string
+          resultText = String(result.text);
+        }
+      }
+      
+      // If textStream didn't yield anything but result.text exists, yield it now
+      // This can happen when tools are called and the model doesn't generate text until after tool execution
+      if (!hasYieldedText && resultText && resultText.trim()) {
+        fullText = resultText;
+        yield {
+          textDelta: resultText,
+          fullText,
+          toolCalls,
+        };
+      } else if (hasYieldedText && resultText && resultText !== fullText) {
+        // If we got some text from stream but result.text has more, yield the difference
+        const remainingText = resultText.slice(fullText.length);
+        if (remainingText) {
+          fullText = resultText;
+          yield {
+            textDelta: remainingText,
+            fullText,
+            toolCalls,
+          };
+        }
+      } else if (!hasYieldedText && !resultText) {
+        // No text at all - update fullText to empty string
+        fullText = '';
+      } else {
+        // Ensure fullText matches result.text
+        fullText = resultText || fullText;
+      }
+
+      // Handle tool calls
+      if (result.toolCalls && result.toolCalls.length > 0) {
+        // Map tool calls and manually execute if results are missing
+        toolCalls = result.toolCalls.map(tc => ({
+          toolId: tc.toolName,
+          args: tc.args as Record<string, any>,
+          result: tc.result,
+        }));
+
+        // If tool calls don't have results, manually execute them
+        if (toolCalls.some(tc => tc.result === undefined)) {
+          for (const toolCall of toolCalls) {
+            if (toolCall.result === undefined && sdkTools[toolCall.toolId]) {
+              try {
+                const toolResult = await sdkTools[toolCall.toolId].execute(toolCall.args);
+                toolCall.result = toolResult;
+              } catch (error) {
+                toolCall.result = error instanceof Error ? error.message : String(error);
+              }
+            }
+          }
+        }
+        
+        // If we have tool results but no text, yield the tool calls
+        // The caller (Fred's streamMessage) will handle continuation
+        if (toolCalls && toolCalls.length > 0) {
+          yield {
+            textDelta: '',
+            fullText,
+            toolCalls,
+          };
+        }
+      }
+      
+      // If we haven't yielded anything yet and we have text, yield it now
+      if (!hasYieldedText && fullText) {
+        yield {
+          textDelta: fullText,
+          fullText,
+          toolCalls,
+        };
+      }
+      
+      // Always yield at least one chunk to indicate completion (even if empty)
+      // This ensures the caller knows the stream is complete
+      if (!hasYieldedText && !fullText && (!toolCalls || toolCalls.length === 0)) {
+        yield {
+          textDelta: '',
+          fullText: '',
+          toolCalls: undefined,
+        };
+      }
+    };
+
+    return { processMessage, streamMessage };
   }
 }
 

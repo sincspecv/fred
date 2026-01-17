@@ -1,4 +1,4 @@
-import { CoreMessage, convertToCoreMessages } from 'ai';
+import { ModelMessage, convertToModelMessages } from 'ai';
 import { Fred } from '../../index';
 import { ContextManager } from '../../core/context/manager';
 import { ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChunk, ChatMessage } from './chat';
@@ -23,22 +23,22 @@ export class ChatHandlers {
   ): Promise<ChatCompletionResponse> {
     const conversationId = request.conversation_id || this.contextManager.generateConversationId();
     
-    // Convert OpenAI messages to AI SDK CoreMessage format
+    // Convert OpenAI messages to AI SDK ModelMessage format
     const openaiMessages: Array<{ role: string; content: string }> = request.messages.map(msg => ({
       role: msg.role,
       content: msg.content || '',
     }));
 
-    const coreMessages = convertToCoreMessages(openaiMessages);
+    const modelMessages = await convertToModelMessages(openaiMessages);
     
     // Get conversation history
     const history = await this.contextManager.getHistory(conversationId);
     
     // Combine history with new messages
-    const allMessages: CoreMessage[] = [...history, ...coreMessages];
+    const allMessages: ModelMessage[] = [...history, ...modelMessages];
     
     // Extract the last user message
-    const lastUserMessage = coreMessages[coreMessages.length - 1];
+    const lastUserMessage = modelMessages[modelMessages.length - 1];
     if (!lastUserMessage || lastUserMessage.role !== 'user') {
       throw new Error('Last message must be from user');
     }
@@ -60,7 +60,7 @@ export class ChatHandlers {
     await this.contextManager.addMessage(conversationId, lastUserMessage);
     
     // Add assistant response to context
-    const assistantMessage: CoreMessage = {
+    const assistantMessage: ModelMessage = {
       role: 'assistant',
       content: response.content,
     };
@@ -96,19 +96,19 @@ export class ChatHandlers {
   ): AsyncGenerator<ChatCompletionChunk, void, unknown> {
     const conversationId = request.conversation_id || this.contextManager.generateConversationId();
     
-    // Convert OpenAI messages to AI SDK CoreMessage format
+    // Convert OpenAI messages to AI SDK ModelMessage format
     const openaiMessages: Array<{ role: string; content: string }> = request.messages.map(msg => ({
       role: msg.role,
       content: msg.content || '',
     }));
 
-    const coreMessages = convertToCoreMessages(openaiMessages);
+    const modelMessages = await convertToModelMessages(openaiMessages);
     
     // Get conversation history
     const history = await this.contextManager.getHistory(conversationId);
     
     // Extract the last user message
-    const lastUserMessage = coreMessages[coreMessages.length - 1];
+    const lastUserMessage = modelMessages[modelMessages.length - 1];
     if (!lastUserMessage || lastUserMessage.role !== 'user') {
       throw new Error('Last message must be from user');
     }
@@ -130,7 +130,7 @@ export class ChatHandlers {
     // Add messages to context
     await this.contextManager.addMessage(conversationId, lastUserMessage);
     
-    const assistantMessage: CoreMessage = {
+    const assistantMessage: ModelMessage = {
       role: 'assistant',
       content: response.content,
     };

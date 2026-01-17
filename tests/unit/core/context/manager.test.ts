@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { ContextManager } from '../../../../src/core/context/manager';
 import { createMockStorage } from '../../helpers/mock-storage';
 import { ContextStorage, ConversationContext } from '../../../../src/core/context/context';
-import { CoreMessage } from 'ai';
+import { ModelMessage } from 'ai';
 
 describe('ContextManager', () => {
   let manager: ContextManager;
@@ -105,7 +105,7 @@ describe('ContextManager', () => {
   describe('addMessage', () => {
     test('should add message to conversation', async () => {
       const conversationId = 'test-conv';
-      const message: CoreMessage = {
+      const message: ModelMessage = {
         role: 'user',
         content: 'Hello',
       };
@@ -119,7 +119,7 @@ describe('ContextManager', () => {
 
     test('should update metadata timestamp when adding message', async () => {
       const conversationId = 'test-conv';
-      const message: CoreMessage = {
+      const message: ModelMessage = {
         role: 'user',
         content: 'Hello',
       };
@@ -154,7 +154,7 @@ describe('ContextManager', () => {
   describe('addMessages', () => {
     test('should add multiple messages at once', async () => {
       const conversationId = 'test-conv';
-      const messages: CoreMessage[] = [
+      const messages: ModelMessage[] = [
         { role: 'user', content: 'Message 1' },
         { role: 'assistant', content: 'Response 1' },
         { role: 'user', content: 'Message 2' },

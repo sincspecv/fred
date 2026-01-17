@@ -33,9 +33,9 @@ This document provides guidelines and instructions for AI agents working on the 
   });
   ```
 
-- **Message Format**: Use `CoreMessage` type from `ai` package
+- **Message Format**: Use `ModelMessage` type from `ai` package
   ```typescript
-  import { CoreMessage } from 'ai';
+  import { ModelMessage } from 'ai';
   ```
 
 - **Provider Integration**: Use `@ai-sdk/*` packages for provider support
@@ -374,7 +374,7 @@ fred.registerDefaultProviders();
 
 ```typescript
 // AI SDK
-import { tool, jsonSchema, generateText, CoreMessage } from 'ai';
+import { tool, jsonSchema, generateText, ModelMessage } from 'ai';
 
 // Fred Core
 import { AgentConfig, AgentInstance } from './agent';

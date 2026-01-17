@@ -15,7 +15,7 @@ import { FrameworkConfig } from './config/types';
 import { loadConfig, validateConfig, extractIntents, extractAgents, extractPipelines } from './config/loader';
 import { semanticMatch } from './utils/semantic';
 import { ContextManager } from './core/context/manager';
-import { CoreMessage, convertToCoreMessages } from 'ai';
+import { ModelMessage, convertToModelMessages } from 'ai';
 import { HookManager, HookType, HookHandler } from './core/hooks';
 import { Tracer, Span } from './core/tracing';
 import { NoOpTracer } from './core/tracing/noop-tracer';
@@ -336,7 +336,7 @@ export class Fred {
         }));
 
       // Add user message to context
-      const userMessage: CoreMessage = {
+      const userMessage: ModelMessage = {
         role: 'user',
         content: message,
       };
@@ -350,6 +350,7 @@ export class Fred {
         : undefined;
 
       let response: AgentResponse;
+      let usedAgentId: string | null = null; // Track which agent was used for tool result continuation
 
       // Routing priority: 1. Agent utterances, 2. Pipeline utterances, 3. Intent matching, 4. Default agent
       // Create span for routing
@@ -378,6 +379,7 @@ export class Fred {
           // Route directly to matched agent
           const agent = this.agentManager.getAgent(agentMatch.agentId);
           if (agent) {
+            usedAgentId = agentMatch.agentId; // Track the agent used
             // Create span for agent selection
             const agentSpan = this.tracer?.startSpan('agent.process', {
               kind: SpanKind.INTERNAL,
@@ -484,6 +486,10 @@ export class Fred {
                 });
               }
               // Route to matched intent's action
+              // Track the agent ID if the intent routes to an agent
+              if (match.intent.action.type === 'agent') {
+                usedAgentId = match.intent.action.target;
+              }
               response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
             } else if (this.defaultAgentId) {
               if (routingSpan) {
@@ -601,8 +607,129 @@ export class Fred {
         rootSpan.setStatus('ok');
       }
 
-      // Add assistant response to context
-      const assistantMessage: CoreMessage = {
+      // Handle tool calls: if there are tool calls with results, add them to context and continue conversation
+      if (currentResponse.toolCalls && currentResponse.toolCalls.length > 0) {
+        const hasToolResults = currentResponse.toolCalls.some(tc => tc.result !== undefined);
+        
+        if (hasToolResults) {
+          // Add assistant message with tool calls to context
+          // The AI SDK format uses toolCalls array in assistant messages
+          const assistantMessage: ModelMessage = {
+            role: 'assistant',
+            content: currentResponse.content || '', // May be empty if only tool calls
+            toolCalls: currentResponse.toolCalls.map((tc, idx) => ({
+              toolCallId: `call_${tc.toolId}_${Date.now()}_${idx}`,
+              toolName: tc.toolId,
+              args: tc.args,
+            })),
+          };
+          await this.contextManager.addMessage(conversationId, assistantMessage);
+
+          // Add tool results to context (AI SDK uses 'tool' role for tool results)
+          for (let idx = 0; idx < currentResponse.toolCalls.length; idx++) {
+            const toolCall = currentResponse.toolCalls[idx];
+            if (toolCall.result !== undefined) {
+              const toolCallId = `call_${toolCall.toolId}_${Date.now()}_${idx}`;
+              const toolResultMessage: ModelMessage = {
+                role: 'tool',
+                content: typeof toolCall.result === 'string' 
+                  ? toolCall.result 
+                  : JSON.stringify(toolCall.result),
+                toolCallId,
+              };
+              await this.contextManager.addMessage(conversationId, toolResultMessage);
+            }
+          }
+
+          // If there's no content response, continue the conversation automatically
+          // This allows the agent to respond to the tool results
+          if (!currentResponse.content || currentResponse.content.trim() === '') {
+            // Use the agent that generated the original response
+            let agent = null;
+            
+            if (usedAgentId) {
+              agent = this.agentManager.getAgent(usedAgentId);
+            } else if (this.defaultAgentId) {
+              // Fallback to default agent if we couldn't track the original agent
+              agent = this.agentManager.getAgent(this.defaultAgentId);
+            }
+            
+            if (agent) {
+              // Get updated conversation history with tool results
+              // The history contains ModelMessage[] with tool calls and tool results
+              // We need to pass this to the agent, but processMessage expects AgentMessage[]
+              // However, the agent factory converts AgentMessage[] to ModelMessage[] anyway
+              // So we'll pass the full history including tool messages, and the agent will handle it
+              const updatedHistory = await this.contextManager.getHistory(conversationId);
+              
+              // Convert ModelMessage history to AgentMessage format
+              // Include tool results as part of the conversation - the agent factory will
+              // properly handle them when converting back to ModelMessage for the AI SDK
+              const updatedPreviousMessages = updatedHistory
+                .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool')
+                .map(msg => {
+                  // For tool messages, include them as assistant messages with the tool result
+                  // The AI SDK will recognize tool results when they're in the proper format
+                  if (msg.role === 'tool') {
+                    // Include tool result - format it so the agent can see it
+                    // The tool result content should be the actual result data
+                    const toolContent = typeof msg.content === 'string' 
+                      ? msg.content 
+                      : JSON.stringify(msg.content);
+                    return {
+                      role: 'assistant' as const,
+                      content: toolContent, // Pass tool result directly, not with prefix
+                    };
+                  }
+                  // For assistant messages with toolCalls, we need to preserve that info
+                  // But AgentMessage doesn't support toolCalls, so we'll include it in content
+                  if (msg.role === 'assistant' && (msg as any).toolCalls) {
+                    // Assistant message with tool calls - include tool call info in content
+                    const toolCallsInfo = JSON.stringify((msg as any).toolCalls);
+                    return {
+                      role: 'assistant' as const,
+                      content: typeof msg.content === 'string' 
+                        ? msg.content 
+                        : JSON.stringify(msg.content),
+                    };
+                  }
+                  return {
+                    role: msg.role as 'user' | 'assistant',
+                    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+                  };
+                });
+
+              // Continue conversation with empty message to get agent's response to tool results
+              // The agent will see the tool results in the conversation history
+              const continuedResponse = await agent.processMessage('', updatedPreviousMessages);
+              
+              // Add the continued response to context
+              const continuedAssistantMessage: ModelMessage = {
+                role: 'assistant',
+                content: continuedResponse.content,
+              };
+              await this.contextManager.addMessage(conversationId, continuedAssistantMessage);
+
+              // Merge tool calls from continued response if any
+              if (continuedResponse.toolCalls) {
+                currentResponse.toolCalls = [
+                  ...(currentResponse.toolCalls || []),
+                  ...continuedResponse.toolCalls,
+                ];
+              }
+
+              // Return the continued response with merged tool calls
+              return {
+                ...continuedResponse,
+                toolCalls: currentResponse.toolCalls,
+              };
+            }
+          }
+        }
+      }
+
+      // Add assistant response to context (if no tool calls or tool calls already handled)
+      const assistantMessage: ModelMessage = {
         role: 'assistant',
         content: currentResponse.content,
       };
@@ -629,6 +756,245 @@ export class Fred {
   }
 
   /**
+   * Stream a user message through the intent system
+   * Returns an async generator that yields text deltas as they're generated
+   */
+  async *streamMessage(
+    message: string,
+    options?: {
+      useSemanticMatching?: boolean;
+      semanticThreshold?: number;
+      conversationId?: string;
+    }
+  ): AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown> {
+    // Validate message input
+    validateMessageLength(message);
+
+    const conversationId = options?.conversationId || this.contextManager.generateConversationId();
+    const useSemantic = options?.useSemanticMatching ?? true;
+    const threshold = options?.semanticThreshold ?? 0.6;
+
+    // Get conversation history
+    const history = await this.contextManager.getHistory(conversationId);
+    
+    // Convert history to AgentMessage format for agents
+    const previousMessages = history
+      .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+      .map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+      }));
+
+    // Add user message to context
+    const userMessage: ModelMessage = {
+      role: 'user',
+      content: message,
+    };
+    await this.contextManager.addMessage(conversationId, userMessage);
+
+    // Create semantic matcher if enabled
+    const semanticMatcher = useSemantic
+      ? async (msg: string, utterances: string[]) => {
+          return semanticMatch(msg, utterances, threshold);
+        }
+      : undefined;
+
+    // Find the agent to use (same routing logic as processMessage)
+    let agent = null;
+    let usedAgentId: string | null = null;
+
+    // Check agent utterances first
+    const agentMatch = await this.agentManager.matchAgentByUtterance(message, semanticMatcher);
+    if (agentMatch) {
+      agent = this.agentManager.getAgent(agentMatch.agentId);
+      usedAgentId = agentMatch.agentId;
+    } else {
+      // Check pipeline utterances
+      const pipelineMatch = await this.pipelineManager.matchPipelineByUtterance(message, semanticMatcher);
+      if (pipelineMatch) {
+        // Pipelines don't support streaming - execute and yield the result as a single chunk
+        const response = await this.pipelineManager.executePipeline(pipelineMatch.pipelineId, message, previousMessages);
+        
+        // Add assistant response to context
+        const assistantMessage: ModelMessage = {
+          role: 'assistant',
+          content: response.content,
+        };
+        await this.contextManager.addMessage(conversationId, assistantMessage);
+        
+        yield {
+          textDelta: response.content,
+          fullText: response.content,
+          toolCalls: response.toolCalls,
+        };
+        return;
+      } else {
+        // Check intent matching
+        const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
+        if (match) {
+          if (match.intent.action.type === 'agent') {
+            usedAgentId = match.intent.action.target;
+            agent = this.agentManager.getAgent(usedAgentId);
+          } else {
+            // Intent routes to pipeline - execute and yield the result as a single chunk
+            const response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
+            
+            // Add assistant response to context
+            const assistantMessage: ModelMessage = {
+              role: 'assistant',
+              content: response.content,
+            };
+            await this.contextManager.addMessage(conversationId, assistantMessage);
+            
+            yield {
+              textDelta: response.content,
+              fullText: response.content,
+              toolCalls: response.toolCalls,
+            };
+            return;
+          }
+        } else if (this.defaultAgentId) {
+          usedAgentId = this.defaultAgentId;
+          agent = this.agentManager.getAgent(this.defaultAgentId);
+        }
+      }
+    }
+
+    if (!agent) {
+      throw new Error('No agent found to handle message');
+    }
+
+    // Stream the message using the agent's streamMessage method
+    if (agent.streamMessage) {
+      let fullText = '';
+      let finalToolCalls: any[] | undefined;
+      let hasYieldedAnything = false;
+
+      try {
+        for await (const chunk of agent.streamMessage(message, previousMessages)) {
+          hasYieldedAnything = true;
+          // Only update fullText if chunk has actual content
+          if (chunk.fullText) {
+            fullText = chunk.fullText;
+          }
+          if (chunk.toolCalls) {
+            finalToolCalls = chunk.toolCalls;
+          }
+          // Always yield chunks - even if empty, they indicate progress
+          yield {
+            textDelta: chunk.textDelta || '',
+            fullText: chunk.fullText || fullText,
+            toolCalls: chunk.toolCalls,
+          };
+        }
+      } catch (streamError) {
+        console.error('[DEBUG] Error in agent.streamMessage:', streamError);
+        throw streamError;
+      }
+      
+      if (!hasYieldedAnything) {
+        console.error('[DEBUG] agent.streamMessage did not yield any chunks');
+      }
+
+      // Add assistant response to context
+      const assistantMessage: ModelMessage = {
+        role: 'assistant',
+        content: fullText,
+      };
+      await this.contextManager.addMessage(conversationId, assistantMessage);
+
+      // Handle tool calls if any
+      if (finalToolCalls && finalToolCalls.length > 0) {
+        const hasToolResults = finalToolCalls.some(tc => tc.result !== undefined);
+        
+        if (hasToolResults) {
+          // Add tool calls and results to context
+          const toolCallMessage: ModelMessage = {
+            role: 'assistant',
+            content: '',
+            toolCalls: finalToolCalls.map((tc, idx) => ({
+              toolCallId: `call_${tc.toolId}_${Date.now()}_${idx}`,
+              toolName: tc.toolId,
+              args: tc.args,
+            })),
+          };
+          await this.contextManager.addMessage(conversationId, toolCallMessage);
+
+          for (let idx = 0; idx < finalToolCalls.length; idx++) {
+            const toolCall = finalToolCalls[idx];
+            if (toolCall.result !== undefined) {
+              const toolCallId = `call_${toolCall.toolId}_${Date.now()}_${idx}`;
+              const toolResultMessage: ModelMessage = {
+                role: 'tool',
+                content: typeof toolCall.result === 'string' 
+                  ? toolCall.result 
+                  : JSON.stringify(toolCall.result),
+                toolCallId,
+              };
+              await this.contextManager.addMessage(conversationId, toolResultMessage);
+            }
+          }
+
+          // Continue streaming if no content was generated after tool execution
+          if (!fullText || fullText.trim() === '') {
+            const updatedHistory = await this.contextManager.getHistory(conversationId);
+            const updatedPreviousMessages = updatedHistory
+              .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool')
+              .map(msg => {
+                if (msg.role === 'tool') {
+                  return {
+                    role: 'assistant' as const,
+                    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+                  };
+                }
+                return {
+                  role: msg.role as 'user' | 'assistant',
+                  content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+                };
+              });
+
+            // Continue streaming with tool results - send empty message to get agent's response
+            if (agent.streamMessage) {
+              let continuationFullText = '';
+              for await (const chunk of agent.streamMessage('', updatedPreviousMessages)) {
+                continuationFullText = chunk.fullText;
+                yield {
+                  textDelta: chunk.textDelta,
+                  fullText: continuationFullText,
+                  toolCalls: chunk.toolCalls,
+                };
+              }
+              
+              // Update fullText with continuation result
+              fullText = continuationFullText;
+              
+              // Add continuation response to context
+              if (continuationFullText) {
+                const continuationMessage: ModelMessage = {
+                  role: 'assistant',
+                  content: continuationFullText,
+                };
+                await this.contextManager.addMessage(conversationId, continuationMessage);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // Fallback to non-streaming if agent doesn't support streaming
+      const response = await agent.processMessage(message, previousMessages);
+      if (response.content) {
+        // Simulate streaming by yielding the full text
+        yield {
+          textDelta: response.content,
+          fullText: response.content,
+          toolCalls: response.toolCalls,
+        };
+      }
+    }
+  }
+
+  /**
    * Process OpenAI-compatible chat messages
    */
   async processChatMessage(
@@ -641,15 +1007,15 @@ export class Fred {
   ): Promise<AgentResponse | null> {
     const conversationId = options?.conversationId || this.contextManager.generateConversationId();
     
-    // Convert to AI SDK CoreMessage format
-    const coreMessages = convertToCoreMessages(messages);
+    // Convert to AI SDK ModelMessage format
+    const modelMessages = await convertToModelMessages(messages);
     
     // Get existing conversation history
     const existingHistory = await this.contextManager.getHistory(conversationId);
     
     // Merge with new messages (avoid duplicates)
-    const allMessages: CoreMessage[] = [...existingHistory];
-    for (const msg of coreMessages) {
+    const allMessages: ModelMessage[] = [...existingHistory];
+    for (const msg of modelMessages) {
       // Simple deduplication - in production, use better logic
       const lastMsg = allMessages[allMessages.length - 1];
       if (!lastMsg || lastMsg.role !== msg.role || lastMsg.content !== msg.content) {
@@ -658,10 +1024,10 @@ export class Fred {
     }
     
     // Update context with all messages
-    await this.contextManager.addMessages(conversationId, coreMessages);
+    await this.contextManager.addMessages(conversationId, modelMessages);
     
     // Extract the last user message
-    const lastUserMessage = coreMessages[coreMessages.length - 1];
+    const lastUserMessage = modelMessages[modelMessages.length - 1];
     if (!lastUserMessage || lastUserMessage.role !== 'user') {
       throw new Error('Last message must be from user');
     }
