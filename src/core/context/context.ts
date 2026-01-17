@@ -1,4 +1,4 @@
-import { CoreMessage } from 'ai';
+import { ModelMessage } from 'ai';
 
 /**
  * Conversation context metadata
@@ -14,7 +14,7 @@ export interface ConversationMetadata {
  */
 export interface ConversationContext {
   id: string;
-  messages: CoreMessage[];
+  messages: ModelMessage[];
   metadata: ConversationMetadata;
 }
 

@@ -1,4 +1,4 @@
-import { CoreMessage } from 'ai';
+import { ModelMessage } from 'ai';
 import { ConversationContext, ConversationMetadata, ContextStorage } from './context';
 
 /**
@@ -78,7 +78,7 @@ export class ContextManager {
   /**
    * Add a message to the conversation context
    */
-  async addMessage(conversationId: string, message: CoreMessage): Promise<void> {
+  async addMessage(conversationId: string, message: ModelMessage): Promise<void> {
     const context = await this.getContext(conversationId);
     context.messages.push(message);
     context.metadata.updatedAt = new Date();
@@ -88,7 +88,7 @@ export class ContextManager {
   /**
    * Add multiple messages to the conversation context
    */
-  async addMessages(conversationId: string, messages: CoreMessage[]): Promise<void> {
+  async addMessages(conversationId: string, messages: ModelMessage[]): Promise<void> {
     const context = await this.getContext(conversationId);
     context.messages.push(...messages);
     context.metadata.updatedAt = new Date();
@@ -98,7 +98,7 @@ export class ContextManager {
   /**
    * Get conversation history
    */
-  async getHistory(conversationId: string): Promise<CoreMessage[]> {
+  async getHistory(conversationId: string): Promise<ModelMessage[]> {
     const context = await this.getContext(conversationId);
     return context.messages;
   }

@@ -41,7 +41,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "ai": "^4.0.0",
+    "ai": "^6.0.0",
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {
