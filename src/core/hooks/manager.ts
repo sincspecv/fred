@@ -92,7 +92,11 @@ export class HookManager {
             handlerSpan.setStatus('ok');
           }
         } catch (error) {
-          console.error(`Error executing hook ${type}:`, error);
+          // Only log errors in non-test environments to avoid noise in test output
+          // Errors are still tracked via tracing spans
+          if (process.env.NODE_ENV !== 'test') {
+            console.error(`Error executing hook ${type}:`, error);
+          }
           if (handlerSpan && error instanceof Error) {
             handlerSpan.recordException(error);
             handlerSpan.setStatus('error', error.message);

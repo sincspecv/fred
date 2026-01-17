@@ -191,20 +191,15 @@ export class AgentFactory {
       message: string,
       previousMessages: AgentMessage[] = []
     ): Promise<AgentResponse> => {
-      // Convert previous messages to AI SDK ModelMessage format
-      const messages: ModelMessage[] = previousMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      }));
-
       // Load system message (handle file paths for programmatic usage)
       // Note: When loaded from config, paths are already resolved in extractAgents
       // For programmatic usage, sandbox to current working directory and disallow absolute paths
       const systemMessage = loadPromptFile(config.systemMessage, undefined, false);
 
       // Generate response using AI SDK with tracing
+      // AgentMessage is now aligned with ModelMessage, so we can use it directly
       const allMessages: ModelMessage[] = [
-        ...messages,
+        ...previousMessages,
         { role: 'user', content: message },
       ];
       
@@ -329,18 +324,13 @@ export class AgentFactory {
       message: string,
       previousMessages: AgentMessage[] = []
     ): AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown> {
-      // Convert previous messages to AI SDK ModelMessage format
-      const messages: ModelMessage[] = previousMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      }));
-
       // Load system message
       const systemMessage = loadPromptFile(config.systemMessage, undefined, false);
 
       // Generate response using AI SDK with tracing
+      // AgentMessage is now aligned with ModelMessage, so we can use it directly
       const allMessages: ModelMessage[] = [
-        ...messages,
+        ...previousMessages,
         { role: 'user', content: message },
       ];
       

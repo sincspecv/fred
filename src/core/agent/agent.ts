@@ -1,5 +1,6 @@
 import { Action } from '../intent/intent';
 import { MCPServerConfig } from '../mcp/types';
+import { ModelMessage } from 'ai';
 
 /**
  * Supported AI platforms
@@ -59,11 +60,9 @@ export interface AgentInstance {
 
 /**
  * Message to send to an agent
+ * Aligned with AI SDK's ModelMessage for type compatibility
  */
-export interface AgentMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
+export type AgentMessage = ModelMessage;
 
 /**
  * Agent response

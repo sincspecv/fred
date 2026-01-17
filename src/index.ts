@@ -288,6 +288,197 @@ export class Fred {
   }
 
   /**
+   * Route a message to the appropriate handler
+   * Returns routing result with agent, pipeline, or intent information
+   */
+  private async _routeMessage(
+    message: string,
+    semanticMatcher?: (msg: string, utterances: string[]) => Promise<{ matched: boolean; confidence: number } | null>,
+    previousMessages: AgentMessage[] = []
+  ): Promise<{
+    type: 'agent' | 'pipeline' | 'intent' | 'default' | 'none';
+    agent?: AgentInstance;
+    agentId?: string;
+    pipelineId?: string;
+    response?: AgentResponse;
+  }> {
+    // Routing priority: 1. Agent utterances, 2. Pipeline utterances, 3. Intent matching, 4. Default agent
+    // Create span for routing
+    const routingSpan = this.tracer?.startSpan('routing', {
+      kind: SpanKind.INTERNAL,
+    });
+
+    if (routingSpan) {
+      this.tracer?.setActiveSpan(routingSpan);
+    }
+
+    try {
+      // Check agent utterances first (direct routing)
+      const agentMatch = await this.agentManager.matchAgentByUtterance(message, semanticMatcher);
+      
+      if (agentMatch) {
+        if (routingSpan) {
+          routingSpan.setAttributes({
+            'routing.method': 'agent.utterance',
+            'routing.agentId': agentMatch.agentId,
+            'routing.confidence': agentMatch.confidence,
+            'routing.matchType': agentMatch.matchType,
+          });
+        }
+
+        // Route directly to matched agent
+        const agent = this.agentManager.getAgent(agentMatch.agentId);
+        if (agent) {
+          if (routingSpan) {
+            routingSpan.setStatus('ok');
+          }
+          return {
+            type: 'agent',
+            agent,
+            agentId: agentMatch.agentId,
+          };
+        } else {
+          // Agent not found, fall through to pipeline matching
+          if (routingSpan) {
+            routingSpan.addEvent('agent.notFound', { 'agent.id': agentMatch.agentId });
+          }
+        }
+      }
+
+      // If no agent match, check pipeline utterances
+      if (!agentMatch || (agentMatch && !this.agentManager.getAgent(agentMatch.agentId))) {
+        const pipelineMatch = await this.pipelineManager.matchPipelineByUtterance(message, semanticMatcher);
+        
+        if (pipelineMatch) {
+          if (routingSpan) {
+            routingSpan.setAttributes({
+              'routing.method': 'pipeline.utterance',
+              'routing.pipelineId': pipelineMatch.pipelineId,
+              'routing.confidence': pipelineMatch.confidence,
+              'routing.matchType': pipelineMatch.matchType,
+            });
+          }
+
+          // Create span for pipeline execution
+          const pipelineSpan = this.tracer?.startSpan('pipeline.process', {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              'pipeline.id': pipelineMatch.pipelineId,
+              'pipeline.matchType': pipelineMatch.matchType,
+              'pipeline.confidence': pipelineMatch.confidence,
+            },
+          });
+
+          const previousPipelineSpan = this.tracer?.getActiveSpan();
+          if (pipelineSpan) {
+            this.tracer?.setActiveSpan(pipelineSpan);
+          }
+
+          try {
+            const response = await this.pipelineManager.executePipeline(pipelineMatch.pipelineId, message, previousMessages);
+            if (pipelineSpan) {
+              pipelineSpan.setAttribute('response.length', response.content.length);
+              pipelineSpan.setAttribute('response.hasToolCalls', (response.toolCalls?.length ?? 0) > 0);
+              pipelineSpan.setStatus('ok');
+            }
+            if (routingSpan) {
+              routingSpan.setStatus('ok');
+            }
+            return {
+              type: 'pipeline',
+              pipelineId: pipelineMatch.pipelineId,
+              response,
+            };
+          } catch (error) {
+            if (pipelineSpan && error instanceof Error) {
+              pipelineSpan.recordException(error);
+              pipelineSpan.setStatus('error', error.message);
+            }
+            throw error;
+          } finally {
+            pipelineSpan?.end();
+            if (previousPipelineSpan) {
+              this.tracer?.setActiveSpan(previousPipelineSpan);
+            }
+          }
+        } else {
+          // No pipeline match, try intent matching
+          const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
+          
+          if (match) {
+            if (routingSpan) {
+              routingSpan.setAttributes({
+                'routing.method': 'intent.matching',
+                'routing.intentId': match.intent.id,
+                'routing.confidence': match.confidence,
+                'routing.matchType': match.matchType,
+              });
+            }
+            
+            // Route to matched intent's action
+            if (match.intent.action.type === 'agent') {
+              const agent = this.agentManager.getAgent(match.intent.action.target);
+              if (agent) {
+                if (routingSpan) {
+                  routingSpan.setStatus('ok');
+                }
+                return {
+                  type: 'agent',
+                  agent,
+                  agentId: match.intent.action.target,
+                };
+              }
+            } else {
+              // Intent routes to pipeline - execute and return response
+              const response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
+              if (routingSpan) {
+                routingSpan.setStatus('ok');
+              }
+              return {
+                type: 'intent',
+                response,
+              };
+            }
+          } else if (this.defaultAgentId) {
+            if (routingSpan) {
+              routingSpan.setAttributes({
+                'routing.method': 'default.agent',
+                'routing.defaultAgentId': this.defaultAgentId,
+              });
+            }
+            // No intent matched - route to default agent
+            const agent = this.agentManager.getAgent(this.defaultAgentId);
+            if (agent) {
+              if (routingSpan) {
+                routingSpan.setStatus('ok');
+              }
+              return {
+                type: 'default',
+                agent,
+                agentId: this.defaultAgentId,
+              };
+            }
+          }
+        }
+      }
+
+      // No match and no default agent
+      if (routingSpan) {
+        routingSpan.setStatus('error', 'No routing target found');
+      }
+      return { type: 'none' };
+    } catch (error) {
+      if (routingSpan && error instanceof Error) {
+        routingSpan.recordException(error);
+        routingSpan.setStatus('error', error.message);
+      }
+      throw error;
+    } finally {
+      routingSpan?.end();
+    }
+  }
+
+  /**
    * Process a user message through the intent system
    */
   async processMessage(
@@ -325,16 +516,14 @@ export class Fred {
         rootSpan.setAttribute('conversation.id', conversationId);
       }
 
-      // Get conversation history
+      // Get conversation history (already in ModelMessage format)
       const history = await this.contextManager.getHistory(conversationId);
       
-      // Convert history to AgentMessage format for agents
-      const previousMessages = history
-        .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-        .map(msg => ({
-          role: msg.role as 'user' | 'assistant',
-          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-        }));
+      // Filter to user/assistant messages for agent processing
+      // Since AgentMessage is now ModelMessage, we can use history directly
+      const previousMessages: AgentMessage[] = history.filter(
+        msg => msg.role === 'user' || msg.role === 'assistant'
+      ) as AgentMessage[];
 
       // Add user message to context
       const userMessage: ModelMessage = {
@@ -350,181 +539,65 @@ export class Fred {
           }
         : undefined;
 
+      // Route message to appropriate handler
+      const route = await this._routeMessage(message, semanticMatcher, previousMessages);
+
       let response: AgentResponse;
-      let usedAgentId: string | null = null; // Track which agent was used for tool result continuation
+      let usedAgentId: string | null = null;
 
-      // Routing priority: 1. Agent utterances, 2. Pipeline utterances, 3. Intent matching, 4. Default agent
-      // Create span for routing
-      const routingSpan = this.tracer?.startSpan('routing', {
-        kind: SpanKind.INTERNAL,
-      });
-
-      if (routingSpan) {
-        this.tracer?.setActiveSpan(routingSpan);
+      // Handle routing result
+      if (route.type === 'none') {
+        return null;
       }
 
-      try {
-        // Check agent utterances first (direct routing)
-        const agentMatch = await this.agentManager.matchAgentByUtterance(message, semanticMatcher);
+      if (route.type === 'pipeline' || route.type === 'intent') {
+        // Pipeline or intent already executed, use the response
+        if (!route.response) {
+          throw new Error(`Route type ${route.type} did not return a response`);
+        }
+        response = route.response;
+      } else if (route.type === 'agent' || route.type === 'default') {
+        // Agent routing - need to execute
+        if (!route.agent) {
+          throw new Error(`Route type ${route.type} did not return an agent`);
+        }
+        usedAgentId = route.agentId || null;
         
-        if (agentMatch) {
-          if (routingSpan) {
-            routingSpan.setAttributes({
-              'routing.method': 'agent.utterance',
-              'routing.agentId': agentMatch.agentId,
-              'routing.confidence': agentMatch.confidence,
-              'routing.matchType': agentMatch.matchType,
-            });
+        // Create span for agent execution
+        const agentSpan = this.tracer?.startSpan('agent.process', {
+          kind: SpanKind.INTERNAL,
+          attributes: {
+            'agent.id': route.agentId || 'unknown',
+          },
+        });
+
+        const previousAgentSpan = this.tracer?.getActiveSpan();
+        if (agentSpan) {
+          this.tracer?.setActiveSpan(agentSpan);
+        }
+
+        try {
+          response = await route.agent.processMessage(message, previousMessages);
+          if (agentSpan) {
+            agentSpan.setAttribute('response.length', response.content.length);
+            agentSpan.setAttribute('response.hasToolCalls', (response.toolCalls?.length ?? 0) > 0);
+            agentSpan.setAttribute('response.hasHandoff', response.handoff !== undefined);
+            agentSpan.setStatus('ok');
           }
-
-          // Route directly to matched agent
-          const agent = this.agentManager.getAgent(agentMatch.agentId);
-          if (agent) {
-            usedAgentId = agentMatch.agentId; // Track the agent used
-            // Create span for agent selection
-            const agentSpan = this.tracer?.startSpan('agent.process', {
-              kind: SpanKind.INTERNAL,
-              attributes: {
-                'agent.id': agentMatch.agentId,
-                'agent.matchType': agentMatch.matchType,
-                'agent.confidence': agentMatch.confidence,
-              },
-            });
-
-            const previousAgentSpan = this.tracer?.getActiveSpan();
-            if (agentSpan) {
-              this.tracer?.setActiveSpan(agentSpan);
-            }
-
-            try {
-              response = await agent.processMessage(message, previousMessages);
-              if (agentSpan) {
-                agentSpan.setAttribute('response.length', response.content.length);
-                agentSpan.setAttribute('response.hasToolCalls', (response.toolCalls?.length ?? 0) > 0);
-                agentSpan.setAttribute('response.hasHandoff', response.handoff !== undefined);
-                agentSpan.setStatus('ok');
-              }
-            } catch (error) {
-              if (agentSpan && error instanceof Error) {
-                agentSpan.recordException(error);
-                agentSpan.setStatus('error', error.message);
-              }
-              throw error;
-            } finally {
-              agentSpan?.end();
-              if (previousAgentSpan) {
-                this.tracer?.setActiveSpan(previousAgentSpan);
-              }
-            }
-          } else {
-            // Agent not found, fall through to pipeline matching
-            if (routingSpan) {
-              routingSpan.addEvent('agent.notFound', { 'agent.id': agentMatch.agentId });
-            }
-            // Continue to pipeline matching below
+        } catch (error) {
+          if (agentSpan && error instanceof Error) {
+            agentSpan.recordException(error);
+            agentSpan.setStatus('error', error.message);
+          }
+          throw error;
+        } finally {
+          agentSpan?.end();
+          if (previousAgentSpan) {
+            this.tracer?.setActiveSpan(previousAgentSpan);
           }
         }
-
-        // If no agent match, check pipeline utterances
-        if (!agentMatch || (agentMatch && !this.agentManager.getAgent(agentMatch.agentId))) {
-          const pipelineMatch = await this.pipelineManager.matchPipelineByUtterance(message, semanticMatcher);
-          
-          if (pipelineMatch) {
-            if (routingSpan) {
-              routingSpan.setAttributes({
-                'routing.method': 'pipeline.utterance',
-                'routing.pipelineId': pipelineMatch.pipelineId,
-                'routing.confidence': pipelineMatch.confidence,
-                'routing.matchType': pipelineMatch.matchType,
-              });
-            }
-
-            // Create span for pipeline execution
-            const pipelineSpan = this.tracer?.startSpan('pipeline.process', {
-              kind: SpanKind.INTERNAL,
-              attributes: {
-                'pipeline.id': pipelineMatch.pipelineId,
-                'pipeline.matchType': pipelineMatch.matchType,
-                'pipeline.confidence': pipelineMatch.confidence,
-              },
-            });
-
-            const previousPipelineSpan = this.tracer?.getActiveSpan();
-            if (pipelineSpan) {
-              this.tracer?.setActiveSpan(pipelineSpan);
-            }
-
-            try {
-              response = await this.pipelineManager.executePipeline(pipelineMatch.pipelineId, message, previousMessages);
-              if (pipelineSpan) {
-                pipelineSpan.setAttribute('response.length', response.content.length);
-                pipelineSpan.setAttribute('response.hasToolCalls', (response.toolCalls?.length ?? 0) > 0);
-                pipelineSpan.setStatus('ok');
-              }
-            } catch (error) {
-              if (pipelineSpan && error instanceof Error) {
-                pipelineSpan.recordException(error);
-                pipelineSpan.setStatus('error', error.message);
-              }
-              throw error;
-            } finally {
-              pipelineSpan?.end();
-              if (previousPipelineSpan) {
-                this.tracer?.setActiveSpan(previousPipelineSpan);
-              }
-            }
-          } else {
-            // No pipeline match, try intent matching
-            const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
-            
-            if (match) {
-              if (routingSpan) {
-                routingSpan.setAttributes({
-                  'routing.method': 'intent.matching',
-                  'routing.intentId': match.intent.id,
-                  'routing.confidence': match.confidence,
-                  'routing.matchType': match.matchType,
-                });
-              }
-              // Route to matched intent's action
-              // Track the agent ID if the intent routes to an agent
-              if (match.intent.action.type === 'agent') {
-                usedAgentId = match.intent.action.target;
-              }
-              response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
-            } else if (this.defaultAgentId) {
-              if (routingSpan) {
-                routingSpan.setAttributes({
-                  'routing.method': 'default.agent',
-                  'routing.defaultAgentId': this.defaultAgentId,
-                });
-              }
-              // No intent matched - route to default agent
-              response = await this.intentRouter.routeToDefaultAgent(message, previousMessages) as AgentResponse;
-            } else {
-              if (routingSpan) {
-                routingSpan.setStatus('error', 'No routing target found');
-              }
-              // No match and no default agent
-              return null;
-            }
-          }
-        }
-
-        if (routingSpan) {
-          routingSpan.setStatus('ok');
-        }
-      } catch (error) {
-        if (routingSpan && error instanceof Error) {
-          routingSpan.recordException(error);
-          routingSpan.setStatus('error', error.message);
-        }
-        throw error;
-      } finally {
-        routingSpan?.end();
-        if (rootSpan) {
-          this.tracer?.setActiveSpan(rootSpan);
-        }
+      } else {
+        throw new Error(`Unknown route type: ${route.type}`);
       }
 
       // Process handoffs recursively (with max depth to prevent infinite loops)
@@ -657,48 +730,15 @@ export class Fred {
             
             if (agent) {
               // Get updated conversation history with tool results
-              // The history contains ModelMessage[] with tool calls and tool results
-              // We need to pass this to the agent, but processMessage expects AgentMessage[]
-              // However, the agent factory converts AgentMessage[] to ModelMessage[] anyway
-              // So we'll pass the full history including tool messages, and the agent will handle it
+              // Since AgentMessage is now ModelMessage, we can pass the history directly
+              // The AI SDK will handle tool messages properly
               const updatedHistory = await this.contextManager.getHistory(conversationId);
               
-              // Convert ModelMessage history to AgentMessage format
-              // Include tool results as part of the conversation - the agent factory will
-              // properly handle them when converting back to ModelMessage for the AI SDK
-              const updatedPreviousMessages = updatedHistory
-                .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool')
-                .map(msg => {
-                  // For tool messages, include them as assistant messages with the tool result
-                  // The AI SDK will recognize tool results when they're in the proper format
-                  if (msg.role === 'tool') {
-                    // Include tool result - format it so the agent can see it
-                    // The tool result content should be the actual result data
-                    const toolContent = typeof msg.content === 'string' 
-                      ? msg.content 
-                      : JSON.stringify(msg.content);
-                    return {
-                      role: 'assistant' as const,
-                      content: toolContent, // Pass tool result directly, not with prefix
-                    };
-                  }
-                  // For assistant messages with toolCalls, we need to preserve that info
-                  // But AgentMessage doesn't support toolCalls, so we'll include it in content
-                  if (msg.role === 'assistant' && (msg as any).toolCalls) {
-                    // Assistant message with tool calls - include tool call info in content
-                    const toolCallsInfo = JSON.stringify((msg as any).toolCalls);
-                    return {
-                      role: 'assistant' as const,
-                      content: typeof msg.content === 'string' 
-                        ? msg.content 
-                        : JSON.stringify(msg.content),
-                    };
-                  }
-                  return {
-                    role: msg.role as 'user' | 'assistant',
-                    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-                  };
-                });
+              // Filter to messages that should be passed to the agent
+              // Include user, assistant, and tool messages (AI SDK handles tool messages)
+              const updatedPreviousMessages: AgentMessage[] = updatedHistory.filter(
+                msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
+              ) as AgentMessage[];
 
               // Continue conversation with empty message to get agent's response to tool results
               // The agent will see the tool results in the conversation history
@@ -775,16 +815,14 @@ export class Fred {
     const useSemantic = options?.useSemanticMatching ?? true;
     const threshold = options?.semanticThreshold ?? 0.6;
 
-    // Get conversation history
+    // Get conversation history (already in ModelMessage format)
     const history = await this.contextManager.getHistory(conversationId);
     
-    // Convert history to AgentMessage format for agents
-    const previousMessages = history
-      .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-      .map(msg => ({
-        role: msg.role as 'user' | 'assistant',
-        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-      }));
+    // Filter to user/assistant messages for agent processing
+    // Since AgentMessage is now ModelMessage, we can use history directly
+    const previousMessages: AgentMessage[] = history.filter(
+      msg => msg.role === 'user' || msg.role === 'assistant'
+    ) as AgentMessage[];
 
     // Add user message to context
     const userMessage: ModelMessage = {
@@ -800,69 +838,45 @@ export class Fred {
         }
       : undefined;
 
-    // Find the agent to use (same routing logic as processMessage)
-    let agent = null;
+    // Route message to appropriate handler
+    const route = await this._routeMessage(message, semanticMatcher, previousMessages);
+
+    let agent: AgentInstance | null = null;
     let usedAgentId: string | null = null;
 
-    // Check agent utterances first
-    const agentMatch = await this.agentManager.matchAgentByUtterance(message, semanticMatcher);
-    if (agentMatch) {
-      agent = this.agentManager.getAgent(agentMatch.agentId);
-      usedAgentId = agentMatch.agentId;
-    } else {
-      // Check pipeline utterances
-      const pipelineMatch = await this.pipelineManager.matchPipelineByUtterance(message, semanticMatcher);
-      if (pipelineMatch) {
-        // Pipelines don't support streaming - execute and yield the result as a single chunk
-        const response = await this.pipelineManager.executePipeline(pipelineMatch.pipelineId, message, previousMessages);
-        
-        // Add assistant response to context
-        const assistantMessage: ModelMessage = {
-          role: 'assistant',
-          content: response.content,
-        };
-        await this.contextManager.addMessage(conversationId, assistantMessage);
-        
-        yield {
-          textDelta: response.content,
-          fullText: response.content,
-          toolCalls: response.toolCalls,
-        };
-        return;
-      } else {
-        // Check intent matching
-        const match = await this.intentMatcher.matchIntent(message, semanticMatcher);
-        if (match) {
-          if (match.intent.action.type === 'agent') {
-            usedAgentId = match.intent.action.target;
-            agent = this.agentManager.getAgent(usedAgentId);
-          } else {
-            // Intent routes to pipeline - execute and yield the result as a single chunk
-            const response = await this.intentRouter.routeIntent(match, message) as AgentResponse;
-            
-            // Add assistant response to context
-            const assistantMessage: ModelMessage = {
-              role: 'assistant',
-              content: response.content,
-            };
-            await this.contextManager.addMessage(conversationId, assistantMessage);
-            
-            yield {
-              textDelta: response.content,
-              fullText: response.content,
-              toolCalls: response.toolCalls,
-            };
-            return;
-          }
-        } else if (this.defaultAgentId) {
-          usedAgentId = this.defaultAgentId;
-          agent = this.agentManager.getAgent(this.defaultAgentId);
-        }
-      }
+    // Handle routing result
+    if (route.type === 'none') {
+      throw new Error('No agent found to handle message');
     }
 
-    if (!agent) {
-      throw new Error('No agent found to handle message');
+    if (route.type === 'pipeline' || route.type === 'intent') {
+      // Pipeline or intent already executed, yield the result as a single chunk
+      if (!route.response) {
+        throw new Error(`Route type ${route.type} did not return a response`);
+      }
+      
+      // Add assistant response to context
+      const assistantMessage: ModelMessage = {
+        role: 'assistant',
+        content: route.response.content,
+      };
+      await this.contextManager.addMessage(conversationId, assistantMessage);
+      
+      yield {
+        textDelta: route.response.content,
+        fullText: route.response.content,
+        toolCalls: route.response.toolCalls,
+      };
+      return;
+    } else if (route.type === 'agent' || route.type === 'default') {
+      // Agent routing - use for streaming
+      if (!route.agent) {
+        throw new Error(`Route type ${route.type} did not return an agent`);
+      }
+      agent = route.agent;
+      usedAgentId = route.agentId || null;
+    } else {
+      throw new Error(`Unknown route type: ${route.type}`);
     }
 
     // Stream the message using the agent's streamMessage method
@@ -939,20 +953,12 @@ export class Fred {
           // Continue streaming if no content was generated after tool execution
           if (!fullText || fullText.trim() === '') {
             const updatedHistory = await this.contextManager.getHistory(conversationId);
-            const updatedPreviousMessages = updatedHistory
-              .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool')
-              .map(msg => {
-                if (msg.role === 'tool') {
-                  return {
-                    role: 'assistant' as const,
-                    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-                  };
-                }
-                return {
-                  role: msg.role as 'user' | 'assistant',
-                  content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-                };
-              });
+            
+            // Since AgentMessage is now ModelMessage, we can pass the history directly
+            // Include user, assistant, and tool messages (AI SDK handles tool messages)
+            const updatedPreviousMessages: AgentMessage[] = updatedHistory.filter(
+              msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
+            ) as AgentMessage[];
 
             // Continue streaming with tool results - send empty message to get agent's response
             if (agent.streamMessage) {
