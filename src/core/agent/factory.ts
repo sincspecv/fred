@@ -338,6 +338,9 @@ export class AgentFactory {
       let hasYieldedText = false;
 
       // Stream text chunks as they arrive
+      if (!stream.textStream || typeof stream.textStream[Symbol.asyncIterator] !== 'function') {
+        throw new Error('streamText returned no textStream for streaming');
+      }
       try {
         for await (const chunk of stream.textStream) {
           // Ensure chunk is a string
