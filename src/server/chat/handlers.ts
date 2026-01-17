@@ -1,4 +1,5 @@
-import { ModelMessage, convertToModelMessages } from 'ai';
+import { ModelMessage } from 'ai';
+import { convertToModelMessages } from 'ai';
 import { Fred } from '../../index';
 import { ContextManager } from '../../core/context/manager';
 import { ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChunk, ChatMessage } from './chat';
