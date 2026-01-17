@@ -10,6 +10,18 @@ import { SpanKind } from '../tracing/types';
 import { setActiveSpan } from '../tracing/context';
 
 /**
+ * Get a safe error message for tool execution failures
+ * This prevents leaking internal error details to the model
+ */
+function getSafeToolErrorMessage(toolId: string, error: unknown): string {
+  // Log the actual error for debugging (server-side only)
+  console.error(`Tool execution failed for "${toolId}":`, error);
+  
+  // Return a generic, safe error message that doesn't expose internal details
+  return `Tool "${toolId}" execution failed. Please try again or use a different approach.`;
+}
+
+/**
  * Agent factory using Vercel AI SDK
  */
 export class AgentFactory {
@@ -275,8 +287,8 @@ export class AgentFactory {
               const toolResult = await sdkTools[toolCall.toolId].execute(toolCall.args);
               toolCall.result = toolResult;
             } catch (error) {
-              // If tool execution fails, set error as result
-              toolCall.result = error instanceof Error ? error.message : String(error);
+              // If tool execution fails, use a safe error message that doesn't expose internal details
+              toolCall.result = getSafeToolErrorMessage(toolCall.toolId, error);
             }
           }
         }
@@ -434,7 +446,8 @@ export class AgentFactory {
                 const toolResult = await sdkTools[toolCall.toolId].execute(toolCall.args);
                 toolCall.result = toolResult;
               } catch (error) {
-                toolCall.result = error instanceof Error ? error.message : String(error);
+                // If tool execution fails, use a safe error message that doesn't expose internal details
+                toolCall.result = getSafeToolErrorMessage(toolCall.toolId, error);
               }
             }
           }
