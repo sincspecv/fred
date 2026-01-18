@@ -317,7 +317,9 @@ export class AgentFactory {
         { role: 'user', content: message },
       ];
       
-      // Use streamText for streaming
+      // Use streamText for streaming with AI SDK v6
+      // Enable includeRawChunks to access fullStream for more granular control
+      // This allows us to process raw provider chunks even if textStream is buffered
       let stream;
       try {
         stream = await streamText({
@@ -327,9 +329,10 @@ export class AgentFactory {
           tools: Object.keys(sdkTools).length > 0 ? sdkTools : undefined,
           temperature: config.temperature,
           maxTokens: config.maxTokens,
+          // Enable raw chunks access for more granular streaming control (AI SDK v6)
+          includeRawChunks: true,
         });
       } catch (streamError) {
-        console.error('[DEBUG] Error creating streamText:', streamError);
         throw streamError;
       }
 
@@ -337,27 +340,131 @@ export class AgentFactory {
       let toolCalls: any[] | undefined;
       let hasYieldedText = false;
 
-      // Stream text chunks as they arrive
-      if (!stream.textStream || typeof stream.textStream[Symbol.asyncIterator] !== 'function') {
-        throw new Error('streamText returned no textStream for streaming');
-      }
-      try {
-        for await (const chunk of stream.textStream) {
-          // Ensure chunk is a string
-          const chunkText = typeof chunk === 'string' ? chunk : (chunk ? String(chunk) : '');
-          if (chunkText) {
-            hasYieldedText = true;
-            fullText += chunkText;
-            yield {
-              textDelta: chunkText,
-              fullText,
-              toolCalls,
-            };
+      // Try using fullStream first for more granular chunks (AI SDK v6)
+      // fullStream provides access to raw provider chunks which may be smaller
+      // If fullStream is not available or doesn't work, fall back to textStream
+      let streamChunkCount = 0;
+      let usedFullStream = false;
+      
+      // Check if fullStream is available (when includeRawChunks is true)
+      if (stream.fullStream && typeof stream.fullStream[Symbol.asyncIterator] === 'function') {
+        try {
+          usedFullStream = true;
+          for await (const part of stream.fullStream) {
+            streamChunkCount++;
+            
+            // Extract text delta from fullStream parts (AI SDK v6)
+            // fullStream yields objects with type field - 'text' for text deltas
+            // We prioritize raw chunks as they may be smaller/more granular
+            let chunkText = '';
+            
+            // First, try to get raw chunks - these are the actual provider chunks
+            // and may be smaller than aggregated text deltas
+            // Type safety: We use type assertions here because AI SDK v6's fullStream
+            // types are not fully exported, but we validate the structure before use
+            if (part.type === 'raw' && 'rawValue' in part) {
+              // Raw chunks from provider (when includeRawChunks: true)
+              // These are the actual chunks from the provider API
+              const rawValue = (part as { rawValue?: unknown }).rawValue;
+              if (typeof rawValue === 'string') {
+                chunkText = rawValue;
+              } else if (rawValue && typeof rawValue === 'object' && rawValue !== null) {
+                // Raw value might be an object - try to extract text content
+                // For SSE streams, this might contain delta.content or similar
+                // Validate structure before accessing nested properties
+                const rawObj = rawValue as Record<string, unknown>;
+                if (Array.isArray(rawObj.choices) && rawObj.choices.length > 0) {
+                  const choice = rawObj.choices[0] as Record<string, unknown>;
+                  if (choice && typeof choice === 'object' && 'delta' in choice) {
+                    const delta = choice.delta as Record<string, unknown>;
+                    if (delta && typeof delta === 'object' && typeof delta.content === 'string') {
+                      chunkText = delta.content;
+                    }
+                  }
+                } else if (rawObj.delta && typeof rawObj.delta === 'object' && rawObj.delta !== null) {
+                  const delta = rawObj.delta as Record<string, unknown>;
+                  if (typeof delta.content === 'string') {
+                    chunkText = delta.content;
+                  }
+                } else if (typeof rawObj.content === 'string') {
+                  chunkText = rawObj.content;
+                }
+              }
+            } else if (part.type === 'text' && 'text' in part) {
+              // AI SDK v6: text deltas have type 'text' with a 'text' property
+              const textPart = part as { text?: unknown };
+              if (typeof textPart.text === 'string') {
+                chunkText = textPart.text;
+              }
+            } else if (part.type === 'text-delta') {
+              // Fallback for v5 compatibility or alternative format
+              const deltaPart = part as { textDelta?: unknown; delta?: unknown };
+              if (typeof deltaPart.textDelta === 'string') {
+                chunkText = deltaPart.textDelta;
+              } else if (typeof deltaPart.delta === 'string') {
+                chunkText = deltaPart.delta;
+              }
+            }
+            
+            // Validate chunk size before processing
+            const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB max chunk size
+            if (chunkText && chunkText.length > MAX_CHUNK_SIZE) {
+              console.warn(`[FACTORY] Warning: Chunk size (${chunkText.length} bytes) exceeds maximum (${MAX_CHUNK_SIZE} bytes). Truncating.`);
+              chunkText = chunkText.substring(0, MAX_CHUNK_SIZE);
+            }
+            
+            if (chunkText) {
+              hasYieldedText = true;
+              fullText += chunkText;
+              
+              yield {
+                textDelta: chunkText,
+                fullText,
+                toolCalls,
+              };
+            }
           }
+        } catch (fullStreamError) {
+          console.warn('[FACTORY] Error reading fullStream, falling back to textStream:', fullStreamError);
+          usedFullStream = false;
         }
-      } catch (streamError) {
-        // If textStream errors, log but continue to get final result
-        console.warn('Error reading textStream:', streamError);
+      }
+      
+      // Fall back to textStream if fullStream didn't work or wasn't available
+      if (!usedFullStream) {
+        if (!stream.textStream || typeof stream.textStream[Symbol.asyncIterator] !== 'function') {
+          throw new Error('streamText returned no textStream for streaming');
+        }
+        
+        try {
+          for await (const chunk of stream.textStream) {
+            streamChunkCount++;
+            
+            // Ensure chunk is a string and validate size
+            const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB max chunk size
+            let chunkText = typeof chunk === 'string' ? chunk : (chunk ? String(chunk) : '');
+            
+            // Prevent resource exhaustion from extremely large chunks
+            if (chunkText.length > MAX_CHUNK_SIZE) {
+              console.warn(`[FACTORY] Warning: Chunk size (${chunkText.length} bytes) exceeds maximum (${MAX_CHUNK_SIZE} bytes). Truncating.`);
+              chunkText = chunkText.substring(0, MAX_CHUNK_SIZE);
+            }
+            
+            if (chunkText) {
+              hasYieldedText = true;
+              fullText += chunkText;
+              
+              yield {
+                textDelta: chunkText,
+                fullText,
+                toolCalls,
+              };
+            }
+          }
+        } catch (streamError) {
+          // If textStream errors, log but continue to get final result
+          console.warn('Error reading textStream:', streamError);
+        }
       }
 
       // Get final result to extract tool calls and check for any remaining text

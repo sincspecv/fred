@@ -809,37 +809,184 @@ async function startChat() {
         }
       }
 
-      const response = await fred.processMessage(message, {
-        conversationId,
-      });
+      // Use streaming for real-time output
+      // At this point, fred is guaranteed to be non-null due to checks above
+      if (!fred) {
+        console.log('\n❌ Fred not available\n');
+        continue;
+      }
 
-      if (response) {
-        console.log(`\n🤖 ${response.content}\n`);
-        if (response.toolCalls && response.toolCalls.length > 0) {
-          console.log(`🔧 Tools used: ${response.toolCalls.map(tc => tc.toolId).join(', ')}\n`);
-        }
-      } else {
-        // No response - provide debugging information
-        const agents = fred.getAgents();
-        const defaultAgentId = fred.getDefaultAgentId();
-        const intents = fred.getIntents();
+      let hasReceivedChunk = false;
+      let fullText = '';
+      let toolCallsUsed: string[] = [];
+      let hasShownToolIndicator = false;
+
+      // Ensure stdout is ready for immediate writes
+      // Unbuffer stdout if it's corked (shouldn't be, but ensure it)
+      if (process.stdout.writable && typeof process.stdout.uncork === 'function') {
+        process.stdout.uncork();
+      }
+
+      // Helper function to write with throttling for readability
+      // Adds a small delay between writes to make streaming output easier on the eyes
+      let lastWriteTime = 0;
+      let pendingWrite: Promise<void> | null = null;
+      const THROTTLE_MS = 20; // Delay between chunks (adjust for readability: 10-50ms recommended)
+      const MAX_CHUNK_SIZE = 1024 * 1024; // 1MB max chunk size to prevent resource exhaustion
+      
+      const writeImmediate = async (text: string): Promise<void> => {
+        if (text.length === 0) return;
         
-        console.log('\n❌ No response received.');
-        console.log(`   Agents available: ${agents.length}`);
-        if (agents.length > 0) {
-          console.log(`   Agent IDs: ${agents.map(a => a.id).join(', ')}`);
+        // Prevent resource exhaustion from extremely large chunks
+        if (text.length > MAX_CHUNK_SIZE) {
+          console.error(`\n⚠️  Warning: Chunk size (${text.length} bytes) exceeds maximum (${MAX_CHUNK_SIZE} bytes). Truncating.`);
+          text = text.substring(0, MAX_CHUNK_SIZE);
         }
-        console.log(`   Default agent: ${defaultAgentId || 'not set'}`);
-        console.log(`   Intents registered: ${intents.length}`);
         
-        if (agents.length === 0) {
-          console.log('\n💡 No agents found. The dev agent should have been auto-created.');
-          console.log('   Check the error messages above for provider registration issues.');
-        } else if (!defaultAgentId) {
-          console.log('\n💡 Agents exist but no default agent is set.');
-          console.log('   The dev agent should have been set as default automatically.');
+        // Wait for any pending write to complete before starting a new one
+        // This prevents race conditions and ensures proper throttling
+        if (pendingWrite) {
+          await pendingWrite;
         }
-        console.log('');
+        
+        // Create a new promise for this write operation
+        pendingWrite = (async () => {
+          // Throttle: ensure at least THROTTLE_MS milliseconds between writes
+          const now = Date.now();
+          const timeSinceLastWrite = now - lastWriteTime;
+          if (timeSinceLastWrite < THROTTLE_MS) {
+            const delay = THROTTLE_MS - timeSinceLastWrite;
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+          
+          // Write to stdout - stdout.write is safe for text content
+          // The AI SDK should already sanitize content, but we trust it here
+          process.stdout.write(text);
+          lastWriteTime = Date.now();
+        })();
+        
+        await pendingWrite;
+        pendingWrite = null;
+      };
+
+      // Start streaming response
+      await writeImmediate('\n🤖 ');
+
+      // Track if stream was aborted for proper cleanup
+      let streamAborted = false;
+      let streamController: AbortController | null = null;
+      
+      try {
+        // Create abort controller for stream cleanup
+        streamController = new AbortController();
+        
+        // Set up signal handler for graceful shutdown
+        const abortHandler = () => {
+          streamAborted = true;
+          streamController?.abort();
+        };
+        
+        // Note: We can't directly abort the async generator, but we can track the abort state
+        // The for-await loop will naturally exit when the generator completes or throws
+        
+        for await (const chunk of fred.streamMessage(message, {
+          conversationId,
+        })) {
+          // Check if stream was aborted
+          if (streamAborted || streamController?.signal.aborted) {
+            break;
+          }
+          
+          hasReceivedChunk = true;
+
+          // Handle tool calls - show indicator when tools are detected
+          if (chunk.toolCalls && chunk.toolCalls.length > 0 && !hasShownToolIndicator) {
+            // If we've already written some text, add a newline before tool indicator
+            if (fullText) {
+              await writeImmediate('\n');
+            }
+            await writeImmediate('🔧 Using tools...\n');
+            hasShownToolIndicator = true;
+            
+            // Track which tools are being used
+            for (const toolCall of chunk.toolCalls) {
+              if (toolCall.toolId && !toolCallsUsed.includes(toolCall.toolId)) {
+                toolCallsUsed.push(toolCall.toolId);
+              }
+            }
+          }
+
+          // Write text delta as it arrives - write with throttling for readability
+          // Each chunk should appear in real-time as it's received from the AI SDK stream
+          if (chunk.textDelta && chunk.textDelta.length > 0) {
+            // Write the delta with throttling - the AI SDK should provide incremental chunks
+            await writeImmediate(chunk.textDelta);
+            fullText = chunk.fullText || fullText;
+          } else if (chunk.fullText && chunk.fullText !== fullText) {
+            // If we get a fullText update without a delta, write the difference
+            // This handles cases where textDelta might be empty but fullText updated
+            const diff = chunk.fullText.slice(fullText.length);
+            if (diff) {
+              await writeImmediate(diff);
+            }
+            fullText = chunk.fullText;
+          }
+        }
+        
+        // Clean up abort handler
+        streamController = null;
+
+        // After streaming completes, add final newline (only if not aborted)
+        if (!streamAborted) {
+          await writeImmediate('\n');
+        }
+
+        // Show tools used summary if any tools were called
+        if (toolCallsUsed.length > 0) {
+          console.log(`🔧 Tools used: ${toolCallsUsed.join(', ')}\n`);
+        } else {
+          // Add extra newline for spacing if no tools were used
+          console.log('');
+        }
+
+        // If no chunks were received, provide debugging information
+        if (!hasReceivedChunk) {
+          const agents = fred.getAgents();
+          const defaultAgentId = fred.getDefaultAgentId();
+          const intents = fred.getIntents();
+          
+          console.log('❌ No response received.');
+          console.log(`   Agents available: ${agents.length}`);
+          if (agents.length > 0) {
+            console.log(`   Agent IDs: ${agents.map(a => a.id).join(', ')}`);
+          }
+          console.log(`   Default agent: ${defaultAgentId || 'not set'}`);
+          console.log(`   Intents registered: ${intents.length}`);
+          
+          if (agents.length === 0) {
+            console.log('\n💡 No agents found. The dev agent should have been auto-created.');
+            console.log('   Check the error messages above for provider registration issues.');
+          } else if (!defaultAgentId) {
+            console.log('\n💡 Agents exist but no default agent is set.');
+            console.log('   The dev agent should have been set as default automatically.');
+          }
+          console.log('');
+        }
+      } catch (streamError) {
+        // Clean up on error
+        streamAborted = true;
+        streamController?.abort();
+        streamController = null;
+        
+        // If streaming fails, try to provide helpful error message
+        // Don't show error if it was an abort (user interruption)
+        if (!streamAborted || (streamError instanceof Error && streamError.name !== 'AbortError')) {
+          console.error('\n❌ Streaming error:', streamError instanceof Error ? streamError.message : streamError);
+          if (streamError instanceof Error && streamError.stack) {
+            console.error(streamError.stack);
+          }
+          console.log('');
+        }
       }
     } catch (error) {
       console.error('\n❌ Error:', error instanceof Error ? error.message : error);
