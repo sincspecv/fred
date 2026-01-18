@@ -6,6 +6,7 @@
  */
 
 import { handleTestCommand } from './test';
+import { handleDevCommand } from './dev';
 
 /**
  * Options that require a value
@@ -71,6 +72,7 @@ Usage:
   fred <command> [options]
 
 Commands:
+  dev                     Start development chat interface with hot reload
   test                    Run golden trace tests
   test --record <message>  Record a new golden trace
   test --update            Update existing golden traces
@@ -81,6 +83,7 @@ Options:
   --traces-dir <dir>       Directory for golden traces (default: tests/golden-traces)
 
 Examples:
+  fred dev
   fred test
   fred test --record "Hello, world!"
   fred test --update
@@ -105,6 +108,10 @@ async function main(): Promise<void> {
     let exitCode = 0;
 
     switch (command) {
+      case 'dev':
+        exitCode = await handleDevCommand();
+        break;
+
       case 'test':
         exitCode = await handleTestCommand(commandArgs, {
           pattern: commandArgs[0],

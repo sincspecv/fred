@@ -17,6 +17,8 @@ let isReloading = false;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 let isWaitingForInput = false;
 let fileWatcher: chokidar.FSWatcher | null = null;
+// Store setup hook for use during initialization
+let globalSetupHook: ((fred: Fred) => Promise<void>) | undefined;
 
 /**
  * Detect available AI provider from environment variables
@@ -410,6 +412,18 @@ async function initializeFred() {
       }
     }
 
+    // Call setup hook if provided (for project-specific setup like registering agents/tools/intents)
+    if (globalSetupHook) {
+      try {
+        await globalSetupHook(newFred);
+      } catch (error) {
+        if (!isWaitingForInput) {
+          console.warn('⚠️  Failed to run setup hook:', error instanceof Error ? error.message : error);
+          console.warn('   Continuing with auto-agent creation if needed...\n');
+        }
+      }
+    }
+
     // Auto-create dev agent if no agents exist
     const agents = newFred.getAgents();
     if (agents.length === 0) {
@@ -714,6 +728,16 @@ async function readLine(): Promise<string> {
 
     stdin.on('data', onData);
   });
+}
+
+/**
+ * Start dev chat interface (exported for CLI use)
+ * @param setupHook Optional function to call after Fred is initialized but before auto-agent creation
+ */
+export async function startDevChat(setupHook?: (fred: Fred) => Promise<void>) {
+  // Store setup hook globally so it's available during reloads
+  globalSetupHook = setupHook;
+  await startChat();
 }
 
 /**
