@@ -11,15 +11,6 @@ import chokidar from 'chokidar';
  * Maintains conversation context until terminal is closed
  */
 
-let fred: Fred | null = null;
-let conversationId: string;
-let isReloading = false;
-let reloadTimer: ReturnType<typeof setTimeout> | null = null;
-let isWaitingForInput = false;
-let fileWatcher: chokidar.FSWatcher | null = null;
-// Store setup hook for use during initialization
-let globalSetupHook: ((fred: Fred) => Promise<void>) | undefined;
-
 /**
  * Detect available AI provider from environment variables
  * Returns platform and model, or null if no provider available
@@ -358,71 +349,87 @@ async function ensureProviderPackageInstalled(): Promise<boolean> {
 }
 
 /**
- * Initialize or reload Fred instance
+ * DevChatRunner class encapsulates all dev chat state and logic
  */
-async function initializeFred() {
-  if (isReloading) return;
-  isReloading = true;
+class DevChatRunner {
+  private fred: Fred | null = null;
+  private conversationId?: string;
+  private isReloading = false;
+  private reloadTimer: ReturnType<typeof setTimeout> | null = null;
+  private isWaitingForInput = false;
+  private fileWatcher: chokidar.FSWatcher | null = null;
+  private setupHook?: (fred: Fred) => Promise<void>;
 
-  try {
-    // Clear any pending reload timers
-    if (reloadTimer) {
-      clearTimeout(reloadTimer);
-      reloadTimer = null;
-    }
+  constructor(setupHook?: (fred: Fred) => Promise<void>) {
+    this.setupHook = setupHook;
+  }
 
-    // Create new Fred instance
-    const newFred = new Fred();
-    
-    // Try to load config files
-    const configPaths = [
-      resolve(process.cwd(), 'src', 'config.json'),
-      resolve(process.cwd(), 'config.json'),
-      resolve(process.cwd(), 'fred.config.json'),
-      resolve(process.cwd(), 'src', 'config.yaml'),
-      resolve(process.cwd(), 'config.yaml'),
-      resolve(process.cwd(), 'fred.config.yaml'),
-    ];
+  /**
+   * Initialize or reload Fred instance
+   */
+  private async initializeFred() {
+    if (this.isReloading) return;
+    this.isReloading = true;
 
-    let configLoaded = false;
-    for (const configPath of configPaths) {
-      if (existsSync(configPath)) {
+    try {
+      // Clear any pending reload timers
+      if (this.reloadTimer) {
+        clearTimeout(this.reloadTimer);
+        this.reloadTimer = null;
+      }
+
+      // Create new Fred instance
+      const newFred = new Fred();
+      
+      // Try to load config files
+      const configPaths = [
+        resolve(process.cwd(), 'src', 'config.json'),
+        resolve(process.cwd(), 'config.json'),
+        resolve(process.cwd(), 'fred.config.json'),
+        resolve(process.cwd(), 'src', 'config.yaml'),
+        resolve(process.cwd(), 'config.yaml'),
+        resolve(process.cwd(), 'fred.config.yaml'),
+      ];
+
+      let configLoaded = false;
+      for (const configPath of configPaths) {
+        if (existsSync(configPath)) {
+          try {
+            await newFred.initializeFromConfig(configPath);
+            if (!this.isWaitingForInput) {
+              console.log(`✅ Loaded config from ${configPath}`);
+            }
+            configLoaded = true;
+            break;
+          } catch (error: any) {
+            // Config file exists but invalid, continue to next
+            if (!this.isWaitingForInput && error.message) {
+              console.warn(`⚠️  Config file ${configPath} exists but has errors: ${error.message}`);
+            }
+          }
+        }
+      }
+
+      if (!configLoaded) {
+        // Register default providers if no config
+        await newFred.registerDefaultProviders();
+        if (!this.isWaitingForInput) {
+          console.log('✅ Using default providers (set OPENAI_API_KEY or GROQ_API_KEY)');
+          console.log('💡 Tip: Create a config.json file or use initializeFromConfig() in your code');
+        }
+      }
+
+      // Call setup hook if provided (for project-specific setup like registering agents/tools/intents)
+      if (this.setupHook) {
         try {
-          await newFred.initializeFromConfig(configPath);
-          if (!isWaitingForInput) {
-            console.log(`✅ Loaded config from ${configPath}`);
-          }
-          configLoaded = true;
-          break;
-        } catch (error: any) {
-          // Config file exists but invalid, continue to next
-          if (!isWaitingForInput && error.message) {
-            console.warn(`⚠️  Config file ${configPath} exists but has errors: ${error.message}`);
+          await this.setupHook(newFred);
+        } catch (error) {
+          if (!this.isWaitingForInput) {
+            console.warn('⚠️  Failed to run setup hook:', error instanceof Error ? error.message : error);
+            console.warn('   Continuing with auto-agent creation if needed...\n');
           }
         }
       }
-    }
-
-    if (!configLoaded) {
-      // Register default providers if no config
-      await newFred.registerDefaultProviders();
-      if (!isWaitingForInput) {
-        console.log('✅ Using default providers (set OPENAI_API_KEY or GROQ_API_KEY)');
-        console.log('💡 Tip: Create a config.json file or use initializeFromConfig() in your code');
-      }
-    }
-
-    // Call setup hook if provided (for project-specific setup like registering agents/tools/intents)
-    if (globalSetupHook) {
-      try {
-        await globalSetupHook(newFred);
-      } catch (error) {
-        if (!isWaitingForInput) {
-          console.warn('⚠️  Failed to run setup hook:', error instanceof Error ? error.message : error);
-          console.warn('   Continuing with auto-agent creation if needed...\n');
-        }
-      }
-    }
 
     // Auto-create dev agent if no agents exist
     const agents = newFred.getAgents();
@@ -435,7 +442,7 @@ async function initializeFred() {
           // Register the provider explicitly to ensure it's available
           try {
             await newFred.useProvider(providerInfo.platform);
-            if (!isWaitingForInput) {
+            if (!this.isWaitingForInput) {
               console.log(`✅ Registered ${providerInfo.platform} provider`);
             }
           } catch (providerError) {
@@ -449,7 +456,7 @@ async function initializeFred() {
           }
 
           // Now create the agent with the registered provider
-          if (!isWaitingForInput) {
+          if (!this.isWaitingForInput) {
             console.log(`Creating dev agent with ${providerInfo.platform}/${providerInfo.model}...`);
           }
           
@@ -481,7 +488,7 @@ async function initializeFred() {
             throw new Error('Agent was created but does not appear in agents list');
           }
           
-          if (!isWaitingForInput) {
+          if (!this.isWaitingForInput) {
             console.log('💡 Auto-created dev agent for testing (temporary)');
             console.log(`   Platform: ${providerInfo.platform}, Model: ${providerInfo.model}`);
             console.log(`   Agent ID: __dev_agent__, Default: ${newFred.getDefaultAgentId()}`);
@@ -507,7 +514,7 @@ async function initializeFred() {
         }
       } else {
         // No providers available
-        if (!isWaitingForInput) {
+        if (!this.isWaitingForInput) {
           console.warn('⚠️  No AI providers available. Set one of the following API keys:');
           console.warn('   - OPENAI_API_KEY (OpenAI)');
           console.warn('   - ANTHROPIC_API_KEY (Anthropic)');
@@ -519,52 +526,52 @@ async function initializeFred() {
     } else {
       // Agents already exist - check if default is set
       const defaultAgentId = newFred.getDefaultAgentId();
-      if (!defaultAgentId && !isWaitingForInput) {
+      if (!defaultAgentId && !this.isWaitingForInput) {
         console.warn('⚠️  Agents exist but no default agent is set.');
         console.warn('   Set a default agent with: fred.setDefaultAgent(agentId)\n');
       }
     }
 
-    // Preserve conversation context if it exists
-    if (fred && conversationId) {
-      const contextManager = fred.getContextManager();
-      const history = await contextManager.getHistory(conversationId);
-      
-      if (history.length > 0) {
-        const newContextManager = newFred.getContextManager();
-        await newContextManager.addMessages(conversationId, history);
-        if (!isWaitingForInput) {
-          console.log(`✅ Preserved conversation context (${history.length} messages)`);
+      // Preserve conversation context if it exists
+      if (this.fred && this.conversationId) {
+        const contextManager = this.fred.getContextManager();
+        const history = await contextManager.getHistory(this.conversationId);
+        
+        if (history.length > 0) {
+          const newContextManager = newFred.getContextManager();
+          await newContextManager.addMessages(this.conversationId, history);
+          if (!this.isWaitingForInput) {
+            console.log(`✅ Preserved conversation context (${history.length} messages)`);
+          }
         }
+      } else if (!this.conversationId) {
+        // Generate new conversation ID on first load
+        this.conversationId = newFred.getContextManager().generateConversationId();
       }
-    } else if (!conversationId) {
-      // Generate new conversation ID on first load
-      conversationId = newFred.getContextManager().generateConversationId();
-    }
 
-    fred = newFred;
-  } catch (error) {
-    if (!isWaitingForInput) {
-      console.error('❌ Error reloading Fred:', error instanceof Error ? error.message : error);
+      this.fred = newFred;
+    } catch (error) {
+      if (!this.isWaitingForInput) {
+        console.error('❌ Error reloading Fred:', error instanceof Error ? error.message : error);
+      }
+    } finally {
+      this.isReloading = false;
     }
-  } finally {
-    isReloading = false;
   }
-}
 
-/**
- * Watch for file changes and reload using chokidar
- */
-function setupFileWatcher() {
-  // Prevent memory leak: close existing watcher if one exists
-  if (fileWatcher) {
-    try {
-      fileWatcher.close();
-    } catch {
-      // Ignore errors when closing existing watcher
+  /**
+   * Watch for file changes and reload using chokidar
+   */
+  public setupFileWatcher() {
+    // Prevent memory leak: close existing watcher if one exists
+    if (this.fileWatcher) {
+      try {
+        this.fileWatcher.close();
+      } catch {
+        // Ignore errors when closing existing watcher
+      }
+      this.fileWatcher = null;
     }
-    fileWatcher = null;
-  }
 
   const projectRoot = process.cwd();
   const watchPaths = [
@@ -591,10 +598,10 @@ function setupFileWatcher() {
     return;
   }
 
-  console.log(`👀 Watching ${existingPaths.length} path(s) for changes...`);
+    console.log(`👀 Watching ${existingPaths.length} path(s) for changes...`);
 
-  // Use chokidar to watch all paths
-  fileWatcher = chokidar.watch(existingPaths, {
+    // Use chokidar to watch all paths
+    this.fileWatcher = chokidar.watch(existingPaths, {
     ignored: [
       /node_modules/,
       /\.git/,
@@ -623,81 +630,81 @@ function setupFileWatcher() {
     },
   });
 
-  fileWatcher.on('change', (path) => {
-    // Additional security: validate path is still within project root
-    const normalizedPath = resolve(path);
-    const normalizedRoot = resolve(projectRoot);
-    if (!normalizedPath.startsWith(normalizedRoot + '/') && normalizedPath !== normalizedRoot) {
-      // Path outside project root - ignore
-      return;
-    }
-
-    // Debounce reloads to avoid multiple rapid reloads
-    if (reloadTimer) {
-      clearTimeout(reloadTimer);
-    }
-
-    reloadTimer = setTimeout(() => {
-      if (!isWaitingForInput) {
-        initializeFred();
+    this.fileWatcher.on('change', (path) => {
+      // Additional security: validate path is still within project root
+      const normalizedPath = resolve(path);
+      const normalizedRoot = resolve(projectRoot);
+      if (!normalizedPath.startsWith(normalizedRoot + '/') && normalizedPath !== normalizedRoot) {
+        // Path outside project root - ignore
+        return;
       }
-    }, 300);
-  });
 
-  fileWatcher.on('error', (error) => {
-    console.error('File watcher error:', error);
-    // On error, cleanup watcher to prevent resource leaks
-    if (fileWatcher) {
-      try {
-        fileWatcher.close();
-      } catch {
-        // Ignore cleanup errors
+      // Debounce reloads to avoid multiple rapid reloads
+      if (this.reloadTimer) {
+        clearTimeout(this.reloadTimer);
       }
-      fileWatcher = null;
-    }
-  });
-}
 
-/**
- * Read a line from stdin with better handling
- */
-async function readLine(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    isWaitingForInput = true;
-    const stdin = process.stdin;
-    
-    // Check if stdin is available
-    if (!stdin || stdin.destroyed) {
-      reject(new Error('stdin is not available or has been closed'));
-      return;
-    }
-    
-    // Set raw mode for better control (if available)
-    if (stdin.isTTY && typeof stdin.setRawMode === 'function') {
-      try {
-        stdin.setRawMode(true);
-      } catch {
-        // ignore in non-TTY or restricted environments
+      this.reloadTimer = setTimeout(() => {
+        if (!this.isWaitingForInput) {
+          this.initializeFred();
+        }
+      }, 300);
+    });
+
+    this.fileWatcher.on('error', (error) => {
+      console.error('File watcher error:', error);
+      // On error, cleanup watcher to prevent resource leaks
+      if (this.fileWatcher) {
+        try {
+          this.fileWatcher.close();
+        } catch {
+          // Ignore cleanup errors
+        }
+        this.fileWatcher = null;
       }
-    }
-    
-    stdin.resume();
-    stdin.setEncoding('utf8');
+    });
+  }
 
-    let input = '';
-
-    const cleanup = () => {
-      isWaitingForInput = false;
-      stdin.pause();
+  /**
+   * Read a line from stdin with better handling
+   */
+  private async readLine(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      this.isWaitingForInput = true;
+      const stdin = process.stdin;
+      
+      // Check if stdin is available
+      if (!stdin || stdin.destroyed) {
+        reject(new Error('stdin is not available or has been closed'));
+        return;
+      }
+      
+      // Set raw mode for better control (if available)
       if (stdin.isTTY && typeof stdin.setRawMode === 'function') {
         try {
-          stdin.setRawMode(false);
+          stdin.setRawMode(true);
         } catch {
-          // ignore
+          // ignore in non-TTY or restricted environments
         }
       }
-      stdin.removeListener('data', onData);
-    };
+      
+      stdin.resume();
+      stdin.setEncoding('utf8');
+
+      let input = '';
+
+      const cleanup = () => {
+        this.isWaitingForInput = false;
+        stdin.pause();
+        if (stdin.isTTY && typeof stdin.setRawMode === 'function') {
+          try {
+            stdin.setRawMode(false);
+          } catch {
+            // ignore
+          }
+        }
+        stdin.removeListener('data', onData);
+      };
 
     const onData = (data: string) => {
       for (const char of data) {
@@ -730,163 +737,153 @@ async function readLine(): Promise<string> {
   });
 }
 
-/**
- * Start dev chat interface (exported for CLI use)
- * @param setupHook Optional function to call after Fred is initialized but before auto-agent creation
- */
-export async function startDevChat(setupHook?: (fred: Fred) => Promise<void>) {
-  // Store setup hook globally so it's available during reloads
-  globalSetupHook = setupHook;
-  await startChat();
-}
-
-/**
- * Interactive chat interface
- */
-async function startChat() {
-  // Ensure required provider package is installed before initializing
-  let packageWasInstalled = false;
-  try {
-    packageWasInstalled = await ensureProviderPackageInstalled();
-  } catch (error) {
-    console.error('\n❌ Failed to ensure provider package is installed.');
-    console.error('   Please install the required package manually and try again.\n');
-    process.exit(1);
-  }
-  
-  // Initialize Fred
-  // If we reach here, the package is installed (or no package needed)
-  // If a package was missing, ensureProviderPackageInstalled() will have
-  // prompted the user and exited the process
-  await initializeFred();
-  
-  if (!fred) {
-    console.error('❌ Failed to initialize Fred');
-    process.exit(1);
-  }
-
-  // Generate conversation ID if not already set
-  if (!conversationId) {
-    conversationId = fred.getContextManager().generateConversationId();
-  }
-
-  console.log(`\n💬 Fred Dev Chat`);
-  console.log(`📝 Conversation ID: ${conversationId}`);
-  console.log('💡 Type your messages and press Enter. Code changes auto-reload!');
-  console.log('📖 Type "help" for commands\n');
-
-  while (true) {
-    // Ensure fred is still available (might have been cleared during reload)
-    if (!fred) {
-      await initializeFred();
-      if (!fred) {
-        console.error('❌ Failed to reload Fred');
-        continue;
-      }
-    }
-
-    // Check if stdin is available and not destroyed
-    if (!process.stdin || process.stdin.destroyed) {
-      console.error('\n❌ stdin is not available. The process may have lost terminal access.');
-      console.error('   This can happen after a restart. Please restart dev-chat manually.\n');
-      process.exit(1);
-    }
-
-    // Ensure stdin is readable
-    if (!process.stdin.readable) {
-      console.error('\n❌ stdin is not readable. The process may have lost terminal access.');
-      console.error('   This can happen after a restart. Please restart dev-chat manually.\n');
-      process.exit(1);
-    }
-
-    process.stdout.write('> ');
-    let message: string;
+  /**
+   * Interactive chat interface
+   */
+  public async start() {
+    // Ensure required provider package is installed before initializing
+    let packageWasInstalled = false;
     try {
-      message = await readLine();
+      packageWasInstalled = await ensureProviderPackageInstalled();
     } catch (error) {
-      if (error instanceof Error && (error.message.includes('stdin') || error.message.includes('not available'))) {
-        console.error('\n❌ Failed to read from stdin:', error.message);
-        console.error('   The process may have lost terminal access after restart.');
-        console.error('   Please restart dev-chat manually: bun run dev\n');
-        process.exit(1);
-      }
-      throw error;
+      console.error('\n❌ Failed to ensure provider package is installed.');
+      console.error('   Please install the required package manually and try again.\n');
+      process.exit(1);
+    }
+    
+    // Initialize Fred
+    // If we reach here, the package is installed (or no package needed)
+    // If a package was missing, ensureProviderPackageInstalled() will have
+    // prompted the user and exited the process
+    await this.initializeFred();
+    
+    if (!this.fred) {
+      console.error('❌ Failed to initialize Fred');
+      process.exit(1);
     }
 
-    if (!message.trim()) {
-      continue;
+    // Generate conversation ID if not already set
+    if (!this.conversationId) {
+      this.conversationId = this.fred.getContextManager().generateConversationId();
     }
 
-    const cmd = message.toLowerCase().trim();
+    console.log(`\n💬 Fred Dev Chat`);
+    console.log(`📝 Conversation ID: ${this.conversationId}`);
+    console.log('💡 Type your messages and press Enter. Code changes auto-reload!');
+    console.log('📖 Type "help" for commands\n');
 
-    if (cmd === 'exit' || cmd === 'quit') {
-      console.log('\n👋 Goodbye!');
-      process.exit(0);
-      return;
-    }
-
-    if (cmd === 'clear' || cmd === '/clear') {
-      if (fred) {
-        const contextManager = fred.getContextManager();
-        await contextManager.clearContext(conversationId);
-        conversationId = fred.getContextManager().generateConversationId();
-        console.log(`\n🧹 Conversation cleared. New ID: ${conversationId}\n`);
-      }
-      continue;
-    }
-
-    if (cmd === 'help' || cmd === '/help') {
-      console.log('\n📖 Commands:');
-      console.log('  exit, quit     - Exit the chat');
-      console.log('  clear, /clear   - Clear conversation context');
-      console.log('  help, /help    - Show this help message');
-      console.log('  reload, /reload - Manually reload Fred\n');
-      continue;
-    }
-
-    if (cmd === 'reload' || cmd === '/reload') {
-      console.log('\n🔄 Manually reloading...');
-      await initializeFred();
-      continue;
-    }
-
-    try {
-      // Process message
-      if (!fred) {
-        console.log('\n⚠️  Fred not initialized. Reloading...');
-        await initializeFred();
-        if (!fred) {
-          console.log('\n❌ Failed to initialize Fred\n');
+    while (true) {
+      // Ensure fred is still available (might have been cleared during reload)
+      if (!this.fred) {
+        await this.initializeFred();
+        if (!this.fred) {
+          console.error('❌ Failed to reload Fred');
           continue;
         }
       }
 
-      // Use streaming for real-time output
-      // At this point, fred is guaranteed to be non-null due to checks above
-      if (!fred) {
-        console.log('\n❌ Fred not available\n');
+      // Check if stdin is available and not destroyed
+      if (!process.stdin || process.stdin.destroyed) {
+        console.error('\n❌ stdin is not available. The process may have lost terminal access.');
+        console.error('   This can happen after a restart. Please restart dev-chat manually.\n');
+        process.exit(1);
+      }
+
+      // Ensure stdin is readable
+      if (!process.stdin.readable) {
+        console.error('\n❌ stdin is not readable. The process may have lost terminal access.');
+        console.error('   This can happen after a restart. Please restart dev-chat manually.\n');
+        process.exit(1);
+      }
+
+      process.stdout.write('> ');
+      let message: string;
+      try {
+        message = await this.readLine();
+      } catch (error) {
+        if (error instanceof Error && (error.message.includes('stdin') || error.message.includes('not available'))) {
+          console.error('\n❌ Failed to read from stdin:', error.message);
+          console.error('   The process may have lost terminal access after restart.');
+          console.error('   Please restart dev-chat manually: bun run dev\n');
+          process.exit(1);
+        }
+        throw error;
+      }
+
+      if (!message.trim()) {
         continue;
       }
 
-      let hasReceivedChunk = false;
-      let fullText = '';
-      let toolCallsUsed: string[] = [];
-      let hasShownToolIndicator = false;
+      const cmd = message.toLowerCase().trim();
 
-      // Ensure stdout is ready for immediate writes
-      // Unbuffer stdout if it's corked (shouldn't be, but ensure it)
-      if (process.stdout.writable && typeof process.stdout.uncork === 'function') {
-        process.stdout.uncork();
+      if (cmd === 'exit' || cmd === 'quit') {
+        console.log('\n👋 Goodbye!');
+        process.exit(0);
+        return;
       }
 
-      // Helper function to write with throttling for readability
-      // Adds a small delay between writes to make streaming output easier on the eyes
-      let lastWriteTime = 0;
-      let pendingWrite: Promise<void> | null = null;
-      const THROTTLE_MS = 20; // Delay between chunks (adjust for readability: 10-50ms recommended)
-      const MAX_CHUNK_SIZE = 1024 * 1024; // 1MB max chunk size to prevent resource exhaustion
-      
-      const writeImmediate = async (text: string): Promise<void> => {
+      if (cmd === 'clear' || cmd === '/clear') {
+        if (this.fred) {
+          const contextManager = this.fred.getContextManager();
+          await contextManager.clearContext(this.conversationId!);
+          this.conversationId = this.fred.getContextManager().generateConversationId();
+          console.log(`\n🧹 Conversation cleared. New ID: ${this.conversationId}\n`);
+        }
+        continue;
+      }
+
+      if (cmd === 'help' || cmd === '/help') {
+        console.log('\n📖 Commands:');
+        console.log('  exit, quit     - Exit the chat');
+        console.log('  clear, /clear   - Clear conversation context');
+        console.log('  help, /help    - Show this help message');
+        console.log('  reload, /reload - Manually reload Fred\n');
+        continue;
+      }
+
+      if (cmd === 'reload' || cmd === '/reload') {
+        console.log('\n🔄 Manually reloading...');
+        await this.initializeFred();
+        continue;
+      }
+
+      try {
+        // Process message
+        if (!this.fred) {
+          console.log('\n⚠️  Fred not initialized. Reloading...');
+          await this.initializeFred();
+          if (!this.fred) {
+            console.log('\n❌ Failed to initialize Fred\n');
+            continue;
+          }
+        }
+
+        // Use streaming for real-time output
+        // At this point, fred is guaranteed to be non-null due to checks above
+        if (!this.fred) {
+          console.log('\n❌ Fred not available\n');
+          continue;
+        }
+
+        let hasReceivedChunk = false;
+        let fullText = '';
+        let toolCallsUsed: string[] = [];
+        let hasShownToolIndicator = false;
+
+        // Ensure stdout is ready for immediate writes
+        // Unbuffer stdout if it's corked (shouldn't be, but ensure it)
+        if (process.stdout.writable && typeof process.stdout.uncork === 'function') {
+          process.stdout.uncork();
+        }
+
+        // Helper function to write with throttling for readability
+        // Adds a small delay between writes to make streaming output easier on the eyes
+        let lastWriteTime = 0;
+        let pendingWrite: Promise<void> | null = null;
+        const THROTTLE_MS = 20; // Delay between chunks (adjust for readability: 10-50ms recommended)
+        const MAX_CHUNK_SIZE = 1024 * 1024; // 1MB max chunk size to prevent resource exhaustion
+        
+        const writeImmediate = async (text: string): Promise<void> => {
         if (text.length === 0) return;
         
         // Prevent resource exhaustion from extremely large chunks
@@ -917,173 +914,189 @@ async function startChat() {
           lastWriteTime = Date.now();
         })();
         
-        await pendingWrite;
-        pendingWrite = null;
-      };
-
-      // Start streaming response
-      await writeImmediate('\n🤖 ');
-
-      // Track if stream was aborted for proper cleanup
-      let streamAborted = false;
-      let streamController: AbortController | null = null;
-      
-      try {
-        // Create abort controller for stream cleanup
-        streamController = new AbortController();
-        
-        // Set up signal handler for graceful shutdown
-        const abortHandler = () => {
-          streamAborted = true;
-          streamController?.abort();
+          await pendingWrite;
+          pendingWrite = null;
         };
-        
-        // Note: We can't directly abort the async generator, but we can track the abort state
-        // The for-await loop will naturally exit when the generator completes or throws
-        
-        for await (const chunk of fred.streamMessage(message, {
-          conversationId,
-        })) {
-          // Check if stream was aborted
-          if (streamAborted || streamController?.signal.aborted) {
-            break;
-          }
-          
-          hasReceivedChunk = true;
 
-          // Handle tool calls - show indicator when tools are detected
-          if (chunk.toolCalls && chunk.toolCalls.length > 0 && !hasShownToolIndicator) {
-            // If we've already written some text, add a newline before tool indicator
-            if (fullText) {
-              await writeImmediate('\n');
+        // Start streaming response
+        await writeImmediate('\n🤖 ');
+
+        // Track if stream was aborted for proper cleanup
+        let streamAborted = false;
+        let streamController: AbortController | null = null;
+        
+        try {
+          // Create abort controller for stream cleanup
+          streamController = new AbortController();
+          
+          // Set up signal handler for graceful shutdown
+          const abortHandler = () => {
+            streamAborted = true;
+            streamController?.abort();
+          };
+          
+          // Note: We can't directly abort the async generator, but we can track the abort state
+          // The for-await loop will naturally exit when the generator completes or throws
+          
+          for await (const chunk of this.fred.streamMessage(message, {
+            conversationId: this.conversationId,
+          })) {
+            // Check if stream was aborted
+            if (streamAborted || streamController?.signal.aborted) {
+              break;
             }
-            await writeImmediate('🔧 Using tools...\n');
-            hasShownToolIndicator = true;
             
-            // Track which tools are being used
-            for (const toolCall of chunk.toolCalls) {
-              if (toolCall.toolId && !toolCallsUsed.includes(toolCall.toolId)) {
-                toolCallsUsed.push(toolCall.toolId);
+            hasReceivedChunk = true;
+
+            // Handle tool calls - show indicator when tools are detected
+            if (chunk.toolCalls && chunk.toolCalls.length > 0 && !hasShownToolIndicator) {
+              // If we've already written some text, add a newline before tool indicator
+              if (fullText) {
+                await writeImmediate('\n');
+              }
+              await writeImmediate('🔧 Using tools...\n');
+              hasShownToolIndicator = true;
+              
+              // Track which tools are being used
+              for (const toolCall of chunk.toolCalls) {
+                if (toolCall.toolId && !toolCallsUsed.includes(toolCall.toolId)) {
+                  toolCallsUsed.push(toolCall.toolId);
+                }
               }
             }
-          }
 
-          // Write text delta as it arrives - write with throttling for readability
-          // Each chunk should appear in real-time as it's received from the AI SDK stream
-          if (chunk.textDelta && chunk.textDelta.length > 0) {
-            // Write the delta with throttling - the AI SDK should provide incremental chunks
-            await writeImmediate(chunk.textDelta);
-            fullText = chunk.fullText || fullText;
-          } else if (chunk.fullText && chunk.fullText !== fullText) {
-            // If we get a fullText update without a delta, write the difference
-            // This handles cases where textDelta might be empty but fullText updated
-            const diff = chunk.fullText.slice(fullText.length);
-            if (diff) {
-              await writeImmediate(diff);
+            // Write text delta as it arrives - write with throttling for readability
+            // Each chunk should appear in real-time as it's received from the AI SDK stream
+            if (chunk.textDelta && chunk.textDelta.length > 0) {
+              // Write the delta with throttling - the AI SDK should provide incremental chunks
+              await writeImmediate(chunk.textDelta);
+              fullText = chunk.fullText || fullText;
+            } else if (chunk.fullText && chunk.fullText !== fullText) {
+              // If we get a fullText update without a delta, write the difference
+              // This handles cases where textDelta might be empty but fullText updated
+              const diff = chunk.fullText.slice(fullText.length);
+              if (diff) {
+                await writeImmediate(diff);
+              }
+              fullText = chunk.fullText;
             }
-            fullText = chunk.fullText;
           }
-        }
-        
-        // Clean up abort handler
-        streamController = null;
-
-        // After streaming completes, add final newline (only if not aborted)
-        if (!streamAborted) {
-          await writeImmediate('\n');
-        }
-
-        // Show tools used summary if any tools were called
-        if (toolCallsUsed.length > 0) {
-          console.log(`🔧 Tools used: ${toolCallsUsed.join(', ')}\n`);
-        } else {
-          // Add extra newline for spacing if no tools were used
-          console.log('');
-        }
-
-        // If no chunks were received, provide debugging information
-        if (!hasReceivedChunk) {
-          const agents = fred.getAgents();
-          const defaultAgentId = fred.getDefaultAgentId();
-          const intents = fred.getIntents();
           
-          console.log('❌ No response received.');
-          console.log(`   Agents available: ${agents.length}`);
-          if (agents.length > 0) {
-            console.log(`   Agent IDs: ${agents.map(a => a.id).join(', ')}`);
+          // Clean up abort handler
+          streamController = null;
+
+          // After streaming completes, add final newline (only if not aborted)
+          if (!streamAborted) {
+            await writeImmediate('\n');
           }
-          console.log(`   Default agent: ${defaultAgentId || 'not set'}`);
-          console.log(`   Intents registered: ${intents.length}`);
+
+          // Show tools used summary if any tools were called
+          if (toolCallsUsed.length > 0) {
+            console.log(`🔧 Tools used: ${toolCallsUsed.join(', ')}\n`);
+          } else {
+            // Add extra newline for spacing if no tools were used
+            console.log('');
+          }
+
+          // If no chunks were received, provide debugging information
+          if (!hasReceivedChunk) {
+            const agents = this.fred.getAgents();
+            const defaultAgentId = this.fred.getDefaultAgentId();
+            const intents = this.fred.getIntents();
+            
+            console.log('❌ No response received.');
+            console.log(`   Agents available: ${agents.length}`);
+            if (agents.length > 0) {
+              console.log(`   Agent IDs: ${agents.map(a => a.id).join(', ')}`);
+            }
+            console.log(`   Default agent: ${defaultAgentId || 'not set'}`);
+            console.log(`   Intents registered: ${intents.length}`);
+            
+            if (agents.length === 0) {
+              console.log('\n💡 No agents found. The dev agent should have been auto-created.');
+              console.log('   Check the error messages above for provider registration issues.');
+            } else if (!defaultAgentId) {
+              console.log('\n💡 Agents exist but no default agent is set.');
+              console.log('   The dev agent should have been set as default automatically.');
+            }
+            console.log('');
+          }
+        } catch (streamError) {
+          // Clean up on error
+          streamAborted = true;
+          streamController?.abort();
+          streamController = null;
           
-          if (agents.length === 0) {
-            console.log('\n💡 No agents found. The dev agent should have been auto-created.');
-            console.log('   Check the error messages above for provider registration issues.');
-          } else if (!defaultAgentId) {
-            console.log('\n💡 Agents exist but no default agent is set.');
-            console.log('   The dev agent should have been set as default automatically.');
+          // If streaming fails, try to provide helpful error message
+          // Don't show error if it was an abort (user interruption)
+          if (!streamAborted || (streamError instanceof Error && streamError.name !== 'AbortError')) {
+            console.error('\n❌ Streaming error:', streamError instanceof Error ? streamError.message : streamError);
+            if (streamError instanceof Error && streamError.stack) {
+              console.error(streamError.stack);
+            }
+            console.log('');
           }
-          console.log('');
         }
-      } catch (streamError) {
-        // Clean up on error
-        streamAborted = true;
-        streamController?.abort();
-        streamController = null;
-        
-        // If streaming fails, try to provide helpful error message
-        // Don't show error if it was an abort (user interruption)
-        if (!streamAborted || (streamError instanceof Error && streamError.name !== 'AbortError')) {
-          console.error('\n❌ Streaming error:', streamError instanceof Error ? streamError.message : streamError);
-          if (streamError instanceof Error && streamError.stack) {
-            console.error(streamError.stack);
-          }
-          console.log('');
+      } catch (error) {
+        console.error('\n❌ Error:', error instanceof Error ? error.message : error);
+        if (error instanceof Error && error.stack) {
+          console.error(error.stack);
         }
+        console.log('');
       }
-    } catch (error) {
-      console.error('\n❌ Error:', error instanceof Error ? error.message : error);
-      if (error instanceof Error && error.stack) {
-        console.error(error.stack);
-      }
-      console.log('');
     }
+  }
+
+  /**
+   * Cleanup file watcher
+   */
+  private cleanupWatcher() {
+    if (this.fileWatcher) {
+      try {
+        this.fileWatcher.close();
+      } catch {
+        // Ignore errors during cleanup
+      }
+      this.fileWatcher = null;
+    }
+  }
+
+  /**
+   * Setup cleanup handlers
+   */
+  public setupCleanup() {
+    // Cleanup watcher on exit
+    process.on('SIGINT', () => {
+      this.cleanupWatcher();
+      process.exit(0);
+    });
+    
+    process.on('SIGTERM', () => {
+      this.cleanupWatcher();
+      process.exit(0);
+    });
   }
 }
 
 /**
- * Cleanup file watcher
+ * Start dev chat interface (exported for CLI use)
+ * @param setupHook Optional function to call after Fred is initialized but before auto-agent creation
  */
-function cleanupWatcher() {
-  if (fileWatcher) {
-    try {
-      fileWatcher.close();
-    } catch {
-      // Ignore errors during cleanup
-    }
-    fileWatcher = null;
-  }
+export async function startDevChat(setupHook?: (fred: Fred) => Promise<void>) {
+  const runner = new DevChatRunner(setupHook);
+  runner.setupCleanup();
+  runner.setupFileWatcher();
+  await runner.start();
 }
 
 /**
  * Main function
  */
 async function main() {
-  // Setup file watcher for hot reload
-  setupFileWatcher();
-  
-  // Cleanup watcher on exit
-  process.on('SIGINT', () => {
-    cleanupWatcher();
-    process.exit(0);
-  });
-  
-  process.on('SIGTERM', () => {
-    cleanupWatcher();
-    process.exit(0);
-  });
-  
-  // Start chat interface
-  await startChat();
+  const runner = new DevChatRunner();
+  runner.setupCleanup();
+  runner.setupFileWatcher();
+  await runner.start();
 }
 
 // Run if this is the main module
