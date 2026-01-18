@@ -8,7 +8,7 @@ Fred is a flexible framework for building AI agents with intent-based routing, c
 
 - **Intent-Based Routing**: Match user messages to intents using exact, regex, or semantic matching
 - **Agent-Level Utterances**: Define utterances directly on agents for direct routing (bypasses intent matching)
-- **Configurable Agents**: Define agents with system messages, AI platform integration, and tool assignments
+- **Configurable Agents**: Define agents with system messages, AI platform integration, and tool assignments. Built on AI SDK v6's ToolLoopAgent for automatic tool loop management.
 - **Markdown System Prompts**: Store system prompts in markdown files for better organization
 - **Dynamic Agent Handoff**: Agents can transfer conversations to other agents via tool calls
 - **Pipeline Hooks**: Intercept and modify the message pipeline at 12 strategic points
@@ -373,6 +373,10 @@ Agents are configured with:
 - Model identifier
 - Tool assignments
 - Optional temperature and max tokens
+- Optional max steps (default: 20) - controls how many tool calls the agent can make in sequence
+- Optional tool choice - control how the agent uses tools ('auto', 'required', 'none', or force specific tool)
+
+Agents use AI SDK v6's `ToolLoopAgent` internally, which automatically handles tool execution loops. The agent can call multiple tools in sequence up to the configured step limit, with each step representing one generation (text or tool call).
 
 Agents can also hand off conversations to other agents using the built-in `handoff_to_agent` tool.
 

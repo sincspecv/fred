@@ -1,4 +1,4 @@
-import { generateText, streamText, tool, ModelMessage, jsonSchema } from 'ai';
+import { ToolLoopAgent, stepCountIs, tool, ModelMessage, jsonSchema } from 'ai';
 import { AgentConfig, AgentMessage, AgentResponse } from './agent';
 import { AIProvider } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
@@ -22,8 +22,18 @@ function getSafeToolErrorMessage(toolId: string, error: unknown): string {
 }
 
 /**
- * Agent factory using Vercel AI SDK
+ * MCP client connection metrics
  */
+export interface MCPClientMetrics {
+  totalConnections: number;
+  activeConnections: number;
+  failedConnections: number;
+  closedConnections: number;
+  connectionsByAgent: Map<string, number>;
+  lastConnectionTime?: Date;
+  lastDisconnectionTime?: Date;
+}
+
 export class AgentFactory {
   private toolRegistry: ToolRegistry;
   private handoffHandler?: {
@@ -32,6 +42,14 @@ export class AgentFactory {
   };
   private mcpClients: Map<string, MCPClientImpl> = new Map(); // Track MCP clients per agent
   private tracer?: Tracer;
+  private metrics: MCPClientMetrics = {
+    totalConnections: 0,
+    activeConnections: 0,
+    failedConnections: 0,
+    closedConnections: 0,
+    connectionsByAgent: new Map(),
+  };
+  private shutdownHooksRegistered = false;
 
   constructor(toolRegistry: ToolRegistry, tracer?: Tracer) {
     this.toolRegistry = toolRegistry;
@@ -50,6 +68,120 @@ export class AgentFactory {
    */
   setHandoffHandler(handler: { getAgent: (id: string) => any; getAvailableAgents: () => string[] }): void {
     this.handoffHandler = handler;
+  }
+
+  /**
+   * Clean up MCP clients for a specific agent
+   * This should be called when an agent is removed to prevent memory leaks
+   */
+  async cleanupMCPClients(agentId: string): Promise<void> {
+    const keysToRemove: string[] = [];
+    
+    for (const [key, client] of this.mcpClients.entries()) {
+      if (key.startsWith(`${agentId}-`)) {
+        try {
+          await client.close();
+          this.metrics.closedConnections++;
+        } catch (error) {
+          console.error(`Error closing MCP client "${key}":`, error);
+        }
+        keysToRemove.push(key);
+      }
+    }
+    
+    // Remove closed clients from map
+    for (const key of keysToRemove) {
+      this.mcpClients.delete(key);
+    }
+    
+    // Update metrics
+    this.metrics.activeConnections = this.mcpClients.size;
+    this.metrics.connectionsByAgent.delete(agentId);
+    if (keysToRemove.length > 0) {
+      this.metrics.lastDisconnectionTime = new Date();
+    }
+  }
+
+  /**
+   * Clean up all MCP clients
+   * This should be called during shutdown to prevent resource leaks
+   */
+  async cleanupAllMCPClients(): Promise<void> {
+    const clients = Array.from(this.mcpClients.values());
+    const clientCount = clients.length;
+    this.mcpClients.clear();
+    
+    // Close all clients in parallel
+    const results = await Promise.allSettled(
+      clients.map(async (client) => {
+        try {
+          await client.close();
+          this.metrics.closedConnections++;
+        } catch (error) {
+          console.error('Error closing MCP client:', error);
+        }
+      })
+    );
+    
+    // Update metrics
+    this.metrics.activeConnections = 0;
+    this.metrics.lastDisconnectionTime = new Date();
+    
+    // Log cleanup summary
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    if (clientCount > 0) {
+      console.log(`[AgentFactory] Cleaned up ${successful}/${clientCount} MCP clients`);
+    }
+  }
+
+  /**
+   * Get MCP client connection metrics
+   */
+  getMCPMetrics(): MCPClientMetrics {
+    return {
+      ...this.metrics,
+      activeConnections: this.mcpClients.size,
+      connectionsByAgent: new Map(this.metrics.connectionsByAgent), // Return a copy
+    };
+  }
+
+  /**
+   * Register shutdown hooks for cleanup
+   * This should be called once during application initialization
+   */
+  registerShutdownHooks(): void {
+    if (this.shutdownHooksRegistered) {
+      return; // Already registered
+    }
+    
+    this.shutdownHooksRegistered = true;
+    
+    // Register cleanup on process exit signals
+    const cleanup = async () => {
+      try {
+        await this.cleanupAllMCPClients();
+      } catch (error) {
+        console.error('[AgentFactory] Error during shutdown cleanup:', error);
+      }
+    };
+    
+    // Handle graceful shutdown signals
+    if (typeof process !== 'undefined') {
+      process.on('SIGINT', async () => {
+        await cleanup();
+        process.exit(0);
+      });
+      
+      process.on('SIGTERM', async () => {
+        await cleanup();
+        process.exit(0);
+      });
+      
+      // Handle uncaught exceptions and unhandled rejections
+      process.on('beforeExit', async () => {
+        await cleanup();
+      });
+    }
   }
 
   /**
@@ -98,6 +230,13 @@ export class AgentFactory {
           const clientKey = `${config.id}-${mcpConfig.id}`;
           this.mcpClients.set(clientKey, mcpClient);
           
+          // Update metrics
+          this.metrics.totalConnections++;
+          this.metrics.activeConnections = this.mcpClients.size;
+          this.metrics.lastConnectionTime = new Date();
+          const agentConnections = this.metrics.connectionsByAgent.get(config.id) || 0;
+          this.metrics.connectionsByAgent.set(config.id, agentConnections + 1);
+          
           // Discover tools from MCP server
           const discoveredTools = await mcpClient.listTools();
           
@@ -114,6 +253,8 @@ export class AgentFactory {
             }
           }
         } catch (error) {
+          // Update metrics for failed connection
+          this.metrics.failedConnections++;
           // Log error but don't fail agent creation
           console.error(`Failed to initialize MCP server "${mcpConfig.id}":`, error);
           // Continue with other MCP servers
@@ -121,18 +262,22 @@ export class AgentFactory {
       }
     }
     
-    // Convert regular tools to AI SDK format with tracing
+    // Convert regular tools to AI SDK format with tracing and timeout
     const sdkTools: Record<string, any> = {};
+    const toolTimeout = config.toolTimeout ?? 300000; // Default: 5 minutes
+    
     for (const toolDef of tools) {
-      // Wrap tool execution with tracing
+      // Wrap tool execution with tracing and timeout
       const originalExecute = toolDef.execute;
       const tracedExecute = async (args: any) => {
+        const startTime = Date.now();
         const toolSpan = this.tracer?.startSpan('tool.execute', {
           kind: SpanKind.CLIENT,
           attributes: {
             'tool.id': toolDef.id,
             'tool.name': toolDef.name,
             'tool.args': JSON.stringify(args),
+            'tool.timeout': toolTimeout,
           },
         });
 
@@ -142,12 +287,25 @@ export class AgentFactory {
         }
 
         try {
-          const result = await originalExecute(args);
+          // Execute tool with timeout
+          const result = await Promise.race([
+            originalExecute(args),
+            new Promise<never>((_, reject) => {
+              setTimeout(() => {
+                const timeoutError = new Error(`Tool "${toolDef.id}" execution timed out after ${toolTimeout}ms`);
+                timeoutError.name = 'ToolTimeoutError';
+                reject(timeoutError);
+              }, toolTimeout);
+            }),
+          ]);
+          
+          const executionTime = Date.now() - startTime;
           
           if (toolSpan) {
             toolSpan.setAttributes({
               'tool.result.type': typeof result,
               'tool.result.hasValue': result !== undefined && result !== null,
+              'tool.executionTime': executionTime,
             });
             // Don't log full result if it's too large (could be sensitive data)
             if (typeof result === 'string' && result.length < 1000) {
@@ -158,10 +316,28 @@ export class AgentFactory {
           
           return result;
         } catch (error) {
-          if (toolSpan && error instanceof Error) {
-            toolSpan.recordException(error);
-            toolSpan.setStatus('error', error.message);
+          const executionTime = Date.now() - startTime;
+          
+          if (toolSpan) {
+            toolSpan.setAttribute('tool.executionTime', executionTime);
+            if (error instanceof Error) {
+              toolSpan.recordException(error);
+              const isTimeout = error.name === 'ToolTimeoutError';
+              toolSpan.setAttribute('tool.timedOut', isTimeout);
+              toolSpan.setStatus('error', error.message);
+            } else {
+              toolSpan.setStatus('error', 'Unknown error');
+            }
           }
+          
+          // Return safe error message for timeouts to prevent leaking internal details
+          if (error instanceof Error && error.name === 'ToolTimeoutError') {
+            // Log the actual error for debugging
+            console.error(`Tool execution timed out for "${toolDef.id}" after ${toolTimeout}ms`);
+            // Return a safe error message
+            throw new Error(`Tool "${toolDef.id}" execution timed out. Please try again or use a different approach.`);
+          }
+          
           throw error;
         } finally {
           if (toolSpan) {
@@ -179,30 +355,33 @@ export class AgentFactory {
       sdkTools[toolDef.id] = tool({
         description: toolDef.description,
         parameters: jsonSchema(toolDef.parameters),
-        execute: tracedExecute,
+        execute: tracedExecute as (args: Record<string, any>) => Promise<any>,
       });
     }
     
     // Merge MCP tools with regular tools
     Object.assign(sdkTools, mcpTools);
 
+    // Load system message (handle file paths for programmatic usage)
+    // Note: When loaded from config, paths are already resolved in extractAgents
+    // For programmatic usage, sandbox to current working directory and disallow absolute paths
+    const systemMessage = loadPromptFile(config.systemMessage, undefined, false);
+
+    // Create ToolLoopAgent instance
+    const agent = new ToolLoopAgent({
+      model,
+      instructions: systemMessage,
+      tools: Object.keys(sdkTools).length > 0 ? sdkTools : undefined,
+      stopWhen: stepCountIs(config.maxSteps ?? 20),
+      toolChoice: config.toolChoice,
+      temperature: config.temperature,
+    });
+
     // Create the agent processing function
     const processMessage = async (
       message: string,
       previousMessages: AgentMessage[] = []
     ): Promise<AgentResponse> => {
-      // Load system message (handle file paths for programmatic usage)
-      // Note: When loaded from config, paths are already resolved in extractAgents
-      // For programmatic usage, sandbox to current working directory and disallow absolute paths
-      const systemMessage = loadPromptFile(config.systemMessage, undefined, false);
-
-      // Generate response using AI SDK with tracing
-      // AgentMessage is now aligned with ModelMessage, so we can use it directly
-      const allMessages: ModelMessage[] = [
-        ...previousMessages,
-        { role: 'user', content: message },
-      ];
-      
       // Create span for model call if tracing is enabled
       const modelSpan = this.tracer?.startSpan('model.call', {
         kind: SpanKind.CLIENT,
@@ -214,6 +393,7 @@ export class AgentFactory {
           'model.maxTokens': config.maxTokens ?? 0,
           'message.length': message.length,
           'history.length': previousMessages.length,
+          'agent.maxSteps': config.maxSteps ?? 20,
         },
       });
 
@@ -224,24 +404,38 @@ export class AgentFactory {
 
       let result;
       try {
-        result = await generateText({
-          model,
-          system: systemMessage,
-          messages: allMessages,
-          tools: Object.keys(sdkTools).length > 0 ? sdkTools : undefined,
-          temperature: config.temperature,
-          maxTokens: config.maxTokens,
-        });
+        // Use ToolLoopAgent.generate() which handles the tool loop automatically
+        // Use messages if we have history, otherwise use prompt
+        // Note: maxTokens is not directly supported in generate(), it's set in the agent constructor
+        if (previousMessages.length > 0) {
+          result = await agent.generate({
+            messages: [
+              ...previousMessages,
+              { role: 'user', content: message },
+            ],
+          });
+        } else {
+          result = await agent.generate({
+            prompt: message,
+          });
+        }
 
         // Record model response attributes
         if (modelSpan) {
+          const usage = result.usage;
+          // Safely extract usage metrics (usage may have different shapes depending on provider)
+          const promptTokens = (usage && 'promptTokens' in usage && typeof usage.promptTokens === 'number') ? usage.promptTokens : 0;
+          const completionTokens = (usage && 'completionTokens' in usage && typeof usage.completionTokens === 'number') ? usage.completionTokens : 0;
+          const totalTokens = (usage && 'totalTokens' in usage && typeof usage.totalTokens === 'number') ? usage.totalTokens : 0;
+          
           modelSpan.setAttributes({
             'response.length': result.text.length,
             'response.finishReason': result.finishReason || 'unknown',
-            'usage.promptTokens': result.usage?.promptTokens ?? 0,
-            'usage.completionTokens': result.usage?.completionTokens ?? 0,
-            'usage.totalTokens': result.usage?.totalTokens ?? 0,
-            'toolCalls.count': result.toolCalls?.length ?? 0,
+            'usage.promptTokens': promptTokens,
+            'usage.completionTokens': completionTokens,
+            'usage.totalTokens': totalTokens,
+            'toolCalls.count': result.toolCalls ? (Array.isArray(result.toolCalls) ? result.toolCalls.length : 0) : 0,
+            'steps.count': result.steps ? (Array.isArray(result.steps) ? result.steps.length : 0) : 0,
           });
           modelSpan.setStatus('ok');
         }
@@ -264,15 +458,17 @@ export class AgentFactory {
       }
 
       // Extract tool calls if any
-      // The AI SDK's generateText should automatically execute tools and include results
-      // However, some providers may not populate results automatically, so we check and execute if needed
-      const toolCalls = result.toolCalls?.map(tc => ({
-        toolId: tc.toolName,
-        args: tc.args as Record<string, any>,
-        result: tc.result,
+      // ToolLoopAgent automatically executes tools and includes results
+      // Need to await toolCalls if it's a promise
+      const toolCallsArray = result.toolCalls ? await Promise.resolve(result.toolCalls) : [];
+      const toolCalls = toolCallsArray.map((tc: any) => ({
+        toolId: tc.toolName || tc.toolCallId || 'unknown',
+        args: ('args' in tc ? tc.args : {}) as Record<string, any>,
+        result: ('result' in tc ? tc.result : undefined),
       }));
 
       // Check for handoff tool calls
+      // Need to check all steps for handoff tool calls
       const handoffCall = toolCalls?.find(tc => tc.toolId === 'handoff_to_agent');
       if (handoffCall && handoffCall.result && typeof handoffCall.result === 'object' && 'type' in handoffCall.result && handoffCall.result.type === 'handoff') {
         // Return handoff result - will be processed by message pipeline
@@ -283,19 +479,7 @@ export class AgentFactory {
         } as AgentResponse & { handoff?: HandoffResult };
       }
 
-      // If there are tool calls with results, we need to continue the conversation
-      // The AI SDK automatically executes tools, so results are already in toolCalls[].result
-      // We need to add tool results to the conversation and continue
-      if (toolCalls && toolCalls.length > 0 && toolCalls.some(tc => tc.result !== undefined)) {
-        // Tool calls were executed and have results
-        // Return the response with tool calls - the caller should continue the conversation
-        // by calling processMessage again with an empty message, which will include tool results
-        return {
-          content: result.text, // May be empty if only tool calls were made
-          toolCalls,
-        };
-      }
-
+      // ToolLoopAgent handles the tool loop internally, so we just return the final result
       return {
         content: result.text,
         toolCalls,
@@ -307,139 +491,29 @@ export class AgentFactory {
       message: string,
       previousMessages: AgentMessage[] = []
     ): AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown> {
-      // Load system message
-      const systemMessage = loadPromptFile(config.systemMessage, undefined, false);
-
-      // Generate response using AI SDK with tracing
-      // AgentMessage is now aligned with ModelMessage, so we can use it directly
-      const allMessages: ModelMessage[] = [
-        ...previousMessages,
-        { role: 'user', content: message },
-      ];
+      // Use ToolLoopAgent.stream() which handles the tool loop automatically
+      // Use messages if we have history, otherwise use prompt (can't use both)
+      const streamResult = previousMessages.length > 0
+        ? await agent.stream({
+            messages: [
+              ...previousMessages,
+              { role: 'user', content: message },
+            ],
+          })
+        : await agent.stream({
+            prompt: message,
+          });
       
-      // Use streamText for streaming with AI SDK v6
-      // Enable includeRawChunks to access fullStream for more granular control
-      // This allows us to process raw provider chunks even if textStream is buffered
-      let stream;
-      try {
-        stream = await streamText({
-          model,
-          system: systemMessage,
-          messages: allMessages,
-          tools: Object.keys(sdkTools).length > 0 ? sdkTools : undefined,
-          temperature: config.temperature,
-          maxTokens: config.maxTokens,
-          // Enable raw chunks access for more granular streaming control (AI SDK v6)
-          includeRawChunks: true,
-        });
-      } catch (streamError) {
-        throw streamError;
-      }
+      const stream = streamResult;
 
       let fullText = '';
       let toolCalls: any[] | undefined;
       let hasYieldedText = false;
 
-      // Try using fullStream first for more granular chunks (AI SDK v6)
-      // fullStream provides access to raw provider chunks which may be smaller
-      // If fullStream is not available or doesn't work, fall back to textStream
-      let streamChunkCount = 0;
-      let usedFullStream = false;
-      
-      // Check if fullStream is available (when includeRawChunks is true)
-      if (stream.fullStream && typeof stream.fullStream[Symbol.asyncIterator] === 'function') {
-        try {
-          usedFullStream = true;
-          for await (const part of stream.fullStream) {
-            streamChunkCount++;
-            
-            // Extract text delta from fullStream parts (AI SDK v6)
-            // fullStream yields objects with type field - 'text' for text deltas
-            // We prioritize raw chunks as they may be smaller/more granular
-            let chunkText = '';
-            
-            // First, try to get raw chunks - these are the actual provider chunks
-            // and may be smaller than aggregated text deltas
-            // Type safety: We use type assertions here because AI SDK v6's fullStream
-            // types are not fully exported, but we validate the structure before use
-            if (part.type === 'raw' && 'rawValue' in part) {
-              // Raw chunks from provider (when includeRawChunks: true)
-              // These are the actual chunks from the provider API
-              const rawValue = (part as { rawValue?: unknown }).rawValue;
-              if (typeof rawValue === 'string') {
-                chunkText = rawValue;
-              } else if (rawValue && typeof rawValue === 'object' && rawValue !== null) {
-                // Raw value might be an object - try to extract text content
-                // For SSE streams, this might contain delta.content or similar
-                // Validate structure before accessing nested properties
-                const rawObj = rawValue as Record<string, unknown>;
-                if (Array.isArray(rawObj.choices) && rawObj.choices.length > 0) {
-                  const choice = rawObj.choices[0] as Record<string, unknown>;
-                  if (choice && typeof choice === 'object' && 'delta' in choice) {
-                    const delta = choice.delta as Record<string, unknown>;
-                    if (delta && typeof delta === 'object' && typeof delta.content === 'string') {
-                      chunkText = delta.content;
-                    }
-                  }
-                } else if (rawObj.delta && typeof rawObj.delta === 'object' && rawObj.delta !== null) {
-                  const delta = rawObj.delta as Record<string, unknown>;
-                  if (typeof delta.content === 'string') {
-                    chunkText = delta.content;
-                  }
-                } else if (typeof rawObj.content === 'string') {
-                  chunkText = rawObj.content;
-                }
-              }
-            } else if (part.type === 'text' && 'text' in part) {
-              // AI SDK v6: text deltas have type 'text' with a 'text' property
-              const textPart = part as { text?: unknown };
-              if (typeof textPart.text === 'string') {
-                chunkText = textPart.text;
-              }
-            } else if (part.type === 'text-delta') {
-              // Fallback for v5 compatibility or alternative format
-              const deltaPart = part as { textDelta?: unknown; delta?: unknown };
-              if (typeof deltaPart.textDelta === 'string') {
-                chunkText = deltaPart.textDelta;
-              } else if (typeof deltaPart.delta === 'string') {
-                chunkText = deltaPart.delta;
-              }
-            }
-            
-            // Validate chunk size before processing
-            const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB max chunk size
-            if (chunkText && chunkText.length > MAX_CHUNK_SIZE) {
-              console.warn(`[FACTORY] Warning: Chunk size (${chunkText.length} bytes) exceeds maximum (${MAX_CHUNK_SIZE} bytes). Truncating.`);
-              chunkText = chunkText.substring(0, MAX_CHUNK_SIZE);
-            }
-            
-            if (chunkText) {
-              hasYieldedText = true;
-              fullText += chunkText;
-              
-              yield {
-                textDelta: chunkText,
-                fullText,
-                toolCalls,
-              };
-            }
-          }
-        } catch (fullStreamError) {
-          console.warn('[FACTORY] Error reading fullStream, falling back to textStream:', fullStreamError);
-          usedFullStream = false;
-        }
-      }
-      
-      // Fall back to textStream if fullStream didn't work or wasn't available
-      if (!usedFullStream) {
-        if (!stream.textStream || typeof stream.textStream[Symbol.asyncIterator] !== 'function') {
-          throw new Error('streamText returned no textStream for streaming');
-        }
-        
+      // Stream text chunks from ToolLoopAgent
+      if (stream.textStream && typeof stream.textStream[Symbol.asyncIterator] === 'function') {
         try {
           for await (const chunk of stream.textStream) {
-            streamChunkCount++;
-            
             // Ensure chunk is a string and validate size
             const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB max chunk size
             let chunkText = typeof chunk === 'string' ? chunk : (chunk ? String(chunk) : '');
@@ -512,18 +586,28 @@ export class AgentFactory {
         fullText = resultText || fullText;
       }
 
-      // Handle tool calls
-      if (result.toolCalls && result.toolCalls.length > 0) {
+      // Handle tool calls from final result
+      // ToolLoopAgent automatically executes tools and includes results
+      // Need to await toolCalls if it's a promise
+      const toolCallsArray = result.toolCalls ? await Promise.resolve(result.toolCalls) : [];
+      if (toolCallsArray.length > 0) {
         // Map tool calls from result
-        toolCalls = result.toolCalls.map(tc => ({
-          toolId: tc.toolName,
-          args: tc.args as Record<string, any>,
-          result: tc.result,
+        toolCalls = toolCallsArray.map((tc: any) => ({
+          toolId: tc.toolName || tc.toolCallId || 'unknown',
+          args: ('args' in tc ? tc.args : {}) as Record<string, any>,
+          result: ('result' in tc ? tc.result : undefined),
         }));
         
         // If we have tool results but no text, yield the tool calls
-        // The caller (Fred's streamMessage) will handle continuation
-        if (toolCalls && toolCalls.length > 0) {
+        // The caller (Fred's streamMessage) will handle continuation if needed
+        if (toolCalls && toolCalls.length > 0 && !hasYieldedText) {
+          yield {
+            textDelta: '',
+            fullText,
+            toolCalls,
+          };
+        } else if (toolCalls && toolCalls.length > 0) {
+          // Yield tool calls with current text
           yield {
             textDelta: '',
             fullText,

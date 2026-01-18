@@ -34,6 +34,20 @@ export class AgentManager {
   }
 
   /**
+   * Get MCP client connection metrics
+   */
+  getMCPMetrics() {
+    return this.factory.getMCPMetrics();
+  }
+
+  /**
+   * Register shutdown hooks for MCP client cleanup
+   */
+  registerShutdownHooks(): void {
+    this.factory.registerShutdownHooks();
+  }
+
+  /**
    * Register an AI provider
    */
   registerProvider(platform: string, provider: AIProvider): void {
@@ -90,9 +104,15 @@ export class AgentManager {
 
   /**
    * Remove an agent
+   * Also cleans up associated MCP clients to prevent memory leaks
    */
-  removeAgent(id: string): boolean {
-    return this.agents.delete(id);
+  async removeAgent(id: string): Promise<boolean> {
+    const removed = this.agents.delete(id);
+    if (removed) {
+      // Clean up MCP clients for this agent
+      await this.factory.cleanupMCPClients(id);
+    }
+    return removed;
   }
 
   /**
@@ -104,9 +124,11 @@ export class AgentManager {
 
   /**
    * Clear all agents
+   * Also cleans up all MCP clients to prevent memory leaks
    */
-  clear(): void {
+  async clear(): Promise<void> {
     this.agents.clear();
+    await this.factory.cleanupAllMCPClients();
   }
 
   /**
