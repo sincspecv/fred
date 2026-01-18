@@ -1,13 +1,24 @@
 import { AIProvider } from '../../../src/core/platform/provider';
+import { LanguageModel } from 'ai';
 
 /**
  * Create a mock AI provider for testing
  */
-export function createMockProvider(): AIProvider {
+export function createMockProvider(platform: string = 'openai'): AIProvider {
+  // Create a minimal mock model that satisfies LanguageModel interface
+  const mockModel = {
+    provider: platform,
+    modelId: 'gpt-4',
+  } as LanguageModel;
+
   return {
-    // Return a mock model object
-    // The actual structure depends on AI SDK, but we just need it to be truthy
-    model: {} as any,
+    getModel: (modelId: string) => {
+      return {
+        ...mockModel,
+        modelId,
+      } as LanguageModel;
+    },
+    getPlatform: () => platform,
   };
 }
 
@@ -15,6 +26,6 @@ export function createMockProvider(): AIProvider {
  * Create a mock provider that can be used with AgentFactory
  * This provides a minimal implementation that won't cause errors
  */
-export function createMockAIProvider(): AIProvider {
-  return createMockProvider();
+export function createMockAIProvider(platform?: string): AIProvider {
+  return createMockProvider(platform);
 }

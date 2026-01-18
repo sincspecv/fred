@@ -1101,7 +1101,7 @@ export class Fred {
 // Export all types and classes
 export * from './core/intent/intent';
 export * from './core/agent/agent';
-export type { MCPClientMetrics } from './core/agent/factory';
+// Note: MCPClientMetrics can be imported directly from './core/agent/factory' if needed
 export * from './core/tool/tool';
 export * from './core/platform/provider';
 export * from './core/platform/openai';
