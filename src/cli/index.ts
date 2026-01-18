@@ -73,6 +73,7 @@ Usage:
 
 Commands:
   dev                     Start development chat interface with hot reload
+                          - If your project exports setup(fred) from src/index.(ts|js) or index.(ts|js), it will be executed before chat starts
   test                    Run golden trace tests
   test --record <message>  Record a new golden trace
   test --update            Update existing golden traces
