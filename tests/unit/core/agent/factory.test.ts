@@ -191,6 +191,7 @@ describe('AgentFactory', () => {
       const metrics = factory.getMCPMetrics();
       expect(metrics.activeConnections).toBe(0);
       expect(metrics.closedConnections).toBeGreaterThanOrEqual(0);
+      expect(metrics.connectionsByAgent).toEqual({}); // Should be cleared
     });
 
     test('should handle errors during MCP client cleanup gracefully', async () => {

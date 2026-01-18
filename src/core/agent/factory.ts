@@ -111,6 +111,8 @@ export class AgentFactory {
     const clients = Array.from(this.mcpClients.values());
     const clientCount = clients.length;
     this.mcpClients.clear();
+    // Also clear per-agent connection counts
+    this.metrics.connectionsByAgent.clear();
     
     // Close all clients in parallel
     const results = await Promise.allSettled(
