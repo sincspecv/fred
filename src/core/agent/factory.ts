@@ -36,6 +36,8 @@ export class AgentFactory {
   constructor(toolRegistry: ToolRegistry, tracer?: Tracer) {
     this.toolRegistry = toolRegistry;
     this.tracer = tracer;
+
+    console.log("Factory constructor");
   }
 
   /**
