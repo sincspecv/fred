@@ -65,8 +65,9 @@ export class AgentManager {
     const instance: AgentInstance = {
       id: config.id,
       config,
-      // Store the processor function
+      // Store the processor functions
       processMessage: agentProcessor.processMessage,
+      streamMessage: agentProcessor.streamMessage,
     } as AgentInstance;
 
     this.agents.set(config.id, instance);

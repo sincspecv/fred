@@ -915,13 +915,11 @@ export class Fred {
             toolCalls: chunk.toolCalls,
           };
         }
-      } catch (streamError) {
-        console.error('[DEBUG] Error in agent.streamMessage:', streamError);
-        throw streamError;
-      }
-      
-      if (!hasYieldedAnything) {
-        console.error('[DEBUG] agent.streamMessage did not yield any chunks');
+        } catch (streamError) {
+          throw streamError;
+        }
+
+        if (!hasYieldedAnything) {
       }
 
       // Add assistant response to context

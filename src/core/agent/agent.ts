@@ -56,6 +56,7 @@ export interface AgentInstance {
   id: string;
   config: AgentConfig;
   processMessage: (message: string, messages?: AgentMessage[]) => Promise<AgentResponse>;
+  streamMessage?: (message: string, messages?: AgentMessage[]) => AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown>;
 }
 
 /**
