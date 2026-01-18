@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "bun run src/dev-chat.ts",
     "server": "bun run src/server.ts",
-    "build": "bun build src/index.ts --outdir lib --target bun --format esm",
+    "build": "bun build src/index.ts --outdir lib --target bun --format esm --minify",
     "prepublishOnly": "bun run build",
     "test": "bun test",
     "test:unit": "bun test tests/unit",
