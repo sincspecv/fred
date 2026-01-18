@@ -187,9 +187,18 @@ bun run dev
 ```
 
 This starts a terminal chat interface that:
+- **Works out of the box** - No configuration needed! Automatically creates a temporary dev agent if none are configured
+- Automatically detects available AI providers from environment variables (e.g., `OPENAI_API_KEY`, `GROQ_API_KEY`)
+- Automatically installs required provider packages if missing (with user confirmation)
 - Automatically reloads when code changes (hot reload)
 - Maintains conversation context until terminal is closed
 - Works great for testing agents and intents during development
+
+**Zero-Config Experience:**
+- If no agents are configured, dev-chat automatically creates a temporary dev agent
+- Detects available providers from environment variables
+- Prompts to install missing provider packages if needed
+- Perfect for quick testing without setting up a full configuration
 
 Commands available in dev chat:
 - `exit` or `quit` - Exit the chat
@@ -403,14 +412,64 @@ Fred supports all official @ai-sdk providers out of the box:
 
 ## Environment Variables
 
-Set API keys for AI platforms:
+Set API keys for AI platforms. Fred supports all @ai-sdk providers and automatically detects available providers from environment variables.
 
-```bash
-export OPENAI_API_KEY=your_openai_key
-export GROQ_API_KEY=your_groq_key
-export ANTHROPIC_API_KEY=your_anthropic_key
-# ... and so on for other providers
+### Complete List of API Key Environment Variables
+
+Create a `.env` file in your project root with the API keys for the providers you want to use:
+
+```env
+# Core Providers
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+GOOGLE_GENERATIVE_AI_API_KEY=your_google_key
+
+# Fast & Cost-Effective Providers
+GROQ_API_KEY=your_groq_key
+MISTRAL_API_KEY=your_mistral_key
+DEEPSEEK_API_KEY=your_deepseek_key
+
+# Additional Providers
+COHERE_API_KEY=your_cohere_key
+FIREWORKS_API_KEY=your_fireworks_key
+XAI_API_KEY=your_xai_key
+PERPLEXITY_API_KEY=your_perplexity_key
+REPLICATE_API_KEY=your_replicate_key
+TOGETHER_API_KEY=your_together_key
+CEREBRAS_API_KEY=your_cerebras_key
+DEEPINFRA_API_KEY=your_deepinfra_key
+BASETEN_API_KEY=your_baseten_key
+
+# Voice & Specialized
+ELEVENLABS_API_KEY=your_elevenlabs_key
+
+# Cloud Services
+# Azure OpenAI/Anthropic (use @ai-sdk/azure)
+AZURE_OPENAI_API_KEY=your_azure_key
+AZURE_OPENAI_ENDPOINT=your_azure_endpoint
+# Or use resource-specific variables:
+# AZURE_OPENAI_RESOURCE_NAME=your_resource
+# AZURE_OPENAI_DEPLOYMENT_NAME=your_deployment
+
+# AWS Bedrock
+AWS_ACCESS_KEY_ID=your_aws_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret
+AWS_REGION=your_aws_region
+
+# Vercel AI Gateway (optional)
+AI_GATEWAY_API_KEY=your_vercel_gateway_key
+# Or use Vercel provider directly
+VERCEL_API_KEY=your_vercel_key
+
+# Local/Community Providers
+# Ollama (typically doesn't require API key, uses baseURL)
+# OLLAMA_BASE_URL=http://localhost:11434
 ```
+
+**Note**: 
+- You only need to add the API keys for the providers you want to use
+- Make sure `.env` is in your `.gitignore` to avoid committing secrets
+- For providers like Azure and AWS Bedrock, additional configuration may be required. See provider-specific documentation for details.
 
 Or use the `.useProvider()` syntax (accepts same parameters as AI SDK providers):
 
@@ -505,6 +564,8 @@ Available hook points: `beforeMessageReceived`, `afterMessageReceived`, `beforeI
 ## Default Agent & Global Context
 
 Fred supports a default agent that handles all unmatched messages, ensuring every message gets a response. Global context management maintains conversation history across all agents, making multi-agent conversations seamless.
+
+**Note**: In dev-chat mode (`bun run dev`), a temporary dev agent is automatically created if no agents are configured, so you can start testing immediately without setting up a default agent.
 
 ### Setting Up a Default Agent
 

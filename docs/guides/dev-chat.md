@@ -1,6 +1,6 @@
 # Development Chat
 
-Fred includes a development chat interface for quickly testing agents and intents during development.
+Fred includes a development chat interface for quickly testing agents and intents during development. **No configuration required** - dev-chat works out of the box!
 
 ## Starting Dev Chat
 
@@ -8,9 +8,33 @@ Fred includes a development chat interface for quickly testing agents and intent
 bun run dev
 ```
 
-This starts an interactive terminal chat interface with hot reload.
+This starts an interactive terminal chat interface with hot reload. Dev-chat automatically:
+- Detects available AI providers from environment variables
+- Creates a temporary dev agent if no agents are configured
+- Prompts to install missing provider packages if needed
+- Works immediately without any setup
 
 ## Features
+
+### Zero-Config Setup
+
+Dev-chat works immediately without any configuration:
+
+- **Auto-Detection**: Automatically detects available AI providers from environment variables
+- **Auto-Installation**: Prompts to install missing provider packages (e.g., `@ai-sdk/groq`)
+- **Auto-Agent Creation**: Creates a temporary dev agent if no agents are configured
+- **No Setup Required**: Just set an API key environment variable and run `bun run dev`
+
+Example:
+```bash
+# Set an API key
+export GROQ_API_KEY=your_key_here
+
+# Run dev-chat (works immediately!)
+bun run dev
+```
+
+If the required provider package isn't installed, dev-chat will prompt you to install it.
 
 ### Hot Reload
 
@@ -123,11 +147,67 @@ Changes trigger automatic reload with a 500ms debounce.
 
 ## Configuration
 
-The dev chat uses the same configuration as your application:
+The dev chat works in two modes:
 
-1. Loads config files automatically
+### Zero-Config Mode (No Setup Required)
+
+If no agents are configured, dev-chat automatically:
+1. Detects available AI providers from environment variables (see [API Key Environment Variables](#api-key-environment-variables) below)
+2. Prompts to install missing provider packages if needed
+3. Creates a temporary dev agent for testing
+4. Sets it as the default agent
+
+This allows you to start testing immediately without any configuration!
+
+#### API Key Environment Variables
+
+Dev-chat automatically detects providers from environment variables. Create a `.env` file in your project root:
+
+```env
+# Core Providers
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+GOOGLE_GENERATIVE_AI_API_KEY=your_google_key
+
+# Fast & Cost-Effective Providers
+GROQ_API_KEY=your_groq_key
+MISTRAL_API_KEY=your_mistral_key
+DEEPSEEK_API_KEY=your_deepseek_key
+
+# Additional Providers
+COHERE_API_KEY=your_cohere_key
+FIREWORKS_API_KEY=your_fireworks_key
+XAI_API_KEY=your_xai_key
+PERPLEXITY_API_KEY=your_perplexity_key
+REPLICATE_API_KEY=your_replicate_key
+TOGETHER_API_KEY=your_together_key
+CEREBRAS_API_KEY=your_cerebras_key
+DEEPINFRA_API_KEY=your_deepinfra_key
+BASETEN_API_KEY=your_baseten_key
+
+# Voice & Specialized
+ELEVENLABS_API_KEY=your_elevenlabs_key
+
+# Cloud Services
+AZURE_OPENAI_API_KEY=your_azure_key
+AZURE_OPENAI_ENDPOINT=your_azure_endpoint
+AWS_ACCESS_KEY_ID=your_aws_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret
+AWS_REGION=your_aws_region
+AI_GATEWAY_API_KEY=your_vercel_gateway_key
+VERCEL_API_KEY=your_vercel_key
+```
+
+You only need to add the API key for the provider you want to use. Dev-chat will automatically detect it and use it. Make sure `.env` is in your `.gitignore` to avoid committing secrets.
+
+### Configured Mode
+
+If you have a config file or agents defined in code:
+
+1. Loads config files automatically (`config.json`, `fred.config.json`, `config.yaml`, `fred.config.yaml`)
 2. Uses environment variables for API keys
 3. Registers default providers if no config
+4. Uses your defined agents instead of the temporary dev agent
 
 ## Best Practices
 
@@ -152,9 +232,10 @@ The dev chat uses the same configuration as your application:
 
 ### No Response
 
-- Ensure default agent is set
 - Check that providers are configured
-- Verify API keys are set
+- Verify API keys are set (e.g., `OPENAI_API_KEY`, `GROQ_API_KEY`)
+- If no agents are configured, dev-chat should auto-create a dev agent
+- Check console for error messages about provider registration or package installation
 
 ## Next Steps
 

@@ -160,11 +160,54 @@ await fred.initializeFromConfig('./my-config.json');
 
 ## Environment Variables
 
-Set API keys via environment variables:
+Set API keys via environment variables. Fred automatically detects available providers from environment variables.
 
-```bash
-export OPENAI_API_KEY=your_key
-export GROQ_API_KEY=your_key
+### Complete List of API Key Environment Variables
+
+Create a `.env` file in your project root with the API keys for the providers you want to use:
+
+```env
+# Core Providers
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+GOOGLE_GENERATIVE_AI_API_KEY=your_google_key
+
+# Fast & Cost-Effective Providers
+GROQ_API_KEY=your_groq_key
+MISTRAL_API_KEY=your_mistral_key
+DEEPSEEK_API_KEY=your_deepseek_key
+
+# Additional Providers
+COHERE_API_KEY=your_cohere_key
+FIREWORKS_API_KEY=your_fireworks_key
+XAI_API_KEY=your_xai_key
+PERPLEXITY_API_KEY=your_perplexity_key
+REPLICATE_API_KEY=your_replicate_key
+TOGETHER_API_KEY=your_together_key
+CEREBRAS_API_KEY=your_cerebras_key
+DEEPINFRA_API_KEY=your_deepinfra_key
+BASETEN_API_KEY=your_baseten_key
+
+# Voice & Specialized
+ELEVENLABS_API_KEY=your_elevenlabs_key
+
+# Cloud Services
+# Azure OpenAI/Anthropic (use @ai-sdk/azure)
+AZURE_OPENAI_API_KEY=your_azure_key
+AZURE_OPENAI_ENDPOINT=your_azure_endpoint
+
+# AWS Bedrock
+AWS_ACCESS_KEY_ID=your_aws_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret
+AWS_REGION=your_aws_region
+
+# Vercel AI Gateway (optional)
+AI_GATEWAY_API_KEY=your_vercel_gateway_key
+VERCEL_API_KEY=your_vercel_key
+
+# Local/Community Providers
+# Ollama (typically doesn't require API key, uses baseURL)
+# OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 Or in provider config:
@@ -174,6 +217,8 @@ await fred.useProvider('openai', {
   apiKey: process.env.OPENAI_API_KEY 
 });
 ```
+
+**Note**: You only need to set the API key for the provider(s) you want to use. Fred will automatically detect available providers from environment variables.
 
 ## Default Agent Configuration
 

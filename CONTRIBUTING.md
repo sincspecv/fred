@@ -17,6 +17,7 @@ Thank you for your interest in contributing to Fred! This document provides guid
 - [Flox](https://flox.dev/) (optional, but recommended for consistent environments)
 - Git
 - A code editor (VS Code, Cursor, etc.)
+- **API Keys**: At least one AI provider API key for testing (see [Environment Variables](#environment-variables) below)
 
 ### Development Setup
 
@@ -54,6 +55,17 @@ Flox provides a consistent, reproducible development environment:
    ```bash
    bun test
    ```
+
+6. **Set up environment variables** (optional, for testing dev-chat)
+   
+   Create a `.env` file in the project root with at least one API key:
+   ```env
+   GROQ_API_KEY=your_key_here
+   # Or OPENAI_API_KEY=your_key_here
+   # Or ANTHROPIC_API_KEY=your_key_here
+   ```
+   
+   See [Environment Variables](#environment-variables) section below for the complete list.
 
 #### Option 2: Manual Setup
 
@@ -97,6 +109,17 @@ If you prefer not to use Flox:
    ```bash
    bun test
    ```
+
+6. **Set up environment variables** (optional, for testing dev-chat)
+   
+   Create a `.env` file in the project root with at least one API key:
+   ```env
+   GROQ_API_KEY=your_key_here
+   # Or OPENAI_API_KEY=your_key_here
+   # Or ANTHROPIC_API_KEY=your_key_here
+   ```
+   
+   See [Environment Variables](#environment-variables) section below for the complete list.
 
 ## Development Workflow
 
@@ -367,6 +390,59 @@ If you're an AI agent working on this repository, please see [AGENTS.md](./AGENT
 - Always create a new branch when working through plans/to-dos
 - Follow existing code patterns
 - Update documentation appropriately
+
+## Environment Variables
+
+For testing dev-chat and running examples, you'll need at least one AI provider API key. Create a `.env` file in your project root:
+
+```env
+# Core Providers
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+GOOGLE_GENERATIVE_AI_API_KEY=your_google_key
+
+# Fast & Cost-Effective Providers
+GROQ_API_KEY=your_groq_key
+MISTRAL_API_KEY=your_mistral_key
+DEEPSEEK_API_KEY=your_deepseek_key
+
+# Additional Providers
+COHERE_API_KEY=your_cohere_key
+FIREWORKS_API_KEY=your_fireworks_key
+XAI_API_KEY=your_xai_key
+PERPLEXITY_API_KEY=your_perplexity_key
+REPLICATE_API_KEY=your_replicate_key
+TOGETHER_API_KEY=your_together_key
+CEREBRAS_API_KEY=your_cerebras_key
+DEEPINFRA_API_KEY=your_deepinfra_key
+BASETEN_API_KEY=your_baseten_key
+
+# Voice & Specialized
+ELEVENLABS_API_KEY=your_elevenlabs_key
+
+# Cloud Services
+# Azure OpenAI/Anthropic
+AZURE_OPENAI_API_KEY=your_azure_key
+AZURE_OPENAI_ENDPOINT=your_azure_endpoint
+
+# AWS Bedrock
+AWS_ACCESS_KEY_ID=your_aws_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret
+AWS_REGION=your_aws_region
+
+# Vercel AI Gateway (optional)
+AI_GATEWAY_API_KEY=your_vercel_gateway_key
+VERCEL_API_KEY=your_vercel_key
+
+# Local/Community Providers
+# Ollama (typically doesn't require API key, uses baseURL)
+# OLLAMA_BASE_URL=http://localhost:11434
+```
+
+**Note**: 
+- Dev-chat automatically detects available providers from environment variables
+- You only need to add the API key for the provider you want to use
+- Make sure `.env` is in your `.gitignore` to avoid committing secrets
 
 ## Questions?
 
