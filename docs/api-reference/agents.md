@@ -14,9 +14,13 @@ interface AgentConfig {
   utterances?: string[];         // Phrases for direct routing (bypasses intents)
   temperature?: number;          // Temperature (0-1)
   maxTokens?: number;            // Maximum tokens
+  maxSteps?: number;             // Maximum tool loop steps (default: 20)
+  toolChoice?: 'auto' | 'required' | 'none' | { type: 'tool'; toolName: string }; // Tool usage control
   mcpServers?: MCPServerConfig[]; // MCP servers to connect to
 }
 ```
+
+**Note**: Fred uses AI SDK v6's `ToolLoopAgent` internally, which automatically handles tool execution loops. The `maxSteps` option controls how many steps the agent can take (each step is one generation: text or tool call). The `toolChoice` option controls how the agent uses available tools.
 
 ## MCPServerConfig
 

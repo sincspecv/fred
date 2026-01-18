@@ -121,17 +121,17 @@ describe('AgentManager', () => {
   });
 
   describe('removeAgent', () => {
-    test('should remove existing agent', () => {
+    test('should remove existing agent', async () => {
       const agent = createMockAgent('test-agent');
       manager['agents'].set('test-agent', agent);
 
-      const removed = manager.removeAgent('test-agent');
+      const removed = await manager.removeAgent('test-agent');
       expect(removed).toBe(true);
       expect(manager.hasAgent('test-agent')).toBe(false);
     });
 
-    test('should return false when removing non-existent agent', () => {
-      const removed = manager.removeAgent('nonexistent');
+    test('should return false when removing non-existent agent', async () => {
+      const removed = await manager.removeAgent('nonexistent');
       expect(removed).toBe(false);
     });
   });
@@ -160,11 +160,11 @@ describe('AgentManager', () => {
   });
 
   describe('clear', () => {
-    test('should clear all agents', () => {
+    test('should clear all agents', async () => {
       manager['agents'].set('agent-1', createMockAgent('agent-1'));
       manager['agents'].set('agent-2', createMockAgent('agent-2'));
 
-      manager.clear();
+      await manager.clear();
 
       expect(manager.getAllAgents()).toHaveLength(0);
     });

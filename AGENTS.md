@@ -21,17 +21,23 @@ This document provides guidelines and instructions for AI agents working on the 
   });
   ```
 
-- **Text Generation**: Use `generateText()` from `ai` package
+- **Agent Creation**: Use `ToolLoopAgent` from `ai` package for agent implementation
   ```typescript
-  import { generateText } from 'ai';
+  import { ToolLoopAgent, stepCountIs } from 'ai';
   
-  const result = await generateText({
+  const agent = new ToolLoopAgent({
     model,
-    system: systemMessage,
-    messages: allMessages,
+    instructions: systemMessage,
     tools: sdkTools,
+    stopWhen: stepCountIs(maxSteps ?? 20),
+    toolChoice: toolChoice,
   });
+  
+  // Use agent.generate() or agent.stream() for processing
+  const result = await agent.generate({ prompt: message, messages: previousMessages });
   ```
+  
+  **Note**: Fred uses `ToolLoopAgent` internally, which automatically handles tool execution loops. This replaces the previous manual `generateText()`/`streamText()` approach.
 
 - **Message Format**: Use `ModelMessage` type from `ai` package
   ```typescript
@@ -374,7 +380,7 @@ fred.registerDefaultProviders();
 
 ```typescript
 // AI SDK
-import { tool, jsonSchema, generateText, ModelMessage } from 'ai';
+import { ToolLoopAgent, stepCountIs, tool, jsonSchema, ModelMessage } from 'ai';
 
 // Fred Core
 import { AgentConfig, AgentInstance } from './agent';

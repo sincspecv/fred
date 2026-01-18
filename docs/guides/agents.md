@@ -49,8 +49,26 @@ await fred.createAgent({
   utterances: ['write', 'story', 'creative'], // Optional: direct routing
   temperature: 0.8,      // Creativity level (0-1)
   maxTokens: 2000,       // Maximum response length
+  maxSteps: 20,         // Optional: Maximum tool loop steps (default: 20)
+  toolChoice: 'auto',    // Optional: 'auto' | 'required' | 'none' | { type: 'tool'; toolName: string }
 });
 ```
+
+#### Tool Loop Configuration
+
+Fred uses AI SDK v6's `ToolLoopAgent` internally, which automatically manages tool execution loops. The agent can call multiple tools in sequence:
+
+- **maxSteps** (optional, default: 20): Maximum number of steps in the agent loop. Each step represents one generation (text or tool call). The loop continues until:
+  - A finish reason other than tool-calls is returned
+  - A tool that is invoked does not have an execute function
+  - A tool call needs approval
+  - The step limit is reached
+
+- **toolChoice** (optional, default: 'auto'): Controls how the agent uses tools:
+  - `'auto'`: Let the model decide when to use tools (default)
+  - `'required'`: Force the agent to use at least one tool
+  - `'none'`: Disable tool usage
+  - `{ type: 'tool'; toolName: string }`: Force the use of a specific tool
 
 ### Agent-Level Utterances
 
@@ -208,6 +226,28 @@ const response = await agent.processMessage('Calculate 10 * 5');
 
 console.log(response.content);  // "The result is 50"
 console.log(response.toolCalls); // Array of tool calls if any
+```
+
+## Tool Loop Management
+
+Fred uses AI SDK v6's `ToolLoopAgent` internally, which automatically manages tool execution loops. This means:
+
+- **Automatic Tool Execution**: When an agent calls a tool, the tool is automatically executed and the result is fed back to the agent
+- **Multi-Step Tool Calls**: Agents can call multiple tools in sequence up to the configured `maxSteps` limit
+- **No Manual Continuation**: You don't need to manually handle tool call continuation - the ToolLoopAgent handles it automatically
+- **Step Limit**: By default, agents can take up to 20 steps (configurable via `maxSteps`). Each step is one generation (text or tool call)
+
+Example of multi-step tool usage:
+
+```typescript
+// Agent can call multiple tools in sequence automatically
+const response = await agent.processMessage('Get the weather in NYC, then convert the temperature to Celsius');
+// The agent will:
+// 1. Call weather tool
+// 2. Get result
+// 3. Call conversion tool with the temperature
+// 4. Return final response
+// All handled automatically by ToolLoopAgent
 ```
 
 ## Dynamic Agent Handoff

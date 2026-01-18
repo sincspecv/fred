@@ -1,7 +1,7 @@
 import { Intent, Action } from './core/intent/intent';
 import { IntentMatcher } from './core/intent/matcher';
 import { IntentRouter } from './core/intent/router';
-import { AgentConfig, AgentInstance, AgentResponse } from './core/agent/agent';
+import { AgentConfig, AgentInstance, AgentResponse, AgentMessage } from './core/agent/agent';
 import { AgentManager } from './core/agent/manager';
 import { PipelineConfig, PipelineInstance } from './core/pipeline';
 import { PipelineManager } from './core/pipeline/manager';
@@ -52,6 +52,9 @@ export class Fred {
     if (this.tracer) {
       this.hookManager.setTracer(this.tracer);
     }
+    
+    // Register shutdown hooks for MCP client cleanup
+    this.agentManager.registerShutdownHooks();
   }
 
   /**
@@ -694,7 +697,9 @@ export class Fred {
         rootSpan.setStatus('ok');
       }
 
-      // Handle tool calls: if there are tool calls with results, add them to context and continue conversation
+      // Handle tool calls: add them to context for persistence
+      // Note: ToolLoopAgent handles the tool loop internally, so we don't need to continue
+      // the conversation manually. The response is already the final response after all tool calls.
       if (currentResponse.toolCalls && currentResponse.toolCalls.length > 0) {
         const hasToolResults = currentResponse.toolCalls.some(tc => tc.result !== undefined);
         
@@ -725,58 +730,6 @@ export class Fred {
                 toolCallId,
               };
               await this.contextManager.addMessage(conversationId, toolResultMessage);
-            }
-          }
-
-          // If there's no content response, continue the conversation automatically
-          // This allows the agent to respond to the tool results
-          if (!currentResponse.content || currentResponse.content.trim() === '') {
-            // Use the agent that generated the original response
-            let agent = null;
-            
-            if (usedAgentId) {
-              agent = this.agentManager.getAgent(usedAgentId);
-            } else if (this.defaultAgentId) {
-              // Fallback to default agent if we couldn't track the original agent
-              agent = this.agentManager.getAgent(this.defaultAgentId);
-            }
-            
-            if (agent) {
-              // Get updated conversation history with tool results
-              // Since AgentMessage is now ModelMessage, we can pass the history directly
-              // The AI SDK will handle tool messages properly
-              const updatedHistory = await this.contextManager.getHistory(conversationId);
-              
-              // Filter to messages that should be passed to the agent
-              // Include user, assistant, and tool messages (AI SDK handles tool messages)
-              const updatedPreviousMessages: AgentMessage[] = updatedHistory.filter(
-                msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
-              ) as AgentMessage[];
-
-              // Continue conversation with empty message to get agent's response to tool results
-              // The agent will see the tool results in the conversation history
-              const continuedResponse = await agent.processMessage('', updatedPreviousMessages);
-              
-              // Add the continued response to context
-              const continuedAssistantMessage: ModelMessage = {
-                role: 'assistant',
-                content: continuedResponse.content,
-              };
-              await this.contextManager.addMessage(conversationId, continuedAssistantMessage);
-
-              // Merge tool calls from continued response if any
-              if (continuedResponse.toolCalls) {
-                currentResponse.toolCalls = [
-                  ...(currentResponse.toolCalls || []),
-                  ...continuedResponse.toolCalls,
-                ];
-              }
-
-              // Return the continued response with merged tool calls
-              return {
-                ...continuedResponse,
-                toolCalls: currentResponse.toolCalls,
-              };
             }
           }
         }
@@ -961,41 +914,9 @@ export class Fred {
             }
           }
 
-          // Continue streaming if no content was generated after tool execution
-          if (!fullText || fullText.trim() === '') {
-            const updatedHistory = await this.contextManager.getHistory(conversationId);
-            
-            // Since AgentMessage is now ModelMessage, we can pass the history directly
-            // Include user, assistant, and tool messages (AI SDK handles tool messages)
-            const updatedPreviousMessages: AgentMessage[] = updatedHistory.filter(
-              msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
-            ) as AgentMessage[];
-
-            // Continue streaming with tool results - send empty message to get agent's response
-            if (agent.streamMessage) {
-              let continuationFullText = '';
-              for await (const chunk of agent.streamMessage('', updatedPreviousMessages)) {
-                continuationFullText = chunk.fullText;
-                yield {
-                  textDelta: chunk.textDelta,
-                  fullText: continuationFullText,
-                  toolCalls: chunk.toolCalls,
-                };
-              }
-              
-              // Update fullText with continuation result
-              fullText = continuationFullText;
-              
-              // Add continuation response to context
-              if (continuationFullText) {
-                const continuationMessage: ModelMessage = {
-                  role: 'assistant',
-                  content: continuationFullText,
-                };
-                await this.contextManager.addMessage(conversationId, continuationMessage);
-              }
-            }
-          }
+          // Note: ToolLoopAgent handles the tool loop internally, so we don't need to continue
+          // streaming if there's no content. The ToolLoopAgent already handled that and the
+          // fullText should already contain the final response after all tool calls.
         }
       }
     } else {
@@ -1180,6 +1101,7 @@ export class Fred {
 // Export all types and classes
 export * from './core/intent/intent';
 export * from './core/agent/agent';
+export type { MCPClientMetrics } from './core/agent/factory';
 export * from './core/tool/tool';
 export * from './core/platform/provider';
 export * from './core/platform/openai';
