@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
 
 import { Fred } from './index';
-import { resolve, join, relative } from 'path';
-import { existsSync, readFileSync, writeFileSync, statSync } from 'fs';
+import { resolve, join } from 'path';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
-import { watch } from 'fs/promises';
-import { readdir } from 'fs/promises';
+import chokidar from 'chokidar';
 
 /**
  * Development chat interface with hot reload
@@ -17,7 +16,7 @@ let conversationId: string;
 let isReloading = false;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 let isWaitingForInput = false;
-let fileWatchers: AbortController[] = [];
+let fileWatcher: chokidar.FSWatcher | null = null;
 
 /**
  * Detect available AI provider from environment variables
@@ -540,177 +539,38 @@ async function initializeFred() {
 }
 
 /**
- * Check if a file path should be ignored
+ * Watch for file changes and reload using chokidar
  */
-function shouldIgnoreFile(filePath: string): boolean {
-  const normalizedPath = filePath.replace(/\\/g, '/');
-  return (
-    normalizedPath.includes('node_modules') ||
-    normalizedPath.includes('.git') ||
-    normalizedPath.includes('dist') ||
-    normalizedPath.includes('lib') ||
-    normalizedPath.includes('.log') ||
-    normalizedPath.endsWith('.swp') ||
-    normalizedPath.endsWith('.tmp') ||
-    normalizedPath.includes('.DS_Store')
-  );
-}
-
-/**
- * Track which directories are being watched to avoid duplicates
- */
-const watchedDirs = new Set<string>();
-
-/**
- * Recursively scan and watch a directory tree (following Chokidar's pattern)
- * This ensures existing subdirectories are watched immediately
- */
-async function scanAndWatchDirectory(dirPath: string, abortController: AbortController, maxDepth: number = 50, currentDepth: number = 0): Promise<void> {
-  const normalizedPath = resolve(dirPath);
-  
-  // Skip if already watching or too deep
-  if (watchedDirs.has(normalizedPath) || currentDepth >= maxDepth) {
-    return;
-  }
-  
-  // Skip ignored directories
-  if (shouldIgnoreFile(normalizedPath)) {
-    return;
-  }
-  
-  try {
-    // Start watching this directory
-    await watchDirectory(normalizedPath, abortController);
-    
-    // Scan subdirectories and watch them too (initial scan pattern from Chokidar)
+function setupFileWatcher() {
+  // Prevent memory leak: close existing watcher if one exists
+  if (fileWatcher) {
     try {
-      const entries = await readdir(normalizedPath, { withFileTypes: true });
-      
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const subdirPath = join(normalizedPath, entry.name);
-          
-          // Recursively watch subdirectories
-          const subAbortController = new AbortController();
-          fileWatchers.push(subAbortController);
-          await scanAndWatchDirectory(subdirPath, subAbortController, maxDepth, currentDepth + 1);
-        }
-      }
-    } catch (error) {
-      // Permission errors or other issues - just skip this directory's children
+      fileWatcher.close();
+    } catch {
+      // Ignore errors when closing existing watcher
     }
-  } catch (error) {
-    // Ignore errors during directory scanning
+    fileWatcher = null;
   }
-}
 
-/**
- * Start watching a directory (only if not already watched)
- * Returns true if a new watcher was created, false if already watching
- */
-async function watchDirectory(dirPath: string, abortController: AbortController): Promise<boolean> {
-  // Normalize path to avoid duplicates
-  const normalizedPath = resolve(dirPath);
-  
-  if (watchedDirs.has(normalizedPath)) {
-    return false; // Already watching
-  }
-  
-  watchedDirs.add(normalizedPath);
-  
-  // Start watching in background
-  (async () => {
-    try {
-      const watcher = watch(normalizedPath, {
-        recursive: false,
-        signal: abortController.signal,
-      });
-
-      for await (const event of watcher) {
-        const filename = event.filename;
-        
-        if (!filename) {
-          continue;
-        }
-
-        const absolutePath = resolve(normalizedPath, filename);
-        const relativePath = relative(process.cwd(), absolutePath);
-
-        // Check if a new directory was created (dynamic watching pattern from Chokidar)
-        if (event.eventType === 'rename') {
-          try {
-            const stats = statSync(absolutePath);
-            if (stats.isDirectory() && !shouldIgnoreFile(absolutePath)) {
-              // New directory created - scan and watch it (including existing contents)
-              // This follows Chokidar's pattern of immediately scanning new directories
-              const newAbortController = new AbortController();
-              fileWatchers.push(newAbortController);
-              
-              // Scan the new directory to watch existing subdirectories too
-              await scanAndWatchDirectory(absolutePath, newAbortController);
-              continue; // Don't trigger reload for directory creation
-            }
-          } catch {
-            // File might have been deleted, continue to check if it's a file change
-          }
-        }
-
-        // Check if file should be ignored
-        if (shouldIgnoreFile(absolutePath) || shouldIgnoreFile(relativePath)) {
-          continue;
-        }
-
-        // Handle both 'change' and 'rename' events for file modifications
-        // File saves often trigger 'rename' events, especially with editors that use atomic writes
-        if (event.eventType === 'change' || event.eventType === 'rename') {
-          // For 'rename' events, verify it's actually a file (not a directory)
-          if (event.eventType === 'rename') {
-            try {
-              const stats = statSync(absolutePath);
-              if (stats.isDirectory()) {
-                continue; // Already handled above
-              }
-            } catch {
-              // File might have been deleted, but still trigger reload in case it was a save
-            }
-          }
-
-          if (reloadTimer) {
-            clearTimeout(reloadTimer);
-          }
-
-          reloadTimer = setTimeout(() => {
-            if (!isWaitingForInput) {
-              initializeFred();
-            }
-          }, 300);
-        }
-      }
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        console.error(`File watcher error for ${normalizedPath}:`, error.message || error);
-      }
-      watchedDirs.delete(normalizedPath);
-    }
-  })();
-  
-  return true;
-}
-
-/**
- * Watch for file changes and reload using fs.promises.watch
- */
-async function setupFileWatcher() {
+  const projectRoot = process.cwd();
   const watchPaths = [
-    resolve(process.cwd(), 'src'),
-    resolve(process.cwd(), 'config.json'),
-    resolve(process.cwd(), 'fred.config.json'),
-    resolve(process.cwd(), 'config.yaml'),
-    resolve(process.cwd(), 'fred.config.yaml'),
+    resolve(projectRoot, 'src'),
+    resolve(projectRoot, 'config.json'),
+    resolve(projectRoot, 'fred.config.json'),
+    resolve(projectRoot, 'config.yaml'),
+    resolve(projectRoot, 'fred.config.yaml'),
   ];
 
-  // Filter to only existing paths
-  const existingPaths = watchPaths.filter(p => existsSync(p));
+  // Filter to only existing paths and validate they're within project root
+  const existingPaths = watchPaths.filter(p => {
+    if (!existsSync(p)) {
+      return false;
+    }
+    // Security: Ensure path is within project root (prevent path traversal)
+    const normalizedPath = resolve(p);
+    const normalizedRoot = resolve(projectRoot);
+    return normalizedPath.startsWith(normalizedRoot + '/') || normalizedPath === normalizedRoot;
+  });
   
   if (existingPaths.length === 0) {
     console.warn('⚠️  No paths to watch found. File watching disabled.');
@@ -719,92 +579,69 @@ async function setupFileWatcher() {
 
   console.log(`👀 Watching ${existingPaths.length} path(s) for changes...`);
 
-  // Detect if we're on Linux (where recursive watching may not work reliably)
-  const isLinux = process.platform === 'linux';
-  
-  // Use fs.promises.watch for each path
-  for (const watchPath of existingPaths) {
-    try {
-      // Check if it's a directory
-      const isDirectory = existsSync(watchPath) && statSync(watchPath).isDirectory();
-      
-      if (isDirectory && isLinux) {
-        // On Linux, use hybrid approach (following Chokidar's pattern):
-        // 1. Initial scan: Watch existing subdirectories immediately
-        // 2. Dynamic watching: Add watchers for new directories as they're created
-        // This balances memory efficiency with immediate coverage
-        const abortController = new AbortController();
-        fileWatchers.push(abortController);
-        await scanAndWatchDirectory(watchPath, abortController);
-      } else {
-        // For files or non-Linux platforms, use recursive watching
-        const abortController = new AbortController();
-        fileWatchers.push(abortController);
+  // Use chokidar to watch all paths
+  fileWatcher = chokidar.watch(existingPaths, {
+    ignored: [
+      /node_modules/,
+      /\.git/,
+      /dist/,
+      /lib/,
+      /\.log$/,
+      /\.swp$/,
+      /\.tmp$/,
+      /\.DS_Store/,
+      // Additional security: ignore common system and backup files
+      /\.bak$/,
+      /\.backup$/,
+      /\.orig$/,
+      /\.pid$/,
+      /\.lock$/,
+      /\.cache/,
+      /\.vscode/,
+      /\.idea/,
+    ],
+    persistent: true,
+    ignoreInitial: true, // Don't trigger on initial scan
+    depth: 50, // Limit recursion depth to prevent resource exhaustion
+    awaitWriteFinish: {
+      stabilityThreshold: 100, // Wait 100ms after file stops changing
+      pollInterval: 50,
+    },
+  });
 
-        // Start watching in background
-        (async () => {
-          try {
-            const watcher = watch(watchPath, {
-              recursive: isDirectory, // Only recursive for directories
-              signal: abortController.signal,
-            });
-
-            for await (const event of watcher) {
-              // event has { eventType: 'rename' | 'change', filename: string | null }
-              const filename = event.filename;
-              
-              if (!filename) {
-                continue;
-              }
-
-              // Resolve to absolute path for consistent filtering
-              const absolutePath = resolve(watchPath, filename);
-              const relativePath = relative(process.cwd(), absolutePath);
-
-              // Ignore irrelevant files
-              if (shouldIgnoreFile(absolutePath) || shouldIgnoreFile(relativePath)) {
-                continue;
-              }
-
-              // Handle both 'change' and 'rename' events for file modifications
-              // File saves often trigger 'rename' events, especially with editors that use atomic writes
-              if (event.eventType === 'change' || event.eventType === 'rename') {
-                // For 'rename' events, verify it's actually a file (not a directory)
-                if (event.eventType === 'rename') {
-                  try {
-                    const stats = statSync(absolutePath);
-                    if (stats.isDirectory()) {
-                      continue; // Skip directories
-                    }
-                  } catch {
-                    // File might have been deleted, but still trigger reload in case it was a save
-                  }
-                }
-
-                // Debounce reloads to avoid multiple rapid reloads
-                if (reloadTimer) {
-                  clearTimeout(reloadTimer);
-                }
-
-                reloadTimer = setTimeout(() => {
-                  if (!isWaitingForInput) {
-                    initializeFred();
-                  }
-                }, 300);
-              }
-            }
-          } catch (error: any) {
-            // AbortError is expected when watcher is closed
-            if (error.name !== 'AbortError') {
-              console.error(`File watcher error for ${watchPath}:`, error.message || error);
-            }
-          }
-        })();
-      }
-    } catch (error: any) {
-      console.error(`Failed to set up watcher for ${watchPath}:`, error.message || error);
+  fileWatcher.on('change', (path) => {
+    // Additional security: validate path is still within project root
+    const normalizedPath = resolve(path);
+    const normalizedRoot = resolve(projectRoot);
+    if (!normalizedPath.startsWith(normalizedRoot + '/') && normalizedPath !== normalizedRoot) {
+      // Path outside project root - ignore
+      return;
     }
-  }
+
+    // Debounce reloads to avoid multiple rapid reloads
+    if (reloadTimer) {
+      clearTimeout(reloadTimer);
+    }
+
+    reloadTimer = setTimeout(() => {
+      if (!isWaitingForInput) {
+        initializeFred();
+      }
+    }, 300);
+  });
+
+  fileWatcher.on('error', (error) => {
+    console.error('File watcher error:', error);
+    // On error, cleanup watcher to prevent resource leaks
+    if (fileWatcher) {
+      try {
+        fileWatcher.close();
+      } catch {
+        // Ignore cleanup errors
+      }
+      fileWatcher = null;
+    }
+  });
 }
 
 /**
@@ -1190,17 +1027,17 @@ async function startChat() {
 }
 
 /**
- * Cleanup file watchers
+ * Cleanup file watcher
  */
-function cleanupWatchers() {
-  for (const controller of fileWatchers) {
+function cleanupWatcher() {
+  if (fileWatcher) {
     try {
-      controller.abort();
+      fileWatcher.close();
     } catch {
       // Ignore errors during cleanup
     }
+    fileWatcher = null;
   }
-  fileWatchers = [];
 }
 
 /**
@@ -1208,16 +1045,16 @@ function cleanupWatchers() {
  */
 async function main() {
   // Setup file watcher for hot reload
-  await setupFileWatcher();
+  setupFileWatcher();
   
-  // Cleanup watchers on exit
+  // Cleanup watcher on exit
   process.on('SIGINT', () => {
-    cleanupWatchers();
+    cleanupWatcher();
     process.exit(0);
   });
   
   process.on('SIGTERM', () => {
-    cleanupWatchers();
+    cleanupWatcher();
     process.exit(0);
   });
   
