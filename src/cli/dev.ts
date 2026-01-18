@@ -7,6 +7,7 @@
 
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { pathToFileURL } from 'url';
 import { Fred } from '../index';
 import { startDevChat } from '../dev-chat';
 
@@ -27,7 +28,7 @@ async function loadProjectSetup(fred: Fred): Promise<void> {
       try {
         // Dynamically import the project's index file
         // Bun natively supports TypeScript imports, so we can import .ts files directly
-        const projectModule = await import(indexPath);
+        const projectModule = await import(pathToFileURL(indexPath).href);
         
         // Check if setup function is exported
         if (typeof projectModule.setup === 'function') {
