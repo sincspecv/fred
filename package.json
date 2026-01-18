@@ -47,8 +47,7 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/bun": "latest",
-    "@ai-sdk/groq": "^3.0.10"
+    "@types/bun": "latest"
   },
   "peerDependencies": {
     "@ai-sdk/openai": "^3.0.0",
