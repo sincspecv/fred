@@ -23,6 +23,7 @@ export interface Tool {
     required?: string[];
   };
   execute: (args: Record<string, any>) => Promise<any> | any;
+  strict?: boolean; // Enable strict validation (AI SDK v6 feature) - only defined properties allowed
 }
 
 /**

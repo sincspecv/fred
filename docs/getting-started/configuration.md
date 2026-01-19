@@ -66,7 +66,8 @@ Create `config.json`:
           "b": { "type": "number" }
         },
         "required": ["operation", "a", "b"]
-      }
+      },
+      "strict": false
     }
   ]
 }
@@ -123,6 +124,7 @@ tools:
         - operation
         - a
         - b
+    strict: false  # Optional: Enable strict validation (AI SDK v6)
 ```
 
 ### Loading Config

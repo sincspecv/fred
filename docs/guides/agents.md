@@ -25,6 +25,7 @@ fred.registerTool({
   description: 'Perform arithmetic',
   parameters: { /* ... */ },
   execute: async (args) => { /* ... */ },
+  strict: false, // Optional: Enable strict validation (default: false)
 });
 
 // Create agent with tools

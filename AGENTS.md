@@ -16,8 +16,9 @@ This document provides guidelines and instructions for AI agents working on the 
   
   const aiSdkTool = tool({
     description: toolDef.description,
-    parameters: jsonSchema(toolDef.parameters),
+    inputSchema: jsonSchema(toolDef.parameters), // Use inputSchema for AI SDK v6
     execute: toolDef.execute,
+    strict: toolDef.strict, // Optional: Enable strict validation (AI SDK v6)
   });
   ```
 
@@ -238,6 +239,7 @@ interface Tool {
   description: string;
   parameters: { /* schema */ };
   execute: (args: any) => Promise<any>;
+  strict?: boolean; // Optional: Enable strict validation (AI SDK v6)
 }
 
 // 2. Register in ToolRegistry
@@ -246,8 +248,9 @@ toolRegistry.registerTool(tool);
 // 3. Convert to AI SDK format when creating agent
 const sdkTool = tool({
   description: tool.description,
-  parameters: jsonSchema(tool.parameters),
+  inputSchema: jsonSchema(tool.parameters), // Use inputSchema for AI SDK v6
   execute: tool.execute,
+  strict: tool.strict, // Optional: Enable strict validation
 });
 ```
 
@@ -258,18 +261,20 @@ const sdkTool = tool({
 const sdkTools: Record<string, any> = {};
 for (const toolDef of tools) {
   sdkTools[toolDef.id] = tool({
+    name: toolDef.name || toolDef.id,
     description: toolDef.description,
-    parameters: jsonSchema(toolDef.parameters),
+    inputSchema: jsonSchema(toolDef.parameters), // Use inputSchema for AI SDK v6
     execute: toolDef.execute,
+    strict: toolDef.strict, // Optional: Enable strict validation (AI SDK v6)
   });
 }
 
-// Use with generateText
-const result = await generateText({
+// Use with ToolLoopAgent (AI SDK v6)
+const agent = new ToolLoopAgent({
   model,
-  system: systemMessage,
-  messages: allMessages,
+  instructions: systemMessage,
   tools: Object.keys(sdkTools).length > 0 ? sdkTools : undefined,
+  stopWhen: stepCountIs(maxSteps ?? 20),
 });
 ```
 
@@ -291,10 +296,11 @@ import { tool, jsonSchema } from 'ai';
 // Convert MCP tool to AI SDK tool
 const aiSdkTool = tool({
   description: mcpTool.description,
-  parameters: jsonSchema(mcpTool.inputSchema),
+  inputSchema: jsonSchema(mcpTool.inputSchema), // Use inputSchema for AI SDK v6
   execute: async (args) => {
     return await mcpClient.callTool(mcpTool.name, args);
   },
+  // Note: MCP tools don't have strict mode by default
 });
 ```
 

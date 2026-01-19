@@ -92,6 +92,7 @@ fred.registerTool({
   description: 'Perform arithmetic',
   parameters: { /* ... */ },
   execute: async (args) => { /* ... */ },
+  strict: false, // Optional: Enable strict validation (AI SDK v6)
 });
 ```
 

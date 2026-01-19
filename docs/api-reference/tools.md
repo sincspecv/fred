@@ -15,6 +15,7 @@ interface Tool {
     required?: string[];
   };
   execute: (args: Record<string, any>) => Promise<any> | any;
+  strict?: boolean;              // Enable strict validation (AI SDK v6) - only defined properties allowed
 }
 ```
 
@@ -116,6 +117,30 @@ fred.registerTool({
   },
   execute: async (args) => {
     // Implementation
+  },
+});
+```
+
+### Tool with Strict Validation
+
+```typescript
+fred.registerTool({
+  id: 'secure-tool',
+  name: 'secure-tool',
+  description: 'Tool with strict validation enabled',
+  parameters: {
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string', description: 'API key' },
+      action: { type: 'string', description: 'Action to perform' },
+    },
+    required: ['apiKey', 'action'],
+  },
+  strict: true, // Enable strict validation - only defined properties allowed
+  execute: async (args) => {
+    // Only args.apiKey and args.action will be present
+    // Extra properties will be rejected by AI SDK v6
+    return { success: true };
   },
 });
 ```

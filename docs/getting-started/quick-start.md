@@ -107,6 +107,7 @@ fred.registerTool({
       case 'divide': return a / b;
     }
   },
+  strict: false, // Optional: Enable strict validation (AI SDK v6)
 });
 
 // Create agent with tool

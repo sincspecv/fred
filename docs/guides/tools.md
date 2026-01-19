@@ -15,6 +15,7 @@ interface Tool {
     required?: string[];
   };
   execute: (args: Record<string, any>) => Promise<any> | any;
+  strict?: boolean;              // Enable strict validation (AI SDK v6) - only defined properties allowed
 }
 ```
 
@@ -252,6 +253,41 @@ fred.registerTool({
 });
 ```
 
+## Strict Validation
+
+AI SDK v6 supports strict validation mode for tools. When `strict: true` is set, only properties defined in the schema are allowed. Extra properties will be rejected.
+
+```typescript
+fred.registerTool({
+  id: 'secure-api',
+  name: 'secure-api',
+  description: 'Secure API call with strict validation',
+  parameters: {
+    type: 'object',
+    properties: {
+      endpoint: { type: 'string', description: 'API endpoint' },
+      method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE'] },
+    },
+    required: ['endpoint', 'method'],
+  },
+  strict: true, // Reject any extra properties not in schema
+  execute: async (args) => {
+    // Only endpoint and method will be present
+    return await fetch(args.endpoint, { method: args.method });
+  },
+});
+```
+
+**When to use strict mode:**
+- Security-sensitive tools that should reject unexpected inputs
+- Tools where extra properties could cause issues
+- When you want explicit validation of all inputs
+
+**Default behavior (strict: false or omitted):**
+- Permissive validation - extra properties are allowed
+- More flexible for tools that can handle additional parameters
+- Recommended for most use cases
+
 ## Best Practices
 
 1. **Clear Descriptions**: Write clear descriptions so the AI understands when to use the tool
@@ -259,6 +295,7 @@ fred.registerTool({
 3. **Type Safety**: Use proper types for parameters
 4. **Error Handling**: Always handle errors gracefully
 5. **Reusability**: Design tools to be reusable across multiple agents
+6. **Strict Validation**: Use `strict: true` for security-sensitive tools that must reject unexpected inputs
 
 ## Examples
 
