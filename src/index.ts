@@ -4,26 +4,57 @@ import { IntentRouter } from './core/intent/router';
 import { AgentConfig, AgentInstance, AgentResponse, AgentMessage } from './core/agent/agent';
 import { AgentManager } from './core/agent/manager';
 import { PipelineConfig, PipelineInstance } from './core/pipeline';
-import { PipelineManager } from './core/pipeline/manager';
+import { PipelineManager, ResumeResult } from './core/pipeline/manager';
+import type { PendingPause, HumanInputResumeOptions } from './core/pipeline/pause/types';
 import { Tool } from './core/tool/tool';
 import { ToolRegistry } from './core/tool/registry';
 import { createCalculatorTool } from './core/tool/calculator';
-import { AIProvider, ProviderConfig } from './core/platform/provider';
-// OpenAIProvider and GroqProvider are no longer imported here
-// They use dynamic imports to avoid requiring packages at build time
-import { createDynamicProvider } from './core/platform/dynamic';
-import { FrameworkConfig } from './config/types';
-import { loadConfig, validateConfig, extractIntents, extractAgents, extractPipelines } from './config/loader';
+import {
+  ProviderConfig,
+  ProviderConfigInput,
+  ProviderDefinition,
+  ProviderModelDefaults,
+} from './core/platform/provider';
+import type { EffectProviderFactory } from './core/platform/base';
+import { ProviderRegistry } from './core/platform/registry';
+import { BUILTIN_PACKS } from './core/platform/packs';
+import {
+  loadConfig,
+  validateConfig,
+  extractIntents,
+  extractAgents,
+  extractPipelines,
+  extractWorkflows,
+  extractProviders,
+  extractObservability,
+} from './config/loader';
+import { loadPromptFile } from './utils/prompt-loader';
 import { semanticMatch } from './utils/semantic';
 import { ContextManager } from './core/context/manager';
-import { ModelMessage } from 'ai';
-import { convertToModelMessages } from 'ai';
+import { PostgresContextStorage } from './core/context/storage/postgres';
+import { SqliteContextStorage } from './core/context/storage/sqlite';
+import {
+  PostgresCheckpointStorage,
+  SqliteCheckpointStorage,
+  CheckpointManager,
+  CheckpointCleanupTask,
+} from './core/pipeline/checkpoint';
+import type { CheckpointStorage } from './core/pipeline/checkpoint';
+import type { ModelMessage } from '@effect/ai';
 import { HookManager, HookType, HookHandler } from './core/hooks';
 import { Tracer, Span } from './core/tracing';
 import { NoOpTracer } from './core/tracing/noop-tracer';
 import { SpanKind } from './core/tracing/types';
 import { setActiveSpan, getActiveSpan } from './core/tracing/context';
 import { validateMessageLength } from './utils/validation';
+import { Effect, Stream } from 'effect';
+import type { StreamEvent } from './core/stream/events';
+import { MessageRouter } from './core/routing/router';
+import { RoutingConfig, RoutingDecision } from './core/routing/types';
+import { WorkflowManager } from './core/workflow/manager';
+import { Workflow } from './core/workflow/types';
+import { buildObservabilityLayers, type ObservabilityLayers } from './core/observability/otel';
+import type { ObservabilityConfig } from './config/types';
 
 /**
  * Fred - Main class for building AI agents
@@ -31,22 +62,37 @@ import { validateMessageLength } from './utils/validation';
 export class Fred {
   private toolRegistry: ToolRegistry;
   private agentManager: AgentManager;
+  private providerRegistry: ProviderRegistry;
   private pipelineManager: PipelineManager;
   private intentMatcher: IntentMatcher;
   private intentRouter: IntentRouter;
   private defaultAgentId?: string;
   private contextManager: ContextManager;
+  private memoryDefaults: {
+    policy?: {
+      maxMessages?: number;
+      maxChars?: number;
+      strict?: boolean;
+      isolated?: boolean;
+    };
+    requireConversationId?: boolean;
+    sequentialVisibility?: boolean;
+  } = {};
   private hookManager: HookManager;
   private tracer?: Tracer;
+  private messageRouter?: MessageRouter;
+  private workflowManager?: WorkflowManager;
+  private observabilityLayers?: ObservabilityLayers;
 
   constructor(tracer?: Tracer) {
     this.toolRegistry = new ToolRegistry();
     this.tracer = tracer;
+    this.providerRegistry = new ProviderRegistry();
     this.agentManager = new AgentManager(this.toolRegistry, tracer);
-    this.pipelineManager = new PipelineManager(this.agentManager, tracer);
     this.intentMatcher = new IntentMatcher();
     this.intentRouter = new IntentRouter(this.agentManager);
     this.contextManager = new ContextManager();
+    this.pipelineManager = new PipelineManager(this.agentManager, tracer, this.contextManager);
     this.hookManager = new HookManager();
     
     // Set tracer on hook manager if provided
@@ -79,61 +125,127 @@ export class Fred {
     this.tracer = tracer || new NoOpTracer();
     this.agentManager.setTracer(this.tracer);
     this.pipelineManager.setTracer(this.tracer);
+    this.pipelineManager.setContextManager(this.contextManager);
     this.hookManager.setTracer(this.tracer);
   }
 
   /**
    * Register an AI provider
    */
-  registerProvider(platform: string, provider: AIProvider): void {
+  registerProvider(platform: string, provider: ProviderDefinition): void {
+    this.providerRegistry.registerDefinition(provider);
     this.agentManager.registerProvider(platform, provider);
+  }
+
+  private syncProviderRegistry(): void {
+    for (const definition of this.providerRegistry.getDefinitions()) {
+      this.agentManager.registerProvider(definition.id, definition);
+      for (const alias of definition.aliases) {
+        this.agentManager.registerProvider(alias, definition);
+      }
+    }
+  }
+
+  /**
+   * List registered provider IDs
+   */
+  listProviders(): string[] {
+    return this.agentManager.listProviders();
   }
 
   /**
    * Use an AI provider (fluent API)
-   * Accepts the same parameters as AI SDK providers for full compatibility
-   * @param platform - Platform name ('openai', 'groq', 'anthropic', 'google', 'mistral', etc.)
-   * @param config - Provider configuration (matches AI SDK provider options)
-   * @param config.apiKey - API key for the provider
-   * @param config.baseURL - Base URL for the API (useful for custom endpoints or proxies)
+   * Accepts provider configuration compatible with Effect provider packs
+   * @param platform - Platform name ('openai', 'anthropic', 'google', etc.)
+   * @param config - Provider configuration (API key env var name, base URL, headers)
+   * @param config.apiKeyEnvVar - Environment variable containing the API key
+   * @param config.baseUrl - Base URL for the API (useful for custom endpoints or proxies)
    * @param config.headers - Custom headers to include in requests
-   * @param config.fetch - Custom fetch implementation
    * @param config.[key] - Additional provider-specific options
    * @returns The provider instance
    * @example
-   * // Basic usage with API key
-   * const groq = await fred.useProvider('groq', { apiKey: 'your-key' });
+   * // Basic usage with API key env var
+   * const openai = await fred.useProvider('openai', { apiKeyEnvVar: 'OPENAI_API_KEY' });
    * 
    * // With custom base URL
    * const openai = await fred.useProvider('openai', { 
-   *   apiKey: 'your-key',
-   *   baseURL: 'https://api.openai.com/v1'
+   *   apiKeyEnvVar: 'OPENAI_API_KEY',
+   *   baseUrl: 'https://api.openai.com/v1'
    * });
    * 
    * // With custom headers
    * const anthropic = await fred.useProvider('anthropic', { 
-   *   apiKey: 'your-key',
+   *   apiKeyEnvVar: 'ANTHROPIC_API_KEY',
    *   headers: { 'X-Custom-Header': 'value' }
    * });
    * 
    * // With custom fetch
    * const google = await fred.useProvider('google', {
-   *   apiKey: 'your-key',
-   *   fetch: customFetchImplementation
+   *   apiKeyEnvVar: 'GOOGLE_GENERATIVE_AI_API_KEY'
    * });
    */
-  async useProvider(platform: string, config?: ProviderConfig): Promise<AIProvider> {
+  async useProvider(platform: string, config?: ProviderConfig): Promise<ProviderDefinition> {
     const platformLower = platform.toLowerCase();
-    
-    // Use dynamic provider loading for all platforms
-    // This ensures no static imports are required at build time
-    const provider = await createDynamicProvider(platformLower, config);
-    
-    // Register the provider
-    this.registerProvider(platformLower, provider);
-    
-    // Return the provider instance
+    await this.registerProviderPack(platformLower, config ?? {});
+
+    const provider = this.providerRegistry.getDefinition(platformLower);
+    if (!provider) {
+      throw new Error(`Failed to load provider: ${platformLower}`);
+    }
+
     return provider;
+  }
+
+  /**
+   * Register a provider pack programmatically.
+   * Can be called before or after initializeFromConfig.
+   *
+   * @param idOrPackage - Provider ID (for built-ins) or npm package name
+   * @param config - Optional provider configuration
+   *
+   * @example
+   * // Register external pack
+   * await fred.registerProviderPack('@fred/provider-mistral', {
+   *   apiKeyEnvVar: 'MISTRAL_API_KEY',
+   *   modelDefaults: { model: 'mistral-large-latest' }
+   * });
+   *
+   * // Register built-in with custom config
+   * await fred.registerProviderPack('openai', {
+   *   baseUrl: 'https://custom-endpoint.com/v1'
+   * });
+   */
+  async registerProviderPack(idOrPackage: string, config: ProviderConfig = {}): Promise<void> {
+    await this.providerRegistry.register(idOrPackage, config);
+    this.syncProviderRegistry();
+  }
+
+  /**
+   * Register a provider factory directly (for custom providers).
+   *
+   * @param factory - Provider factory implementing EffectProviderFactory
+   * @param config - Optional provider configuration
+   */
+  async registerProviderFactory(
+    factory: EffectProviderFactory,
+    config: ProviderConfig = {}
+  ): Promise<void> {
+    await this.providerRegistry.registerFactory(factory, config);
+    this.syncProviderRegistry();
+  }
+
+  /**
+   * List all registered provider IDs.
+   */
+  listProviders(): string[] {
+    return this.providerRegistry.listProviders();
+  }
+
+  /**
+   * Check if a provider is registered.
+   */
+  hasProvider(providerId: string): boolean {
+    return this.providerRegistry.hasProvider(providerId);
   }
 
   /**
@@ -158,68 +270,43 @@ export class Fred {
   }
 
   /**
-   * Register default providers (OpenAI and Groq)
-   * For other providers, use the .useProvider() method
+   * Register default providers from config or environment
+   * Providers load lazily through Effect provider packs
    */
-  async registerDefaultProviders(config?: {
-    openai?: ProviderConfig;
-    groq?: ProviderConfig;
-    [key: string]: ProviderConfig | undefined;
-  }): Promise<void> {
-    // @ts-ignore - Bun global
-    const openaiKey = typeof process !== 'undefined' ? process.env.OPENAI_API_KEY : undefined;
-    // @ts-ignore - Bun global
-    const groqKey = typeof process !== 'undefined' ? process.env.GROQ_API_KEY : undefined;
-    
-    // Use dynamic provider loading for all providers
-    // This ensures no static imports are required at build time
-    const providerPromises: Promise<void>[] = [];
+  async registerDefaultProviders(config?: ProviderConfigInput): Promise<void> {
+    if (config?.providers && config.providers.length > 0) {
+      const defaults: ProviderModelDefaults | undefined = config.modelDefaults
+        ? { ...config.modelDefaults, model: config.defaultModel ?? config.modelDefaults.model }
+        : config.defaultModel
+          ? { model: config.defaultModel }
+          : undefined;
 
-    if (openaiKey || config?.openai) {
-      providerPromises.push(
-        createDynamicProvider('openai', config?.openai)
-          .then(provider => {
-            this.registerProvider('openai', provider);
-          })
-          .catch(() => {
-            // Silently fail if @ai-sdk/openai is not installed
-            // Users can install it with: bun add @ai-sdk/openai
-          })
+      await Promise.all(
+        config.providers.map((registration) => {
+          const resolvedId = config.aliases?.[registration.id] ?? registration.id;
+          const resolvedConfig: ProviderConfig = {
+            ...registration.config,
+            modelDefaults: registration.modelDefaults ?? defaults,
+          };
+          return this.providerRegistry.register(resolvedId, resolvedConfig);
+        })
       );
+    } else {
+      await this.loadDefaultProviders();
     }
 
-    if (groqKey || config?.groq) {
-      providerPromises.push(
-        createDynamicProvider('groq', config?.groq)
-          .then(provider => {
-            this.registerProvider('groq', provider);
-          })
-          .catch(() => {
-            // Silently fail if @ai-sdk/groq is not installed
-            // Users can install it with: bun add @ai-sdk/groq
-          })
-      );
-    }
-    
-    // Register any additional providers from config
-    for (const [platform, platformConfig] of Object.entries(config || {})) {
-      if (platform !== 'openai' && platform !== 'groq' && platformConfig) {
-        // Use dynamic provider for other platforms
-        providerPromises.push(
-          createDynamicProvider(platform, platformConfig)
-            .then(provider => {
-              this.registerProvider(platform, provider);
-            })
-            .catch(() => {
-              // Silently fail for optional providers
-              // Users can use .useProvider() method for explicit provider registration
-            })
-        );
+    this.providerRegistry.markInitialized();
+    this.syncProviderRegistry();
+  }
+
+  private async loadDefaultProviders(): Promise<void> {
+    for (const [id, factory] of Object.entries(BUILTIN_PACKS)) {
+      try {
+        await this.providerRegistry.registerFactory(factory, {});
+      } catch (error) {
+        console.debug(`Built-in provider ${id} not available:`, error);
       }
     }
-
-    // Wait for all providers to be registered
-    await Promise.allSettled(providerPromises);
   }
 
   /**
@@ -318,6 +405,88 @@ export class Fred {
   }
 
   /**
+   * Configure rule-based routing for messages.
+   * When configured, MessageRouter is used instead of utterance/intent matching.
+   *
+   * @param config - Routing configuration with rules and default agent
+   * @example
+   * fred.configureRouting({
+   *   defaultAgent: 'general-agent',
+   *   rules: [
+   *     { id: 'support', agent: 'support-agent', keywords: ['help', 'support'] },
+   *     { id: 'sales', agent: 'sales-agent', patterns: ['pricing.*', 'buy'] },
+   *   ],
+   *   debug: true,
+   * });
+   */
+  configureRouting(config: RoutingConfig): void {
+    this.messageRouter = new MessageRouter(
+      this.agentManager,
+      this.hookManager,
+      config
+    );
+  }
+
+  /**
+   * Configure workflows for multiple entry points.
+   * Creates a WorkflowManager and registers all provided workflows.
+   *
+   * @param workflows - Array of workflow definitions
+   * @example
+   * fred.configureWorkflows([
+   *   {
+   *     name: 'support',
+   *     defaultAgent: 'support-agent',
+   *     agents: ['support-agent', 'escalation-agent'],
+   *   },
+   *   {
+   *     name: 'sales',
+   *     defaultAgent: 'sales-agent',
+   *     agents: ['sales-agent', 'pricing-agent'],
+   *   },
+   * ]);
+   */
+  configureWorkflows(workflows: Workflow[]): void {
+    this.workflowManager = new WorkflowManager(this);
+    for (const workflow of workflows) {
+      this.workflowManager.addWorkflow(workflow.name, {
+        defaultAgent: workflow.defaultAgent,
+        agents: workflow.agents,
+        routing: workflow.routing,
+      });
+    }
+  }
+
+  /**
+   * Get the workflow manager instance (if configured).
+   *
+   * @returns WorkflowManager instance or undefined if workflows not configured
+   */
+  getWorkflowManager(): WorkflowManager | undefined {
+    return this.workflowManager;
+  }
+
+  /**
+   * Test routing without executing the agent (dry-run).
+   * Useful for debugging and verifying routing rules.
+   *
+   * @param message - The message to test
+   * @param metadata - Optional metadata for routing (threadId, userId, etc.)
+   * @returns Routing decision or null if routing is not configured
+   * @example
+   * const decision = await fred.testRoute('I need help', { userId: 'alice' });
+   * console.log(decision?.agent); // 'support-agent'
+   * console.log(decision?.fallback); // false
+   */
+  async testRoute(
+    message: string,
+    metadata?: Record<string, unknown>
+  ): Promise<RoutingDecision | null> {
+    if (!this.messageRouter) return null;
+    return this.messageRouter.testRoute(message, metadata ?? {});
+  }
+
+  /**
    * Route a message to the appropriate handler
    * Returns routing result with agent, pipeline, or intent information
    */
@@ -343,9 +512,48 @@ export class Fred {
     }
 
     try {
+      // If MessageRouter is configured, use rule-based routing
+      if (this.messageRouter) {
+        const decision = await this.messageRouter.route(message, {});
+
+        if (routingSpan) {
+          routingSpan.setAttributes({
+            'routing.method': decision.fallback ? 'message.router.fallback' : 'message.router.rule',
+            'routing.agentId': decision.agent,
+            'routing.fallback': decision.fallback,
+          });
+          if (decision.rule) {
+            routingSpan.setAttribute('routing.ruleId', decision.rule.id);
+          }
+          if (decision.matchType) {
+            routingSpan.setAttribute('routing.matchType', decision.matchType);
+          }
+        }
+
+        const agent = this.agentManager.getAgent(decision.agent);
+        if (agent) {
+          if (routingSpan) {
+            routingSpan.setStatus('ok');
+          }
+          return {
+            type: decision.fallback ? 'default' : 'agent',
+            agent,
+            agentId: decision.agent,
+          };
+        } else {
+          // Agent not found - this shouldn't happen if fallback works correctly
+          if (routingSpan) {
+            routingSpan.addEvent('agent.notFound', { 'agent.id': decision.agent });
+            routingSpan.setStatus('error', `Agent ${decision.agent} not found`);
+          }
+          return { type: 'none' };
+        }
+      }
+
+      // Otherwise, use existing routing (agent utterances, pipelines, intents)
       // Check agent utterances first (direct routing)
       const agentMatch = await this.agentManager.matchAgentByUtterance(message, semanticMatcher);
-      
+
       if (agentMatch) {
         if (routingSpan) {
           routingSpan.setAttributes({
@@ -405,7 +613,15 @@ export class Fred {
           }
 
           try {
-            const response = await this.pipelineManager.executePipeline(pipelineMatch.pipelineId, message, previousMessages);
+            const response = await this.pipelineManager.executePipeline(
+              pipelineMatch.pipelineId,
+              message,
+              previousMessages,
+              {
+                conversationId,
+                sequentialVisibility,
+              }
+            );
             if (pipelineSpan) {
               pipelineSpan.setAttribute('response.length', response.content.length);
               pipelineSpan.setAttribute('response.hasToolCalls', (response.toolCalls?.length ?? 0) > 0);
@@ -517,6 +733,8 @@ export class Fred {
       useSemanticMatching?: boolean;
       semanticThreshold?: number;
       conversationId?: string;
+      requireConversationId?: boolean;
+      sequentialVisibility?: boolean;
     }
   ): Promise<AgentResponse | null> {
     // Validate message input to prevent resource exhaustion
@@ -538,9 +756,18 @@ export class Fred {
     }
 
     try {
-      const conversationId = options?.conversationId || this.contextManager.generateConversationId();
+      const requireConversationId = options?.requireConversationId ?? this.memoryDefaults.requireConversationId;
+      const conversationId = options?.conversationId
+        ? options.conversationId
+        : requireConversationId
+          ? undefined
+          : this.contextManager.generateConversationId();
       const useSemantic = options?.useSemanticMatching ?? true;
       const threshold = options?.semanticThreshold ?? 0.6;
+
+      if (!conversationId) {
+        throw new Error('Conversation ID is required for this request');
+      }
 
       if (rootSpan) {
         rootSpan.setAttribute('conversation.id', conversationId);
@@ -548,19 +775,12 @@ export class Fred {
 
       // Get conversation history (already in ModelMessage format)
       const history = await this.contextManager.getHistory(conversationId);
-      
+
       // Filter to user/assistant messages for agent processing
       // Since AgentMessage is now ModelMessage, we can use history directly
       const previousMessages: AgentMessage[] = history.filter(
         msg => msg.role === 'user' || msg.role === 'assistant'
       ) as AgentMessage[];
-
-      // Add user message to context
-      const userMessage: ModelMessage = {
-        role: 'user',
-        content: message,
-      };
-      await this.contextManager.addMessage(conversationId, userMessage);
 
       // Create semantic matcher if enabled
       const semanticMatcher = useSemantic
@@ -570,7 +790,12 @@ export class Fred {
         : undefined;
 
       // Route message to appropriate handler
-      const route = await this._routeMessage(message, semanticMatcher, previousMessages);
+      const sequentialVisibility = options?.sequentialVisibility ?? this.memoryDefaults.sequentialVisibility ?? true;
+      const route = await this._routeMessage(
+        message,
+        semanticMatcher,
+        sequentialVisibility ? previousMessages : []
+      );
 
       let response: AgentResponse;
       let usedAgentId: string | null = null;
@@ -607,7 +832,10 @@ export class Fred {
         }
 
         try {
-          response = await route.agent.processMessage(message, previousMessages);
+          response = await route.agent.processMessage(
+            message,
+            sequentialVisibility ? previousMessages : []
+          );
           if (agentSpan) {
             agentSpan.setAttribute('response.length', response.content.length);
             agentSpan.setAttribute('response.hasToolCalls', (response.toolCalls?.length ?? 0) > 0);
@@ -711,50 +939,65 @@ export class Fred {
         rootSpan.setStatus('ok');
       }
 
-      // Handle tool calls: add them to context for persistence
-      // Note: ToolLoopAgent handles the tool loop internally, so we don't need to continue
-      // the conversation manually. The response is already the final response after all tool calls.
-      if (currentResponse.toolCalls && currentResponse.toolCalls.length > 0) {
-        const hasToolResults = currentResponse.toolCalls.some(tc => tc.result !== undefined);
-        
-        if (hasToolResults) {
-          // Add assistant message with tool calls to context
-          // The AI SDK format uses toolCalls array in assistant messages
-          const assistantMessage: ModelMessage = {
-            role: 'assistant',
-            content: currentResponse.content || '', // May be empty if only tool calls
-            toolCalls: currentResponse.toolCalls.map((tc, idx) => ({
-              toolCallId: `call_${tc.toolId}_${Date.now()}_${idx}`,
-              toolName: tc.toolId,
-              args: tc.args,
-            })),
-          };
-          await this.contextManager.addMessage(conversationId, assistantMessage);
+      // Check if the routed agent allows history persistence (default: true)
+      const routedAgent = usedAgentId ? this.agentManager.getAgent(usedAgentId) : route.agent;
+      const shouldPersistHistory = routedAgent?.config.persistHistory !== false;
 
-          // Add tool results to context (AI SDK uses 'tool' role for tool results)
-          for (let idx = 0; idx < currentResponse.toolCalls.length; idx++) {
-            const toolCall = currentResponse.toolCalls[idx];
-            if (toolCall.result !== undefined) {
-              const toolCallId = `call_${toolCall.toolId}_${Date.now()}_${idx}`;
-              const toolResultMessage: ModelMessage = {
-                role: 'tool',
-                content: typeof toolCall.result === 'string' 
-                  ? toolCall.result 
-                  : JSON.stringify(toolCall.result),
-                toolCallId,
-              };
-              await this.contextManager.addMessage(conversationId, toolResultMessage);
+      if (shouldPersistHistory) {
+        // Add user message to context
+        const userMessage: ModelMessage = {
+          role: 'user',
+          content: message,
+        };
+        await this.contextManager.addMessage(conversationId, userMessage);
+
+        // Handle tool calls: add them to context for persistence
+        // Tools are executed inside the Effect LanguageModel loop, so we don't need to
+        // continue the conversation manually. The response is already the final response.
+        if (currentResponse.toolCalls && currentResponse.toolCalls.length > 0) {
+          const hasToolResults = currentResponse.toolCalls.some(tc => tc.result !== undefined);
+
+          if (hasToolResults) {
+            // Add assistant message with tool calls to context
+            // Use toolCalls array in assistant messages for tool results
+            const assistantMessage: ModelMessage = {
+              role: 'assistant',
+              content: currentResponse.content || '', // May be empty if only tool calls
+              toolCalls: currentResponse.toolCalls.map((tc, idx) => ({
+                toolCallId: `call_${tc.toolId}_${Date.now()}_${idx}`,
+                toolName: tc.toolId,
+                args: tc.args,
+              })),
+            };
+            await this.contextManager.addMessage(conversationId, assistantMessage);
+
+            // Add tool results to context ("tool" role for tool results)
+            for (let idx = 0; idx < currentResponse.toolCalls.length; idx++) {
+              const toolCall = currentResponse.toolCalls[idx];
+              if (toolCall.result !== undefined) {
+                const toolCallId = `call_${toolCall.toolId}_${Date.now()}_${idx}`;
+                const toolResultMessage: ModelMessage = {
+                  role: 'tool',
+                  content: typeof toolCall.result === 'string'
+                    ? toolCall.result
+                    : JSON.stringify(toolCall.result),
+                  toolCallId,
+                };
+                await this.contextManager.addMessage(conversationId, toolResultMessage);
+              }
             }
           }
         }
-      }
 
-      // Add assistant response to context (if no tool calls or tool calls already handled)
-      const assistantMessage: ModelMessage = {
-        role: 'assistant',
-        content: currentResponse.content,
-      };
-      await this.contextManager.addMessage(conversationId, assistantMessage);
+        // Add assistant response to context (if no tool calls or tool calls already handled)
+        if (currentResponse.content) {
+          const assistantMessage: ModelMessage = {
+            role: 'assistant',
+            content: currentResponse.content,
+          };
+          await this.contextManager.addMessage(conversationId, assistantMessage);
+        }
+      }
 
       return currentResponse;
     } catch (error) {
@@ -778,173 +1021,330 @@ export class Fred {
 
   /**
    * Stream a user message through the intent system
-   * Returns an async generator that yields text deltas as they're generated
+   * Returns an async iterable that yields stream events as they're generated
    */
-  async *streamMessage(
+  streamMessage(
     message: string,
     options?: {
       useSemanticMatching?: boolean;
       semanticThreshold?: number;
       conversationId?: string;
+      requireConversationId?: boolean;
+      sequentialVisibility?: boolean;
     }
-  ): AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown> {
-    // Validate message input
-    validateMessageLength(message);
-
-    const conversationId = options?.conversationId || this.contextManager.generateConversationId();
+  ): AsyncIterable<StreamEvent> {
+    const requireConversationId = options?.requireConversationId ?? this.memoryDefaults.requireConversationId;
+    const conversationId = options?.conversationId
+      ? options.conversationId
+      : requireConversationId
+        ? undefined
+        : this.contextManager.generateConversationId();
     const useSemantic = options?.useSemanticMatching ?? true;
     const threshold = options?.semanticThreshold ?? 0.6;
+    const sequentialVisibility = options?.sequentialVisibility ?? this.memoryDefaults.sequentialVisibility ?? true;
 
-    // Get conversation history (already in ModelMessage format)
-    const history = await this.contextManager.getHistory(conversationId);
-    
-    // Filter to user/assistant messages for agent processing
-    // Since AgentMessage is now ModelMessage, we can use history directly
-    const previousMessages: AgentMessage[] = history.filter(
-      msg => msg.role === 'user' || msg.role === 'assistant'
-    ) as AgentMessage[];
-
-    // Add user message to context
-    const userMessage: ModelMessage = {
-      role: 'user',
-      content: message,
-    };
-    await this.contextManager.addMessage(conversationId, userMessage);
-
-    // Create semantic matcher if enabled
-    const semanticMatcher = useSemantic
-      ? async (msg: string, utterances: string[]) => {
-          return semanticMatch(msg, utterances, threshold);
-        }
-      : undefined;
-
-    // Route message to appropriate handler
-    const route = await this._routeMessage(message, semanticMatcher, previousMessages);
-
-    let agent: AgentInstance | null = null;
-    let usedAgentId: string | null = null;
-
-    // Handle routing result
-    if (route.type === 'none') {
-      throw new Error('No agent found to handle message');
-    }
-
-    if (route.type === 'pipeline' || route.type === 'intent') {
-      // Pipeline or intent already executed, yield the result as a single chunk
-      if (!route.response) {
-        throw new Error(`Route type ${route.type} did not return a response`);
+    const initEffect = Effect.gen(function* () {
+      validateMessageLength(message);
+      if (!conversationId) {
+        return yield* Effect.fail(new Error('Conversation ID is required for this request'));
       }
-      
-      // Add assistant response to context
-      const assistantMessage: ModelMessage = {
-        role: 'assistant',
-        content: route.response.content,
-      };
-      await this.contextManager.addMessage(conversationId, assistantMessage);
-      
-      yield {
-        textDelta: route.response.content,
-        fullText: route.response.content,
-        toolCalls: route.response.toolCalls,
-      };
-      return;
-    } else if (route.type === 'agent' || route.type === 'default') {
-      // Agent routing - use for streaming
-      if (!route.agent) {
-        throw new Error(`Route type ${route.type} did not return an agent`);
-      }
-      agent = route.agent;
-      usedAgentId = route.agentId || null;
-    } else {
-      throw new Error(`Unknown route type: ${route.type}`);
-    }
 
-    // Stream the message using the agent's streamMessage method
-    if (agent.streamMessage) {
-      let fullText = '';
-      let finalToolCalls: any[] | undefined;
-      let hasYieldedAnything = false;
+      const history = yield* Effect.promise(() => this.contextManager.getHistory(conversationId));
 
-      try {
-        for await (const chunk of agent.streamMessage(message, previousMessages)) {
-          hasYieldedAnything = true;
-          // Only update fullText if chunk has actual content
-          if (chunk.fullText) {
-            fullText = chunk.fullText;
+      const previousMessages: AgentMessage[] = history.filter(
+        msg => msg.role === 'user' || msg.role === 'assistant'
+      ) as AgentMessage[];
+
+      const semanticMatcher = useSemantic
+        ? async (msg: string, utterances: string[]) => {
+            return semanticMatch(msg, utterances, threshold);
           }
-          if (chunk.toolCalls) {
-            finalToolCalls = chunk.toolCalls;
+        : undefined;
+
+      const route = yield* Effect.promise(() =>
+        this._routeMessage(message, semanticMatcher, sequentialVisibility ? previousMessages : [])
+      );
+
+      return { route, previousMessages };
+    }.bind(this));
+
+    const streamEffect = initEffect.pipe(
+      Effect.flatMap(({ route, previousMessages }) =>
+        Effect.gen(function* () {
+          if (route.type === 'none') {
+            return yield* Effect.fail(new Error('No agent found to handle message'));
           }
-          // Always yield chunks - even if empty, they indicate progress
-          yield {
-            textDelta: chunk.textDelta || '',
-            fullText: chunk.fullText || fullText,
-            toolCalls: chunk.toolCalls,
-          };
-        }
-        } catch (streamError) {
-          throw streamError;
-        }
 
-        if (!hasYieldedAnything) {
-      }
-
-      // Add assistant response to context
-      const assistantMessage: ModelMessage = {
-        role: 'assistant',
-        content: fullText,
-      };
-      await this.contextManager.addMessage(conversationId, assistantMessage);
-
-      // Handle tool calls if any
-      if (finalToolCalls && finalToolCalls.length > 0) {
-        const hasToolResults = finalToolCalls.some(tc => tc.result !== undefined);
-        
-        if (hasToolResults) {
-          // Add tool calls and results to context
-          const toolCallMessage: ModelMessage = {
-            role: 'assistant',
-            content: '',
-            toolCalls: finalToolCalls.map((tc, idx) => ({
-              toolCallId: `call_${tc.toolId}_${Date.now()}_${idx}`,
-              toolName: tc.toolId,
-              args: tc.args,
-            })),
-          };
-          await this.contextManager.addMessage(conversationId, toolCallMessage);
-
-          for (let idx = 0; idx < finalToolCalls.length; idx++) {
-            const toolCall = finalToolCalls[idx];
-            if (toolCall.result !== undefined) {
-              const toolCallId = `call_${toolCall.toolId}_${Date.now()}_${idx}`;
-              const toolResultMessage: ModelMessage = {
-                role: 'tool',
-                content: typeof toolCall.result === 'string' 
-                  ? toolCall.result 
-                  : JSON.stringify(toolCall.result),
-                toolCallId,
-              };
-              await this.contextManager.addMessage(conversationId, toolResultMessage);
+          if (route.type === 'pipeline' || route.type === 'intent') {
+            if (!route.response) {
+              return yield* Effect.fail(new Error(`Route type ${route.type} did not return a response`));
             }
+
+            // For pipelines/intents, persist history by default (no specific agent to check)
+            const userMessage: ModelMessage = {
+              role: 'user',
+              content: message,
+            };
+            yield* Effect.promise(() => this.contextManager.addMessage(conversationId, userMessage));
+
+            const assistantMessage: ModelMessage = {
+              role: 'assistant',
+              content: route.response.content,
+            };
+            yield* Effect.promise(() => this.contextManager.addMessage(conversationId, assistantMessage));
+
+            const startedAt = Date.now();
+            const runId = `run_${startedAt}_${Math.random().toString(36).slice(2, 8)}`;
+            const messageId = `msg_${startedAt}_${Math.random().toString(36).slice(2, 6)}`;
+            let sequence = 0;
+            const initialEvents: StreamEvent[] = [
+              {
+                type: 'run-start',
+                sequence: sequence++,
+                emittedAt: startedAt,
+                runId,
+                threadId: conversationId,
+                input: {
+                  message,
+                  previousMessages,
+                },
+                startedAt,
+              },
+              {
+                type: 'message-start',
+                sequence: sequence++,
+                emittedAt: startedAt,
+                runId,
+                threadId: conversationId,
+                messageId,
+                step: 0,
+                role: 'assistant',
+              },
+            ];
+
+            const bodyEvents: StreamEvent[] = [];
+
+            if (route.response.content) {
+              bodyEvents.push({
+                type: 'token',
+                sequence: sequence++,
+                emittedAt: Date.now(),
+                runId,
+                threadId: conversationId,
+                messageId,
+                step: 0,
+                delta: route.response.content,
+                accumulated: route.response.content,
+              });
+            }
+
+            if (route.response.usage) {
+              bodyEvents.push({
+                type: 'usage',
+                sequence: sequence++,
+                emittedAt: Date.now(),
+                runId,
+                threadId: conversationId,
+                messageId,
+                step: 0,
+                usage: route.response.usage,
+              });
+            }
+
+            const finishedAt = Date.now();
+            bodyEvents.push({
+              type: 'message-end',
+              sequence: sequence++,
+              emittedAt: finishedAt,
+              runId,
+              threadId: conversationId,
+              messageId,
+              step: 0,
+              finishedAt,
+              finishReason: 'stop',
+            });
+
+            bodyEvents.push({
+              type: 'run-end',
+              sequence: sequence++,
+              emittedAt: finishedAt,
+              runId,
+              threadId: conversationId,
+              finishedAt,
+              durationMs: finishedAt - startedAt,
+              result: {
+                content: route.response.content,
+                toolCalls: route.response.toolCalls,
+                usage: route.response.usage,
+              },
+            });
+
+            return Stream.fromIterable(initialEvents).pipe(Stream.concat(Stream.fromIterable(bodyEvents)));
           }
 
-          // Note: ToolLoopAgent handles the tool loop internally, so we don't need to continue
-          // streaming if there's no content. The ToolLoopAgent already handled that and the
-          // fullText should already contain the final response after all tool calls.
-        }
-      }
-    } else {
-      // Fallback to non-streaming if agent doesn't support streaming
-      const response = await agent.processMessage(message, previousMessages);
-      if (response.content) {
-        // Simulate streaming by yielding the full text
-        yield {
-          textDelta: response.content,
-          fullText: response.content,
-          toolCalls: response.toolCalls,
-        };
-      }
-    }
+          if (route.type === 'agent' || route.type === 'default') {
+            if (!route.agent) {
+              return yield* Effect.fail(new Error(`Route type ${route.type} did not return an agent`));
+            }
+
+            const agent = route.agent;
+            const shouldPersistHistory = agent.config.persistHistory !== false;
+
+            if (agent.streamMessage) {
+              let finalText = '';
+
+              // Add user message if persistence is enabled
+              if (shouldPersistHistory) {
+                yield* Effect.promise(() =>
+                  this.contextManager.addMessage(conversationId, {
+                    role: 'user',
+                    content: message,
+                  })
+                );
+              }
+
+              const updates = agent.streamMessage(
+                message,
+                sequentialVisibility ? previousMessages : [],
+                { threadId: conversationId }
+              );
+              return updates.pipe(
+                Stream.tap((event) => {
+                  if (event.type === 'token') {
+                    finalText = event.accumulated;
+                  }
+                  if (event.type === 'run-end') {
+                    finalText = event.result.content;
+                    if (finalText && shouldPersistHistory) {
+                      return Effect.promise(() =>
+                        this.contextManager.addMessage(conversationId, {
+                          role: 'assistant',
+                          content: finalText,
+                        })
+                      );
+                    }
+                  }
+                  return Effect.void;
+                })
+              );
+            }
+
+            // Add user message if persistence is enabled
+            if (shouldPersistHistory) {
+              yield* Effect.promise(() =>
+                this.contextManager.addMessage(conversationId, {
+                  role: 'user',
+                  content: message,
+                })
+              );
+            }
+
+            const response = yield* Effect.promise(() =>
+              agent.processMessage(message, sequentialVisibility ? previousMessages : [])
+            );
+            if (response.content && shouldPersistHistory) {
+              yield* Effect.promise(() =>
+                this.contextManager.addMessage(conversationId, {
+                  role: 'assistant',
+                  content: response.content,
+                })
+              );
+            }
+            const startedAt = Date.now();
+            const runId = `run_${startedAt}_${Math.random().toString(36).slice(2, 8)}`;
+            const messageId = `msg_${startedAt}_${Math.random().toString(36).slice(2, 6)}`;
+            let sequence = 0;
+            const initialEvents: StreamEvent[] = [
+              {
+                type: 'run-start',
+                sequence: sequence++,
+                emittedAt: startedAt,
+                runId,
+                threadId: conversationId,
+                input: {
+                  message,
+                  previousMessages,
+                },
+                startedAt,
+              },
+              {
+                type: 'message-start',
+                sequence: sequence++,
+                emittedAt: startedAt,
+                runId,
+                threadId: conversationId,
+                messageId,
+                step: 0,
+                role: 'assistant',
+              },
+            ];
+
+            const bodyEvents: StreamEvent[] = [];
+
+            if (response.content) {
+              bodyEvents.push({
+                type: 'token',
+                sequence: sequence++,
+                emittedAt: Date.now(),
+                runId,
+                threadId: conversationId,
+                messageId,
+                step: 0,
+                delta: response.content,
+                accumulated: response.content,
+              });
+            }
+
+            if (response.usage) {
+              bodyEvents.push({
+                type: 'usage',
+                sequence: sequence++,
+                emittedAt: Date.now(),
+                runId,
+                threadId: conversationId,
+                messageId,
+                step: 0,
+                usage: response.usage,
+              });
+            }
+
+            const finishedAt = Date.now();
+            bodyEvents.push({
+              type: 'message-end',
+              sequence: sequence++,
+              emittedAt: finishedAt,
+              runId,
+              threadId: conversationId,
+              messageId,
+              step: 0,
+              finishedAt,
+              finishReason: 'stop',
+            });
+
+            bodyEvents.push({
+              type: 'run-end',
+              sequence: sequence++,
+              emittedAt: finishedAt,
+              runId,
+              threadId: conversationId,
+              finishedAt,
+              durationMs: finishedAt - startedAt,
+              result: {
+                content: response.content,
+                toolCalls: response.toolCalls,
+                usage: response.usage,
+              },
+            });
+
+            return Stream.fromIterable(initialEvents).pipe(Stream.concat(Stream.fromIterable(bodyEvents)));
+          }
+
+          return yield* Effect.fail(new Error(`Unknown route type: ${route.type}`));
+        }.bind(this))
+      )
+    );
+
+    return Stream.toAsyncIterable(Stream.unwrap(streamEffect));
   }
 
   /**
@@ -956,29 +1356,26 @@ export class Fred {
       conversationId?: string;
       useSemanticMatching?: boolean;
       semanticThreshold?: number;
+      requireConversationId?: boolean;
+      sequentialVisibility?: boolean;
     }
   ): Promise<AgentResponse | null> {
-    const conversationId = options?.conversationId || this.contextManager.generateConversationId();
+    const requireConversationId = options?.requireConversationId ?? this.memoryDefaults.requireConversationId;
+    const conversationId = options?.conversationId
+      ? options.conversationId
+      : requireConversationId
+        ? undefined
+        : this.contextManager.generateConversationId();
     
-    // Convert to AI SDK ModelMessage format
-    const modelMessages = await convertToModelMessages(messages);
-    
-    // Get existing conversation history
-    const existingHistory = await this.contextManager.getHistory(conversationId);
-    
-    // Merge with new messages (avoid duplicates)
-    const allMessages: ModelMessage[] = [...existingHistory];
-    for (const msg of modelMessages) {
-      // Simple deduplication - in production, use better logic
-      const lastMsg = allMessages[allMessages.length - 1];
-      if (!lastMsg || lastMsg.role !== msg.role || lastMsg.content !== msg.content) {
-        allMessages.push(msg);
-      }
+    if (!conversationId) {
+      throw new Error('Conversation ID is required for this request');
     }
-    
-    // Update context with all messages
-    await this.contextManager.addMessages(conversationId, modelMessages);
-    
+
+    const modelMessages: ModelMessage[] = messages.map((message) => ({
+      role: message.role as ModelMessage['role'],
+      content: message.content,
+    }));
+
     // Extract the last user message
     const lastUserMessage = modelMessages[modelMessages.length - 1];
     if (!lastUserMessage || lastUserMessage.role !== 'user') {
@@ -994,6 +1391,8 @@ export class Fred {
       conversationId,
       useSemanticMatching: options?.useSemanticMatching,
       semanticThreshold: options?.semanticThreshold,
+      requireConversationId: options?.requireConversationId,
+      sequentialVisibility: options?.sequentialVisibility,
     });
 
     return response;
@@ -1035,24 +1434,205 @@ export class Fred {
   }
 
   /**
+   * Get a pending pause request for a specific run.
+   *
+   * @param runId - The run identifier to check
+   * @returns PendingPause if run is paused, null otherwise
+   *
+   * @example
+   * const pause = await fred.getPendingPause('run-123');
+   * if (pause) {
+   *   console.log(`Awaiting: ${pause.prompt}`);
+   *   if (pause.choices) {
+   *     console.log(`Choices: ${pause.choices.join(', ')}`);
+   *   }
+   * }
+   */
+  async getPendingPause(runId: string): Promise<PendingPause | null> {
+    const pauseManager = this.pipelineManager.getPauseManager();
+    if (!pauseManager) {
+      // No checkpoint manager configured = no pauses possible
+      return null;
+    }
+    return pauseManager.getPendingPause(runId);
+  }
+
+  /**
+   * List all pending pause requests across all runs.
+   *
+   * @returns Array of pending pauses, sorted by createdAt descending
+   *
+   * @example
+   * const pauses = await fred.listPendingPauses();
+   * for (const pause of pauses) {
+   *   console.log(`Run ${pause.runId}: ${pause.prompt}`);
+   * }
+   */
+  async listPendingPauses(): Promise<PendingPause[]> {
+    const pauseManager = this.pipelineManager.getPauseManager();
+    if (!pauseManager) {
+      return [];
+    }
+    return pauseManager.listPendingPauses();
+  }
+
+  /**
+   * Resume a paused pipeline with human input.
+   *
+   * The human input is merged into the conversation history as a USER message,
+   * making it available to downstream pipeline steps.
+   *
+   * @param runId - The run identifier to resume
+   * @param options - Human input and resume options
+   * @returns Resume result with execution outcome
+   * @throws If run is not found or not paused
+   * @throws If input validation fails (when schema/choices specified)
+   *
+   * @example
+   * // Resume with text input
+   * const result = await fred.resume('run-123', {
+   *   humanInput: 'approved',
+   * });
+   *
+   * @example
+   * // Resume with choice
+   * const result = await fred.resume('run-123', {
+   *   humanInput: 'approve', // Must be in pause.choices
+   * });
+   *
+   * @example
+   * // Override resume behavior
+   * const result = await fred.resume('run-123', {
+   *   humanInput: 'Modified prompt text',
+   *   resumeBehavior: 'rerun', // Re-execute the paused step
+   * });
+   */
+  async resume(
+    runId: string,
+    options: HumanInputResumeOptions
+  ): Promise<ResumeResult> {
+    return this.pipelineManager.resumeWithHumanInput(runId, options);
+  }
+
+  /**
+   * Configure observability (tracing and logging) from config.
+   * Builds Effect tracer and logger layers with OTLP exporter support.
+   *
+   * @param config - Observability configuration
+   * @example
+   * fred.configureObservability({
+   *   otlp: { endpoint: 'http://localhost:4318/v1/traces' },
+   *   logLevel: 'debug'
+   * });
+   */
+  configureObservability(config: ObservabilityConfig): void {
+    this.observabilityLayers = buildObservabilityLayers(config);
+  }
+
+  /**
+   * Get the configured observability layers (if any).
+   * Returns undefined if observability has not been configured.
+   */
+  getObservabilityLayers(): ObservabilityLayers | undefined {
+    return this.observabilityLayers;
+  }
+
+  /**
    * Initialize from a config file
    */
   async initializeFromConfig(
     configPath: string,
     options?: {
       toolExecutors?: Map<string, Tool['execute']>;
-      providers?: {
-        openai?: ProviderConfig;
-        groq?: ProviderConfig;
-      };
+      providers?: ProviderConfigInput;
     }
   ): Promise<void> {
     // Load and validate config
     const config = loadConfig(configPath);
     validateConfig(config);
+    const defaultSystemMessage = config.defaultSystemMessage
+      ? loadPromptFile(config.defaultSystemMessage, configPath, false)
+      : undefined;
+    this.agentManager.setDefaultSystemMessage(defaultSystemMessage);
+    const memoryDefaults = config.memory;
+    if (memoryDefaults?.policy) {
+      this.contextManager.setDefaultPolicy(memoryDefaults.policy);
+    }
+    this.memoryDefaults = {
+      policy: memoryDefaults?.policy,
+      requireConversationId: memoryDefaults?.requireConversationId,
+      sequentialVisibility: memoryDefaults?.sequentialVisibility,
+    };
+
+    // Configure persistence adapter
+    if (config.persistence) {
+      if (config.persistence.adapter === 'postgres') {
+        const connectionString = process.env.FRED_POSTGRES_URL;
+        if (!connectionString) {
+          throw new Error(
+            'FRED_POSTGRES_URL environment variable is required for Postgres persistence adapter'
+          );
+        }
+        const storage = new PostgresContextStorage({ connectionString });
+        this.contextManager.setStorage(storage);
+      } else if (config.persistence.adapter === 'sqlite') {
+        const path = process.env.FRED_SQLITE_PATH || './fred.db';
+        const storage = new SqliteContextStorage({ path });
+        this.contextManager.setStorage(storage);
+      }
+
+      // Set up checkpoint storage if persistence enabled (default: true)
+      const checkpointEnabled = config.persistence.checkpoint?.enabled !== false;
+      if (checkpointEnabled) {
+        let checkpointStorage: CheckpointStorage;
+
+        if (config.persistence.adapter === 'postgres') {
+          const url = process.env.FRED_POSTGRES_URL;
+          if (!url) {
+            throw new Error('FRED_POSTGRES_URL required for postgres persistence');
+          }
+          checkpointStorage = new PostgresCheckpointStorage({ connectionString: url });
+        } else {
+          const dbPath = process.env.FRED_SQLITE_PATH ?? './fred.db';
+          checkpointStorage = new SqliteCheckpointStorage({ path: dbPath });
+        }
+
+        const checkpointManager = new CheckpointManager({
+          storage: checkpointStorage,
+          defaultTtlMs: config.persistence.checkpoint?.ttlMs,
+        });
+
+        // Wire to pipeline manager
+        this.pipelineManager.setCheckpointManager(checkpointManager);
+
+        // Start cleanup task
+        const cleanupIntervalMs = config.persistence.checkpoint?.cleanupIntervalMs ?? 3600000;
+        const cleanupTask = new CheckpointCleanupTask(checkpointStorage, { intervalMs: cleanupIntervalMs });
+        cleanupTask.start();
+
+        // Note: Consider adding a shutdown() method to Fred that stops cleanup
+      }
+    }
+
+    // Configure observability (tracing and logging)
+    const observabilityConfig = extractObservability(config);
+    this.configureObservability(observabilityConfig);
 
     // Register providers
-    await this.registerDefaultProviders(options?.providers);
+    const providers = extractProviders(config);
+    if (providers.length > 0) {
+      await Promise.all(
+        providers.map((pack) => this.providerRegistry.register(pack.package, pack.config))
+      );
+      this.providerRegistry.markInitialized();
+      this.syncProviderRegistry();
+    } else if (options?.providers) {
+      await this.registerDefaultProviders(options.providers);
+    } else {
+      await this.loadDefaultProviders();
+      this.providerRegistry.markInitialized();
+      this.syncProviderRegistry();
+    }
 
     // Register tools (need execute functions)
     if (config.tools) {
@@ -1088,6 +1668,23 @@ export class Fred {
     for (const pipelineConfig of pipelines) {
       await this.createPipeline(pipelineConfig);
     }
+
+    // Configure routing if specified in config
+    if (config.routing) {
+      // Warn if defaultAgent references unknown agent
+      if (config.routing.defaultAgent && !this.agentManager.hasAgent(config.routing.defaultAgent)) {
+        console.warn(
+          `[Config] Routing defaultAgent "${config.routing.defaultAgent}" not found among registered agents`
+        );
+      }
+      this.configureRouting(config.routing);
+    }
+
+    // Configure workflows if specified in config
+    const workflows = extractWorkflows(config);
+    if (workflows.length > 0) {
+      this.configureWorkflows(workflows);
+    }
   }
 
   /**
@@ -1117,9 +1714,8 @@ export * from './core/intent/intent';
 export * from './core/agent/agent';
 // Note: MCPClientMetrics can be imported directly from './core/agent/factory' if needed
 export * from './core/tool/tool';
+export type { EffectProviderFactory } from './core/platform/base';
 export * from './core/platform/provider';
-export * from './core/platform/openai';
-export * from './core/platform/groq';
 export * from './config/types';
 export { ToolRegistry } from './core/tool/registry';
 export { AgentManager } from './core/agent/manager';
@@ -1127,8 +1723,41 @@ export { IntentMatcher } from './core/intent/matcher';
 export { IntentRouter } from './core/intent/router';
 export { ContextManager } from './core/context/manager';
 export * from './core/context/context';
+export { SqliteContextStorage } from './core/context/storage/sqlite';
+export { PostgresContextStorage } from './core/context/storage/postgres';
+
+// Checkpoint storage exports
+export {
+  PostgresCheckpointStorage,
+  SqliteCheckpointStorage,
+  CheckpointManager,
+  CheckpointCleanupTask,
+} from './core/pipeline/checkpoint';
+export type {
+  CheckpointStorage,
+  Checkpoint,
+  CheckpointStatus,
+  CheckpointManagerOptions,
+  CheckpointCleanupOptions,
+} from './core/pipeline/checkpoint';
+
+// Pause types
+export type {
+  PauseSignal,
+  PauseRequest,
+  PendingPause,
+  PauseMetadata,
+  HumanInputResumeOptions,
+} from './core/pipeline/pause/types';
+export { createRequestHumanInputTool } from './core/pipeline/pause';
+
 export { HookManager } from './core/hooks/manager';
 export * from './core/hooks/types';
+export { MessageRouter } from './core/routing/router';
+export * from './core/routing/types';
+export { WorkflowManager } from './core/workflow/manager';
+export { WorkflowContext } from './core/workflow/context';
+export * from './core/workflow/types';
 export * from './core/tracing';
 export { NoOpTracer } from './core/tracing/noop-tracer';
 export { createOpenTelemetryTracer, isOpenTelemetryAvailable } from './core/tracing/otel-exporter';
@@ -1137,3 +1766,6 @@ export { GoldenTraceRecorder } from './core/eval/recorder';
 export * from './core/eval/assertions';
 export * from './core/eval/assertion-runner';
 
+// Observability exports
+export { buildObservabilityLayers, annotateSpan, withFredSpan } from './core/observability/otel';
+export type { ObservabilityLayers } from './core/observability/otel';

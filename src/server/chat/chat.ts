@@ -11,8 +11,8 @@ export interface ChatMessage {
   name?: string;
   tool_calls?: Array<{
     id: string;
-    type: 'function';
-    function: {
+    type: 'tool_call';
+    tool_call: {
       name: string;
       arguments: string;
     };
@@ -65,8 +65,16 @@ export interface ChatCompletionChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      tool_calls?: Array<{
+        index: number;
+        id: string;
+        type: 'tool_call';
+        tool_call: {
+          name: string;
+          arguments: string;
+        };
+      }>;
     };
     finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
 }
-

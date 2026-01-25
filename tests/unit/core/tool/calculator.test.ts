@@ -8,9 +8,9 @@ describe('Calculator Tool', () => {
     expect(calculator.id).toBe('calculator');
     expect(calculator.name).toBe('calculator');
     expect(calculator.description).toContain('arithmetic');
-    expect(calculator.parameters.type).toBe('object');
-    expect(calculator.parameters.properties.expression).toBeDefined();
-    expect(calculator.parameters.required).toContain('expression');
+    expect(calculator.schema?.metadata?.type).toBe('object');
+    expect(calculator.schema?.metadata?.properties.expression).toBeDefined();
+    expect(calculator.schema?.metadata?.required).toContain('expression');
   });
 
   test('should perform basic addition', async () => {

@@ -3,12 +3,12 @@ import { AgentFactory } from '../../../../src/core/agent/factory';
 import { ToolRegistry } from '../../../../src/core/tool/registry';
 import { AgentConfig } from '../../../../src/core/agent/agent';
 import { createMockProvider } from '../../helpers/mock-provider';
-import { AIProvider } from '../../../../src/core/platform/provider';
+import { ProviderDefinition } from '../../../../src/core/platform/provider';
 
 describe('AgentFactory', () => {
   let factory: AgentFactory;
   let toolRegistry: ToolRegistry;
-  let mockProvider: AIProvider;
+  let mockProvider: ProviderDefinition;
 
   beforeEach(() => {
     toolRegistry = new ToolRegistry();
@@ -23,12 +23,6 @@ describe('AgentFactory', () => {
         id: 'quick-tool',
         name: 'Quick Tool',
         description: 'A tool that executes quickly',
-        parameters: {
-          type: 'object',
-          properties: {
-            message: { type: 'string' },
-          },
-        },
         execute: async (args: { message: string }) => {
           await new Promise(resolve => setTimeout(resolve, 10));
           return { result: `Processed: ${args.message}` };
@@ -62,10 +56,6 @@ describe('AgentFactory', () => {
         id: 'slow-tool',
         name: 'Slow Tool',
         description: 'A tool that takes too long',
-        parameters: {
-          type: 'object',
-          properties: {},
-        },
         execute: async () => {
           // This will timeout
           await new Promise(resolve => setTimeout(resolve, 2000));
@@ -95,7 +85,6 @@ describe('AgentFactory', () => {
         id: 'test-tool',
         name: 'Test Tool',
         description: 'A test tool',
-        parameters: { type: 'object', properties: {} },
         execute: async () => ({ result: 'ok' }),
       };
 
@@ -120,7 +109,6 @@ describe('AgentFactory', () => {
         id: 'cleanup-tool',
         name: 'Cleanup Tool',
         description: 'A tool to test cleanup',
-        parameters: { type: 'object', properties: {} },
         execute: async () => {
           await new Promise(resolve => setTimeout(resolve, 10));
           return { result: 'ok' };
@@ -150,7 +138,6 @@ describe('AgentFactory', () => {
         id: 'error-tool',
         name: 'Error Tool',
         description: 'A tool that throws an error',
-        parameters: { type: 'object', properties: {} },
         execute: async () => {
           throw new Error('Tool execution failed');
         },
@@ -275,6 +262,51 @@ describe('AgentFactory', () => {
       expect(agent).toBeDefined();
       expect(agent.processMessage).toBeDefined();
       expect(agent.streamMessage).toBeDefined();
+    });
+
+    test('should use default system message when config omits one', async () => {
+      const defaultMessage = 'Default system prompt';
+      factory.setDefaultSystemMessage(defaultMessage);
+
+      const config: AgentConfig = {
+        id: 'default-prompt-agent',
+        platform: 'openai',
+        model: 'gpt-4',
+      };
+
+      const agent = await factory.createAgent(config, mockProvider);
+      expect(agent).toBeDefined();
+    });
+
+    test('should warn and skip unknown tools', async () => {
+      const tool = {
+        id: 'known-tool',
+        name: 'Known Tool',
+        description: 'A known tool',
+        parameters: {
+          type: 'object',
+          properties: {},
+        },
+        execute: async () => ({ ok: true }),
+      };
+
+      toolRegistry.registerTool(tool);
+
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config: AgentConfig = {
+        id: 'tool-agent',
+        systemMessage: 'Test agent',
+        platform: 'openai',
+        model: 'gpt-4',
+        tools: ['known-tool', 'missing-tool'],
+      };
+
+      await factory.createAgent(config, mockProvider);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('missing-tool');
+      warnSpy.mockRestore();
     });
 
     test('should create agent with tools', async () => {
@@ -431,6 +463,7 @@ describe('AgentFactory', () => {
     });
 
     test('should handle missing tools gracefully', async () => {
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
       const config: AgentConfig = {
         id: 'missing-tool-agent',
         systemMessage: 'Test agent',
@@ -442,6 +475,8 @@ describe('AgentFactory', () => {
       // Should not throw - tools are optional
       const agent = await factory.createAgent(config, mockProvider);
       expect(agent).toBeDefined();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
     });
   });
 

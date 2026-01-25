@@ -1,6 +1,6 @@
 import { AgentConfig, AgentInstance } from './agent';
 import { AgentFactory } from './factory';
-import { AIProvider } from '../platform/provider';
+import { ProviderDefinition } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
 import { semanticMatch } from '../../utils/semantic';
 import { Tracer } from '../tracing';
@@ -11,8 +11,9 @@ import { Tracer } from '../tracing';
 export class AgentManager {
   private agents: Map<string, AgentInstance> = new Map();
   private factory: AgentFactory;
-  private providers: Map<string, AIProvider> = new Map();
+  private providers: Map<string, ProviderDefinition> = new Map();
   private tracer?: Tracer;
+  private defaultSystemMessage?: string;
 
   constructor(toolRegistry: ToolRegistry, tracer?: Tracer) {
     this.tracer = tracer;
@@ -33,6 +34,11 @@ export class AgentManager {
     this.factory.setTracer(tracer);
   }
 
+  setDefaultSystemMessage(systemMessage?: string): void {
+    this.defaultSystemMessage = systemMessage;
+    this.factory.setDefaultSystemMessage(systemMessage);
+  }
+
   /**
    * Get MCP client connection metrics
    */
@@ -50,14 +56,21 @@ export class AgentManager {
   /**
    * Register an AI provider
    */
-  registerProvider(platform: string, provider: AIProvider): void {
+  registerProvider(platform: string, provider: ProviderDefinition): void {
     this.providers.set(platform, provider);
+  }
+
+  /**
+   * List registered provider IDs
+   */
+  listProviders(): string[] {
+    return Array.from(this.providers.keys());
   }
 
   /**
    * Get a provider for a platform
    */
-  private getProvider(platform: string): AIProvider {
+  private getProvider(platform: string): ProviderDefinition {
     const provider = this.providers.get(platform);
     if (!provider) {
       throw new Error(`No provider registered for platform: ${platform}`);
@@ -73,12 +86,16 @@ export class AgentManager {
       throw new Error(`Agent with id "${config.id}" already exists`);
     }
 
+    const resolvedConfig = {
+      ...config,
+      systemMessage: config.systemMessage ?? this.defaultSystemMessage,
+    };
     const provider = this.getProvider(config.platform);
-    const agentProcessor = await this.factory.createAgent(config, provider);
+    const agentProcessor = await this.factory.createAgent(resolvedConfig, provider);
 
     const instance: AgentInstance = {
       id: config.id,
-      config,
+      config: resolvedConfig,
       // Store the processor functions
       processMessage: agentProcessor.processMessage,
       streamMessage: agentProcessor.streamMessage,
@@ -199,5 +216,3 @@ export class AgentManager {
     return null;
   }
 }
-
-

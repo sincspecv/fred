@@ -83,3 +83,6 @@ fred.config.local.json
 
 # Flox local state
 .flox/
+
+# Planning documents (local only)
+.planning/

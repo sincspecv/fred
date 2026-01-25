@@ -1,4 +1,4 @@
-import { tool, jsonSchema } from 'ai';
+import { Schema } from 'effect';
 import { Tool } from '../tool/tool';
 import { MCPClient, MCPToolDefinition } from './types';
 
@@ -16,10 +16,14 @@ export function convertMCPToolToFredTool(
     id: toolId,
     name: toolId,
     description: mcpTool.description || '',
-    parameters: {
-      type: 'object',
-      properties: mcpTool.inputSchema.properties || {},
-      required: mcpTool.inputSchema.required || [],
+    schema: {
+      input: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+      success: Schema.Unknown,
+      metadata: {
+        type: 'object',
+        properties: mcpTool.inputSchema.properties || {},
+        required: mcpTool.inputSchema.required || [],
+      },
     },
     execute: async (args: Record<string, any>) => {
       // Call MCP server's tools/call method
@@ -27,43 +31,6 @@ export function convertMCPToolToFredTool(
       return result;
     },
   };
-}
-
-/**
- * Convert MCP tool to AI SDK tool() format for use in generateText
- * This leverages the AI SDK's tool() and jsonSchema() functions
- */
-export function createAISDKToolFromMCP(
-  mcpTool: MCPToolDefinition,
-  mcpClient: MCPClient,
-  serverId: string
-): ReturnType<typeof tool> {
-  const fredTool = convertMCPToolToFredTool(mcpTool, mcpClient, serverId);
-  
-  // Use AI SDK's tool() and jsonSchema() - same pattern as factory.ts
-  return tool({
-    description: fredTool.description,
-    parameters: jsonSchema(fredTool.parameters),
-    execute: fredTool.execute,
-  });
-}
-
-/**
- * Convert multiple MCP tools to AI SDK tools
- */
-export function createAISDKToolsFromMCP(
-  mcpTools: MCPToolDefinition[],
-  mcpClient: MCPClient,
-  serverId: string
-): Record<string, ReturnType<typeof tool>> {
-  const tools: Record<string, ReturnType<typeof tool>> = {};
-  
-  for (const mcpTool of mcpTools) {
-    const toolId = `mcp-${serverId}-${mcpTool.name}`;
-    tools[toolId] = createAISDKToolFromMCP(mcpTool, mcpClient, serverId);
-  }
-  
-  return tools;
 }
 
 /**

@@ -1,39 +1,98 @@
-import { LanguageModel } from 'ai';
-import { AIProvider, ProviderConfig } from './provider';
+import { Effect, Layer } from 'effect';
+import type { LanguageModel } from '@effect/ai';
+import { ProviderConfig, ProviderDefinition, ProviderModelDefaults } from './provider';
+import { validatePackExports, isProviderFactory } from './pack-schema';
+import { ProviderPackLoadError } from './errors';
+
+// Re-export validation utilities for external use
+export { validatePackExports, isProviderFactory } from './pack-schema';
+export { ProviderPackLoadError, ProviderNotFoundError, ProviderRuntimeError } from './errors';
+
+export interface EffectProviderFactory {
+  id: string;
+  aliases?: string[];
+  load: (config: ProviderConfig) => Promise<{
+    layer: Layer.Layer<never, Error>;
+    getModel: (modelId: string, options?: ProviderModelDefaults) => Effect.Effect<LanguageModel, Error>;
+  }>;
+}
 
 /**
- * Base provider class that wraps any @ai-sdk provider
+ * Symbol to mark factories that have already been validated.
+ * Prevents redundant validation on repeated calls.
  */
-export class BaseProvider implements AIProvider {
-  private providerFactory: (modelId: string, options?: any) => LanguageModel;
-  private platformName: string;
-  private config: ProviderConfig;
+const VALIDATED_FACTORY = Symbol('ValidatedFactory');
 
-  constructor(
-    providerFactory: (modelId: string, options?: any) => LanguageModel,
-    platformName: string,
-    config: ProviderConfig = {}
-  ) {
-    this.providerFactory = providerFactory;
-    this.platformName = platformName;
-    this.config = config;
-  }
+interface ValidatedFactory extends EffectProviderFactory {
+  [VALIDATED_FACTORY]: true;
+}
 
-  getModel(modelId: string): LanguageModel {
-    // Pass all config options to the provider factory
-    // This ensures full compatibility with AI SDK provider options
-    return this.providerFactory(modelId, {
-      apiKey: this.config.apiKey,
-      baseURL: this.config.baseURL,
-      headers: this.config.headers,
-      fetch: this.config.fetch,
-      ...this.config,
+/**
+ * Check if a factory has already been validated.
+ */
+function isAlreadyValidated(factory: EffectProviderFactory): factory is ValidatedFactory {
+  return VALIDATED_FACTORY in factory;
+}
+
+/**
+ * Mark a factory as validated.
+ */
+function markValidated(factory: EffectProviderFactory): ValidatedFactory {
+  (factory as ValidatedFactory)[VALIDATED_FACTORY] = true;
+  return factory as ValidatedFactory;
+}
+
+/**
+ * Create a ProviderDefinition from an EffectProviderFactory.
+ *
+ * Validates the factory structure before use and wraps load() failures
+ * in ProviderPackLoadError with clear remediation hints.
+ *
+ * @param factory - The provider factory (from pack or built-in)
+ * @param config - Provider configuration
+ * @returns Promise<ProviderDefinition> on success
+ * @throws ProviderPackLoadError if factory validation or load() fails
+ */
+export async function createProviderDefinition(
+  factory: EffectProviderFactory,
+  config: ProviderConfig
+): Promise<ProviderDefinition> {
+  // Validate factory structure if not already validated
+  const validatedFactory = isAlreadyValidated(factory)
+    ? factory
+    : markValidated(validatePackExports(factory, factory.id ?? 'unknown'));
+
+  // Wrap load() call in try/catch to provide helpful error context
+  let loadResult: { layer: Layer.Layer<never, Error>; getModel: EffectProviderFactory['load'] extends (config: ProviderConfig) => Promise<infer R> ? R extends { getModel: infer G } ? G : never : never };
+
+  try {
+    loadResult = await validatedFactory.load(config);
+  } catch (error) {
+    // If it's already a ProviderPackLoadError, preserve it
+    if (error instanceof ProviderPackLoadError) {
+      throw error;
+    }
+
+    // Wrap unknown errors in ProviderPackLoadError
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ProviderPackLoadError({
+      packageName: validatedFactory.id,
+      reason: `Provider load() failed: ${message}`,
+      remediation: [
+        'Check the provider pack configuration:',
+        '  - Is the API key environment variable set?',
+        '  - Is the baseUrl correct (if specified)?',
+        '  - Are required dependencies installed?',
+      ].join('\n'),
+      cause: error,
     });
   }
 
-  getPlatform(): string {
-    return this.platformName;
-  }
+  return {
+    id: validatedFactory.id,
+    aliases: validatedFactory.aliases ?? [],
+    config,
+    getModel: loadResult.getModel,
+    layer: loadResult.layer,
+  };
 }
-
-

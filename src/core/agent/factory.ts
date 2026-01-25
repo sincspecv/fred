@@ -1,37 +1,30 @@
-import { ToolLoopAgent, stepCountIs } from 'ai';
-import { convertToAISDKTool } from '../tool/utils';
+import { Effect, Layer, Stream } from 'effect';
+import * as Schema from 'effect/Schema';
+import { Tool, Toolkit, ModelMessage, LanguageModel, Prompt } from '@effect/ai';
+import type { StreamEvent } from '../stream/events';
 import { AgentConfig, AgentMessage, AgentResponse } from './agent';
-import { AIProvider } from '../platform/provider';
+import { ProviderDefinition } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
 import { createHandoffTool, HandoffResult } from '../tool/handoff';
 import { loadPromptFile } from '../../utils/prompt-loader';
-import { MCPClientImpl, createAISDKToolsFromMCP, convertMCPToolsToFredTools } from '../mcp';
+import { MCPClientImpl, convertMCPToolsToFredTools } from '../mcp';
 import { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
-import { setActiveSpan } from '../tracing/context';
+import { wrapToolExecution } from '../tool/validation';
+import { annotateSpan } from '../observability/otel';
+import { attachErrorToSpan } from '../observability/errors';
 
-/**
- * Get a safe error message for tool execution failures
- * This prevents leaking internal error details to the model
- */
 function getSafeToolErrorMessage(toolId: string, error: unknown): string {
-  // Log the actual error for debugging (server-side only)
   console.error(`Tool execution failed for "${toolId}":`, error);
-  
-  // Return a generic, safe error message that doesn't expose internal details
   return `Tool "${toolId}" execution failed. Please try again or use a different approach.`;
 }
 
-/**
- * MCP client connection metrics
- * Note: connectionsByAgent is returned as a plain object (not a Map) for JSON serialization
- */
 export interface MCPClientMetrics {
   totalConnections: number;
   activeConnections: number;
   failedConnections: number;
   closedConnections: number;
-  connectionsByAgent: Record<string, number>; // Plain object for JSON serialization
+  connectionsByAgent: Record<string, number>;
   lastConnectionTime?: Date;
   lastDisconnectionTime?: Date;
 }
@@ -42,14 +35,15 @@ export class AgentFactory {
     getAgent: (id: string) => any;
     getAvailableAgents: () => string[];
   };
-  private mcpClients: Map<string, MCPClientImpl> = new Map(); // Track MCP clients per agent
+  private mcpClients: Map<string, MCPClientImpl> = new Map();
   private tracer?: Tracer;
+  private defaultSystemMessage?: string;
   private metrics: MCPClientMetrics = {
     totalConnections: 0,
     activeConnections: 0,
     failedConnections: 0,
     closedConnections: 0,
-    connectionsByAgent: new Map(),
+    connectionsByAgent: {},
   };
   private shutdownHooksRegistered = false;
 
@@ -58,27 +52,21 @@ export class AgentFactory {
     this.tracer = tracer;
   }
 
-  /**
-   * Set the tracer for agent creation
-   */
+  setDefaultSystemMessage(systemMessage?: string): void {
+    this.defaultSystemMessage = systemMessage;
+  }
+
   setTracer(tracer?: Tracer): void {
     this.tracer = tracer;
   }
 
-  /**
-   * Set handoff handler for agent-to-agent handoffs
-   */
   setHandoffHandler(handler: { getAgent: (id: string) => any; getAvailableAgents: () => string[] }): void {
     this.handoffHandler = handler;
   }
 
-  /**
-   * Clean up MCP clients for a specific agent
-   * This should be called when an agent is removed to prevent memory leaks
-   */
   async cleanupMCPClients(agentId: string): Promise<void> {
     const keysToRemove: string[] = [];
-    
+
     for (const [key, client] of this.mcpClients.entries()) {
       if (key.startsWith(`${agentId}-`)) {
         try {
@@ -90,32 +78,24 @@ export class AgentFactory {
         keysToRemove.push(key);
       }
     }
-    
-    // Remove closed clients from map
+
     for (const key of keysToRemove) {
       this.mcpClients.delete(key);
     }
-    
-    // Update metrics
+
     this.metrics.activeConnections = this.mcpClients.size;
-    this.metrics.connectionsByAgent.delete(agentId);
+    delete this.metrics.connectionsByAgent[agentId];
     if (keysToRemove.length > 0) {
       this.metrics.lastDisconnectionTime = new Date();
     }
   }
 
-  /**
-   * Clean up all MCP clients
-   * This should be called during shutdown to prevent resource leaks
-   */
   async cleanupAllMCPClients(): Promise<void> {
     const clients = Array.from(this.mcpClients.values());
     const clientCount = clients.length;
     this.mcpClients.clear();
-    // Also clear per-agent connection counts
-    this.metrics.connectionsByAgent.clear();
-    
-    // Close all clients in parallel
+    this.metrics.connectionsByAgent = {};
+
     const results = await Promise.allSettled(
       clients.map(async (client) => {
         try {
@@ -126,47 +106,35 @@ export class AgentFactory {
         }
       })
     );
-    
-    // Update metrics
+
     this.metrics.activeConnections = 0;
     this.metrics.lastDisconnectionTime = new Date();
-    
-    // Log cleanup summary
-    const successful = results.filter(r => r.status === 'fulfilled').length;
+
+    const successful = results.filter((result) => result.status === 'fulfilled').length;
     if (clientCount > 0) {
       console.log(`[AgentFactory] Cleaned up ${successful}/${clientCount} MCP clients`);
     }
   }
 
-  /**
-   * Get MCP client connection metrics
-   */
   getMCPMetrics(): MCPClientMetrics {
-    // Convert Map to a plain object for JSON-serializable telemetry/export
-    const connectionsByAgentObj = Object.fromEntries(this.metrics.connectionsByAgent.entries());
     return {
       totalConnections: this.metrics.totalConnections,
       activeConnections: this.mcpClients.size,
       failedConnections: this.metrics.failedConnections,
       closedConnections: this.metrics.closedConnections,
-      connectionsByAgent: connectionsByAgentObj, // Plain object for JSON serialization
+      connectionsByAgent: this.metrics.connectionsByAgent,
       lastConnectionTime: this.metrics.lastConnectionTime,
       lastDisconnectionTime: this.metrics.lastDisconnectionTime,
     };
   }
 
-  /**
-   * Register shutdown hooks for cleanup
-   * This should be called once during application initialization
-   */
   registerShutdownHooks(): void {
     if (this.shutdownHooksRegistered) {
-      return; // Already registered
+      return;
     }
-    
+
     this.shutdownHooksRegistered = true;
-    
-    // Register cleanup on process exit signals
+
     const cleanup = async () => {
       try {
         await this.cleanupAllMCPClients();
@@ -174,42 +142,56 @@ export class AgentFactory {
         console.error('[AgentFactory] Error during shutdown cleanup:', error);
       }
     };
-    
-    // Handle graceful shutdown signals
+
     if (typeof process !== 'undefined') {
       process.on('SIGINT', async () => {
         await cleanup();
         process.exit(0);
       });
-      
+
       process.on('SIGTERM', async () => {
         await cleanup();
         process.exit(0);
       });
-      
-      // Handle uncaught exceptions and unhandled rejections
+
       process.on('beforeExit', async () => {
         await cleanup();
       });
     }
   }
 
-  /**
-   * Create an agent instance from configuration
-   */
   async createAgent(
     config: AgentConfig,
-    provider: AIProvider
+    provider: ProviderDefinition
   ): Promise<{
     processMessage: (message: string, messages?: AgentMessage[]) => Promise<AgentResponse>;
-    streamMessage: (message: string, messages?: AgentMessage[]) => AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown>;
+    streamMessage: (
+      message: string,
+      messages?: AgentMessage[],
+      options?: { threadId?: string }
+    ) => Stream.Stream<StreamEvent>;
   }> {
-    const model = provider.getModel(config.model);
-    
-    // Get tools for this agent
+    const resolvedSystemMessage = config.systemMessage ?? this.defaultSystemMessage ?? '';
+
+    if (!resolvedSystemMessage) {
+      throw new Error(`Agent "${config.id}" must have a systemMessage`);
+    }
+
+    const modelEffect = provider.getModel(config.model, {
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+    });
+
+    const missingTools = config.tools ? this.toolRegistry.getMissingToolIds(config.tools) : [];
+    if (missingTools.length > 0) {
+      console.warn(
+        `Agent "${config.id}" references unknown tools: ${missingTools.join(', ')}. ` +
+          'These tools will be skipped.'
+      );
+    }
     const tools = config.tools ? this.toolRegistry.getTools(config.tools) : [];
-    
-    // Auto-register handoff tool if handler is available
+    const toolTimeout = config.toolTimeout ?? 300000;
+
     if (this.handoffHandler) {
       const handoffTool = createHandoffTool(
         this.handoffHandler.getAgent,
@@ -218,75 +200,51 @@ export class AgentFactory {
       );
       tools.push(handoffTool);
     }
-    
-    // Initialize MCP servers and discover tools
-    const mcpTools: Record<string, any> = {};
-    const mcpClientInstances: MCPClientImpl[] = [];
-    
-    if (config.mcpServers && config.mcpServers.length > 0) {
-      for (const mcpConfig of config.mcpServers) {
-        // Skip disabled servers
-        if (mcpConfig.enabled === false) {
-          continue;
-        }
 
-        try {
-          // Create and initialize MCP client
-          const mcpClient = new MCPClientImpl(mcpConfig);
-          await mcpClient.initialize();
-          mcpClientInstances.push(mcpClient);
-          
-          // Store client for cleanup later
-          const clientKey = `${config.id}-${mcpConfig.id}`;
-          this.mcpClients.set(clientKey, mcpClient);
-          
-          // Update metrics
-          this.metrics.totalConnections++;
-          this.metrics.activeConnections = this.mcpClients.size;
-          this.metrics.lastConnectionTime = new Date();
-          const agentConnections = this.metrics.connectionsByAgent.get(config.id) || 0;
-          this.metrics.connectionsByAgent.set(config.id, agentConnections + 1);
-          
-          // Discover tools from MCP server
-          const discoveredTools = await mcpClient.listTools();
-          
-          // Convert MCP tools to AI SDK format
-          const aiSdkTools = createAISDKToolsFromMCP(discoveredTools, mcpClient, mcpConfig.id);
-          Object.assign(mcpTools, aiSdkTools);
-          
-          // Also register MCP tools in the tool registry (for consistency)
-          const fredTools = convertMCPToolsToFredTools(discoveredTools, mcpClient, mcpConfig.id);
-          for (const fredTool of fredTools) {
-            // Only register if not already registered (avoid conflicts)
-            if (!this.toolRegistry.hasTool(fredTool.id)) {
-              this.toolRegistry.registerTool(fredTool);
-            }
-          }
-        } catch (error) {
-          // Update metrics for failed connection
-          this.metrics.failedConnections++;
-          // Log error but don't fail agent creation
-          console.error(`Failed to initialize MCP server "${mcpConfig.id}":`, error);
-          // Continue with other MCP servers
-        }
+    const toolDefinitions = new Map<string, (typeof tools)[number]>(tools.map((tool) => [tool.id, tool]));
+    const toolExecutors = new Map<string, (args: Record<string, any>) => Promise<any> | any>(
+      tools.map((tool) => [tool.id, tool.execute])
+    );
+
+    for (const tool of tools) {
+      if (!tool.schema) {
+        tool.schema = {
+          input: Schema.Struct({}),
+          success: Schema.Unknown,
+          failure: Schema.Never,
+        };
+      }
+
+      if (!tool.schema.input) {
+        tool.schema = {
+          ...tool.schema,
+          input: Schema.Struct({}),
+        };
+      }
+
+      if (!tool.schema.success) {
+        tool.schema = {
+          ...tool.schema,
+          success: Schema.Unknown,
+        };
+      }
+
+      if (!tool.schema.failure) {
+        tool.schema = {
+          ...tool.schema,
+          failure: Schema.Never,
+        };
       }
     }
-    
-    // Convert regular tools to AI SDK format with tracing and timeout
-    const sdkTools: Record<string, any> = {};
-    const toolTimeout = config.toolTimeout ?? 300000; // Default: 5 minutes
-    
-    for (const toolDef of tools) {
-      // Wrap tool execution with tracing and timeout
-      const originalExecute = toolDef.execute;
-      const tracedExecute = async (args: any) => {
+
+    const effectTools: Tool.Any[] = [];
+    const buildToolHandler = (toolId: string, execute?: (args: Record<string, any>) => Promise<any> | any) => {
+      return (input: unknown) => {
         const startTime = Date.now();
         const toolSpan = this.tracer?.startSpan('tool.execute', {
           kind: SpanKind.CLIENT,
           attributes: {
-            'tool.id': toolDef.id,
-            'tool.name': toolDef.name,
-            'tool.args': JSON.stringify(args),
+            'tool.id': toolId,
             'tool.timeout': toolTimeout,
           },
         });
@@ -296,126 +254,153 @@ export class AgentFactory {
           this.tracer?.setActiveSpan(toolSpan);
         }
 
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        
-        try {
-          // Execute tool with timeout and ensure timer cleanup to avoid event loop handle leaks
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-              const timeoutError = new Error(`Tool "${toolDef.id}" execution timed out after ${toolTimeout}ms`);
-              timeoutError.name = 'ToolTimeoutError';
-              reject(timeoutError);
-            }, toolTimeout);
-          });
+        // Annotate tool span with Fred identifiers (best effort)
+        const toolAnnotation = annotateSpan({
+          toolId,
+          agentId: config.id,
+        });
+        Effect.runPromise(toolAnnotation).catch(() => {});
 
-          // Race between tool execution and timeout
-          const result = await Promise.race([
-            originalExecute(args),
-            timeoutPromise,
-          ]);
-          
-          // Clear timeout if execution completed successfully
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = undefined;
-          }
-          
-          const executionTime = Date.now() - startTime;
-          
-          if (toolSpan) {
-            toolSpan.setAttributes({
-              'tool.result.type': typeof result,
-              'tool.result.hasValue': result !== undefined && result !== null,
-              'tool.executionTime': executionTime,
+        const toolDefinition = toolDefinitions.get(toolId);
+        const executor = execute ?? toolDefinition?.execute;
+        const validatedExecute = toolDefinition && executor ? wrapToolExecution(toolDefinition, executor) : executor;
+
+        return Effect.tryPromise({
+          try: async () => {
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => {
+                const timeoutError = new Error(`Tool "${toolId}" execution timed out after ${toolTimeout}ms`);
+                timeoutError.name = 'ToolTimeoutError';
+                reject(timeoutError);
+              }, toolTimeout);
             });
-            // Don't log full result if it's too large (could be sensitive data)
-            if (typeof result === 'string' && result.length < 1000) {
-              toolSpan.setAttribute('tool.result.preview', result.substring(0, 100));
+
+            try {
+              const result = await Promise.race([
+                Promise.resolve(validatedExecute ? validatedExecute(input as Record<string, any>) : undefined),
+                timeoutPromise,
+              ]);
+              return result;
+            } finally {
+              if (timeoutId) {
+                clearTimeout(timeoutId);
+              }
             }
-            toolSpan.setStatus('ok');
-          }
-          
-          return result;
-        } catch (error) {
-          // Clear timeout on error (whether timeout or execution error)
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = undefined;
-          }
-          
-          const executionTime = Date.now() - startTime;
-          
-          if (toolSpan) {
-            toolSpan.setAttribute('tool.executionTime', executionTime);
-            if (error instanceof Error) {
-              toolSpan.recordException(error);
-              const isTimeout = error.name === 'ToolTimeoutError';
-              toolSpan.setAttribute('tool.timedOut', isTimeout);
-              toolSpan.setStatus('error', error.message);
-            } else {
-              toolSpan.setStatus('error', 'Unknown error');
+          },
+          catch: (error) => {
+            const executionTime = Date.now() - startTime;
+            const err = error instanceof Error ? error : new Error(String(error));
+
+            if (toolSpan) {
+              toolSpan.setAttribute('tool.executionTime', executionTime);
+              // Use error taxonomy for span status/classification
+              attachErrorToSpan(toolSpan, err, {
+                includeStack: false,
+              });
             }
-          }
-          
-          // Return safe error message for timeouts to prevent leaking internal details
-          if (error instanceof Error && error.name === 'ToolTimeoutError') {
-            // Log the actual error for debugging
-            console.error(`Tool execution timed out for "${toolDef.id}" after ${toolTimeout}ms`);
-            // Return a safe error message
-            throw new Error(`Tool "${toolDef.id}" execution timed out. Please try again or use a different approach.`);
-          }
-          
-          throw error;
-        } finally {
-          // Ensure timeout is always cleared to prevent memory leaks
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-          }
-          
-          if (toolSpan) {
-            toolSpan.end();
-            // Restore previous active span
+
+            if (err.name === 'ToolTimeoutError') {
+              return new Error(`Tool "${toolId}" execution timed out. Please try again or use a different approach.`);
+            }
+
+            return new Error(getSafeToolErrorMessage(toolId, error));
+          },
+        }).tap((result) =>
+          Effect.sync(() => {
+            const executionTime = Date.now() - startTime;
+            if (toolSpan) {
+              toolSpan.setAttributes({
+                'tool.executionTime': executionTime,
+                'tool.result.hasValue': result !== undefined && result !== null,
+              });
+              toolSpan.setStatus('ok');
+            }
+          })
+        ).ensuring(
+          Effect.sync(() => {
+            if (toolSpan) {
+              toolSpan.end();
+            }
             if (previousActiveSpan) {
               this.tracer?.setActiveSpan(previousActiveSpan);
             } else {
               this.tracer?.setActiveSpan(undefined);
             }
-          }
-        }
+          })
+        );
       };
+    };
 
-      // Convert tool to AI SDK format using shared utility
-      // The utility handles schema normalization, Groq compatibility, and AI SDK v6 conversion
-      sdkTools[toolDef.id] = convertToAISDKTool(
-        toolDef,
-        tracedExecute as (args: Record<string, any>) => Promise<any>
+    for (const toolDef of tools) {
+      effectTools.push(
+        Tool.make(toolDef.id, {
+          description: toolDef.description,
+          parameters: toolDef.schema?.input ? toolDef.schema.input.fields : {},
+          success: toolDef.schema?.success,
+          failure: toolDef.schema?.failure,
+        })
       );
     }
-    
-    // Merge MCP tools with regular tools
-    Object.assign(sdkTools, mcpTools);
 
-    // Load system message (handle file paths for programmatic usage)
-    // Note: When loaded from config, paths are already resolved in extractAgents
-    // For programmatic usage, sandbox to current working directory and disallow absolute paths
-    const systemMessage = loadPromptFile(config.systemMessage, undefined, false);
+    const mcpClientInstances: MCPClientImpl[] = [];
+    if (config.mcpServers && config.mcpServers.length > 0) {
+      for (const mcpConfig of config.mcpServers) {
+        if (mcpConfig.enabled === false) {
+          continue;
+        }
+        try {
+          const mcpClient = new MCPClientImpl(mcpConfig);
+          await mcpClient.initialize();
+          mcpClientInstances.push(mcpClient);
 
-    // Create ToolLoopAgent instance
-    const agent = new ToolLoopAgent({
-      model,
-      instructions: systemMessage,
-      tools: Object.keys(sdkTools).length > 0 ? sdkTools : undefined,
-      stopWhen: stepCountIs(config.maxSteps ?? 20),
-      toolChoice: config.toolChoice,
-      temperature: config.temperature,
-    });
+          const clientKey = `${config.id}-${mcpConfig.id}`;
+          this.mcpClients.set(clientKey, mcpClient);
 
-    // Create the agent processing function
+          this.metrics.totalConnections++;
+          this.metrics.activeConnections = this.mcpClients.size;
+          this.metrics.lastConnectionTime = new Date();
+          this.metrics.connectionsByAgent[config.id] = (this.metrics.connectionsByAgent[config.id] ?? 0) + 1;
+
+          const discoveredTools = await mcpClient.listTools();
+          const fredTools = convertMCPToolsToFredTools(discoveredTools, mcpClient, mcpConfig.id);
+          for (const fredTool of fredTools) {
+            if (!this.toolRegistry.hasTool(fredTool.id)) {
+              this.toolRegistry.registerTool(fredTool);
+            }
+            toolExecutors.set(fredTool.id, fredTool.execute);
+            toolDefinitions.set(fredTool.id, fredTool);
+            effectTools.push(
+              Tool.make(fredTool.id, {
+                description: fredTool.description,
+                parameters: fredTool.schema?.input ? fredTool.schema.input.fields : {},
+                success: fredTool.schema?.success,
+                failure: fredTool.schema?.failure,
+              })
+            );
+          }
+        } catch (error) {
+          this.metrics.failedConnections++;
+          console.error(`Failed to initialize MCP server "${mcpConfig.id}":`, error);
+        }
+      }
+    }
+
+    const toolkit = effectTools.length > 0 ? Toolkit.make(...effectTools) : undefined;
+    const toolLayer = toolkit
+      ? toolkit.toLayer(
+          Object.fromEntries(
+            effectTools.map((tool) => [tool.name, buildToolHandler(tool.name, toolExecutors.get(tool.name))])
+          )
+        )
+      : Layer.empty;
+
+    const systemMessage = loadPromptFile(resolvedSystemMessage, undefined, false);
+
     const processMessage = async (
       message: string,
       previousMessages: AgentMessage[] = []
     ): Promise<AgentResponse> => {
-      // Create span for model call if tracing is enabled
       const modelSpan = this.tracer?.startSpan('model.call', {
         kind: SpanKind.CLIENT,
         attributes: {
@@ -435,53 +420,85 @@ export class AgentFactory {
         this.tracer?.setActiveSpan(modelSpan);
       }
 
-      let result;
-      try {
-        // Use ToolLoopAgent.generate() which handles the tool loop automatically
-        // Use messages if we have history, otherwise use prompt
-        // Note: maxTokens is not directly supported in generate(), it's set in the agent constructor
-        if (previousMessages.length > 0) {
-          result = await agent.generate({
-            messages: [
-              ...previousMessages,
-              { role: 'user', content: message },
-            ],
-          });
-        } else {
-          result = await agent.generate({
-            prompt: message,
-          });
-        }
+      // Annotate model span with Fred identifiers (best effort)
+      const modelAnnotation = annotateSpan({
+        agentId: config.id,
+        provider: config.platform,
+      });
+      Effect.runPromise(modelAnnotation).catch(() => {});
 
-        // Record model response attributes
+      try {
+        const program = Effect.gen(function* () {
+          const model = yield* modelEffect;
+          const inputMessages: ModelMessage[] = [
+            { role: 'system', content: systemMessage },
+            ...previousMessages,
+            { role: 'user', content: message },
+          ];
+
+          return yield* LanguageModel.generateText({
+            model,
+            messages: inputMessages,
+            tools: toolkit,
+            maxSteps: config.maxSteps ?? 20,
+            toolChoice: config.toolChoice,
+            temperature: config.temperature,
+          });
+        });
+
+        const result = await Effect.runPromise(program.pipe(Effect.provide(provider.layer), Effect.provide(toolLayer)));
+
         if (modelSpan) {
-          const usage = result.usage;
-          // Safely extract usage metrics (usage may have different shapes depending on provider)
-          const promptTokens = (usage && 'promptTokens' in usage && typeof usage.promptTokens === 'number') ? usage.promptTokens : 0;
-          const completionTokens = (usage && 'completionTokens' in usage && typeof usage.completionTokens === 'number') ? usage.completionTokens : 0;
-          const totalTokens = (usage && 'totalTokens' in usage && typeof usage.totalTokens === 'number') ? usage.totalTokens : 0;
-          
           modelSpan.setAttributes({
             'response.length': result.text.length,
-            'response.finishReason': result.finishReason || 'unknown',
-            'usage.promptTokens': promptTokens,
-            'usage.completionTokens': completionTokens,
-            'usage.totalTokens': totalTokens,
-            'toolCalls.count': result.toolCalls ? (Array.isArray(result.toolCalls) ? result.toolCalls.length : 0) : 0,
-            'steps.count': result.steps ? (Array.isArray(result.steps) ? result.steps.length : 0) : 0,
+            'response.finishReason': result.finishReason ?? 'unknown',
+            'toolCalls.count': result.toolCalls?.length ?? 0,
           });
           modelSpan.setStatus('ok');
         }
+
+        const toolCalls = (result.toolCalls ?? []).map((toolCall) => ({
+          toolId: toolCall.name,
+          args: toolCall.input as Record<string, any>,
+          result: toolCall.output,
+          metadata: toolCall.metadata as Record<string, unknown> | undefined,
+        }));
+
+        const usage = result.usage
+          ? {
+              inputTokens: result.usage.inputTokens,
+              outputTokens: result.usage.outputTokens,
+              totalTokens: result.usage.totalTokens,
+            }
+          : undefined;
+
+        const handoffCall = toolCalls.find((call) => call.toolId === 'handoff_to_agent');
+        if (handoffCall && handoffCall.result && typeof handoffCall.result === 'object' && 'type' in handoffCall.result) {
+          return {
+            content: result.text,
+            toolCalls,
+            usage,
+            handoff: handoffCall.result as HandoffResult,
+          };
+        }
+
+        return {
+          content: result.text,
+          toolCalls,
+          usage,
+        };
       } catch (error) {
-        if (modelSpan && error instanceof Error) {
-          modelSpan.recordException(error);
-          modelSpan.setStatus('error', error.message);
+        const err = error instanceof Error ? error : new Error(String(error));
+        if (modelSpan) {
+          // Use error taxonomy for span status/classification
+          attachErrorToSpan(modelSpan, err, {
+            includeStack: false,
+          });
         }
         throw error;
       } finally {
         if (modelSpan) {
           modelSpan.end();
-          // Restore previous active span
           if (previousActiveSpan) {
             this.tracer?.setActiveSpan(previousActiveSpan);
           } else {
@@ -489,188 +506,314 @@ export class AgentFactory {
           }
         }
       }
-
-      // Extract tool calls if any
-      // ToolLoopAgent automatically executes tools and includes results
-      // Need to await toolCalls if it's a promise
-      const toolCallsArray = result.toolCalls ? await Promise.resolve(result.toolCalls) : [];
-      const toolCalls = toolCallsArray.map((tc: any) => ({
-        toolId: tc.toolName || tc.toolCallId || 'unknown',
-        args: ('args' in tc ? tc.args : {}) as Record<string, any>,
-        result: ('result' in tc ? tc.result : undefined),
-      }));
-
-      // Check for handoff tool calls
-      // Need to check all steps for handoff tool calls
-      const handoffCall = toolCalls?.find(tc => tc.toolId === 'handoff_to_agent');
-      if (handoffCall && handoffCall.result && typeof handoffCall.result === 'object' && 'type' in handoffCall.result && handoffCall.result.type === 'handoff') {
-        // Return handoff result - will be processed by message pipeline
-        return {
-          content: result.text,
-          toolCalls,
-          handoff: handoffCall.result as HandoffResult,
-        } as AgentResponse & { handoff?: HandoffResult };
-      }
-
-      // ToolLoopAgent handles the tool loop internally, so we just return the final result
-      return {
-        content: result.text,
-        toolCalls,
-      };
     };
 
-    // Create streaming function for this agent
-    const streamMessage = async function* (
+    const streamMessage = (
       message: string,
-      previousMessages: AgentMessage[] = []
-    ): AsyncGenerator<{ textDelta: string; fullText: string; toolCalls?: any[] }, void, unknown> {
-      // Use ToolLoopAgent.stream() which handles the tool loop automatically
-      // Use messages if we have history, otherwise use prompt (can't use both)
-      const streamResult = previousMessages.length > 0
-        ? await agent.stream({
-            messages: [
-              ...previousMessages,
-              { role: 'user', content: message },
-            ],
-          })
-        : await agent.stream({
-            prompt: message,
-          });
-      
-      const stream = streamResult;
+      previousMessages: AgentMessage[] = [],
+      options?: { threadId?: string }
+    ): Stream.Stream<StreamEvent> => {
+      const startedAt = Date.now();
+      const runId = `run_${startedAt}_${Math.random().toString(36).slice(2, 8)}`;
+      const messageId = `msg_${startedAt}_${Math.random().toString(36).slice(2, 6)}`;
+      const threadId = options?.threadId;
 
-      let fullText = '';
-      let toolCalls: any[] | undefined;
-      let hasYieldedText = false;
+      const toPromptMessages = (messages: ModelMessage[]): Prompt.MessageEncoded[] =>
+        messages.map((msg) => {
+          if (msg.role === 'system') {
+            return { role: 'system', content: String(msg.content) } as Prompt.SystemMessageEncoded;
+          }
+          if (msg.role === 'user') {
+            return { role: 'user', content: String(msg.content) } as Prompt.UserMessageEncoded;
+          }
+          if (msg.role === 'tool') {
+            return { role: 'tool', content: String(msg.content), toolCallId: (msg as any).toolCallId } as Prompt.ToolMessageEncoded;
+          }
 
-      // Stream text chunks from ToolLoopAgent
-      if (stream.textStream && typeof stream.textStream[Symbol.asyncIterator] === 'function') {
-        try {
-          for await (const chunk of stream.textStream) {
-            // Ensure chunk is a string and validate size
-            const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB max chunk size
-            let chunkText = typeof chunk === 'string' ? chunk : (chunk ? String(chunk) : '');
-            
-            // Prevent resource exhaustion from extremely large chunks
-            if (chunkText.length > MAX_CHUNK_SIZE) {
-              console.warn(`[FACTORY] Warning: Chunk size (${chunkText.length} bytes) exceeds maximum (${MAX_CHUNK_SIZE} bytes). Truncating.`);
-              chunkText = chunkText.substring(0, MAX_CHUNK_SIZE);
-            }
-            
-            if (chunkText) {
-              hasYieldedText = true;
-              fullText += chunkText;
-              
-              yield {
-                textDelta: chunkText,
-                fullText,
-                toolCalls,
+          return {
+            role: 'assistant',
+            content: String(msg.content ?? ''),
+          } as Prompt.AssistantMessageEncoded;
+        });
+
+      const promptMessages = [
+        { role: 'system', content: systemMessage } as Prompt.SystemMessageEncoded,
+        ...toPromptMessages(previousMessages),
+        { role: 'user', content: message } as Prompt.UserMessageEncoded,
+      ];
+
+      const prompt = Prompt.make(promptMessages as Prompt.MessageEncoded[]);
+
+      const streamEffect = Effect.gen(function* () {
+        const model = yield* modelEffect;
+        return LanguageModel.streamText({
+          model,
+          prompt,
+          toolkit,
+          maxSteps: config.maxSteps ?? 20,
+          toolChoice: config.toolChoice as any,
+          temperature: config.temperature,
+        });
+      });
+
+      const partsStream = Stream.unwrap(
+        streamEffect.pipe(
+          Effect.provide(provider.layer),
+          Effect.provide(toolLayer),
+          Effect.map((stream) => stream)
+        )
+      );
+
+      const initialEvents: StreamEvent[] = [
+        {
+          type: 'run-start',
+          sequence: 0,
+          emittedAt: startedAt,
+          runId,
+          threadId,
+          input: {
+            message,
+            previousMessages: [...previousMessages],
+          },
+          startedAt,
+        },
+        {
+          type: 'message-start',
+          sequence: 1,
+          emittedAt: startedAt,
+          runId,
+          threadId,
+          messageId,
+          step: 0,
+          role: 'assistant',
+        },
+      ];
+
+      type StreamState = {
+        sequence: number;
+        step: number;
+        text: string;
+        toolStarts: Map<string, { toolName: string; startedAt: number }>;
+        toolCalls: Array<{
+          toolId: string;
+          args: Record<string, unknown>;
+          result?: unknown;
+          error?: {
+            message: string;
+            name?: string;
+            stack?: string;
+          };
+        }>;
+        finishReason?: string;
+        usage?: {
+          inputTokens?: number;
+          outputTokens?: number;
+          totalTokens?: number;
+        };
+      };
+
+      const initialState: StreamState = {
+        sequence: 2,
+        step: 0,
+        text: '',
+        toolStarts: new Map(),
+        toolCalls: [],
+      };
+
+      const mappedEvents = partsStream.pipe(
+        Stream.mapAccum(initialState, (state, part): [StreamState, StreamEvent[]] => {
+          const emittedAt = Date.now();
+          const nextState: StreamState = {
+            ...state,
+            toolStarts: new Map(state.toolStarts),
+            toolCalls: [...state.toolCalls],
+          };
+          const events: StreamEvent[] = [];
+
+          if (part.type === 'text-start') {
+            nextState.step += 1;
+          }
+
+          if (part.type === 'text-delta') {
+            nextState.text += part.delta;
+            events.push({
+              type: 'token',
+              sequence: nextState.sequence++,
+              emittedAt,
+              runId,
+              threadId,
+              messageId,
+              step: nextState.step,
+              delta: part.delta,
+              accumulated: nextState.text,
+            });
+          }
+
+          if (part.type === 'tool-call') {
+            const startedAtPart = Date.now();
+            nextState.toolStarts.set(part.id, { toolName: part.name, startedAt: startedAtPart });
+            nextState.toolCalls.push({
+              toolId: part.name,
+              args: part.params as Record<string, unknown>,
+            });
+            events.push({
+              type: 'tool-call',
+              sequence: nextState.sequence++,
+              emittedAt,
+              runId,
+              threadId,
+              messageId,
+              step: nextState.step,
+              toolCallId: part.id,
+              toolName: part.name,
+              input: part.params as Record<string, unknown>,
+              startedAt: startedAtPart,
+            });
+          }
+
+          if (part.type === 'tool-result') {
+            const start = nextState.toolStarts.get(part.id);
+            const durationMs = start ? emittedAt - start.startedAt : 0;
+            if (part.isFailure) {
+              const errorPayload = {
+                message: typeof part.result === 'string' ? part.result : JSON.stringify(part.result),
               };
+              nextState.toolCalls = nextState.toolCalls.map((call) =>
+                call.toolId === part.name && !call.result && !call.error
+                  ? { ...call, error: errorPayload }
+                  : call
+              );
+              events.push({
+                type: 'tool-error',
+                sequence: nextState.sequence++,
+                emittedAt,
+                runId,
+                threadId,
+                messageId,
+                step: nextState.step,
+                toolCallId: part.id,
+                toolName: part.name,
+                error: errorPayload,
+                completedAt: emittedAt,
+                durationMs,
+              });
+            } else {
+              nextState.toolCalls = nextState.toolCalls.map((call) =>
+                call.toolId === part.name && call.result === undefined && call.error === undefined
+                  ? { ...call, result: part.result }
+                  : call
+              );
+              events.push({
+                type: 'tool-result',
+                sequence: nextState.sequence++,
+                emittedAt,
+                runId,
+                threadId,
+                messageId,
+                step: nextState.step,
+                toolCallId: part.id,
+                toolName: part.name,
+                output: part.result,
+                completedAt: emittedAt,
+                durationMs,
+              });
             }
           }
-        } catch (streamError) {
-          // If textStream errors, log but continue to get final result
-          console.warn('Error reading textStream:', streamError);
-        }
-      }
 
-      // Get final result to extract tool calls and check for any remaining text
-      const result = await stream;
-      
-      // Ensure result.text is a string (it might be undefined, null, Promise, or other type)
-      let resultText = '';
-      if (result.text !== undefined && result.text !== null) {
-        if (typeof result.text === 'string') {
-          resultText = result.text;
-        } else if (result.text instanceof Promise) {
-          // If it's a Promise, await it
-          resultText = String(await result.text);
-        } else {
-          // Convert to string
-          resultText = String(result.text);
-        }
-      }
-      
-      // If textStream didn't yield anything but result.text exists, yield it now
-      // This can happen when tools are called and the model doesn't generate text until after tool execution
-      if (!hasYieldedText && resultText && resultText.trim()) {
-        fullText = resultText;
-        yield {
-          textDelta: resultText,
-          fullText,
-          toolCalls,
-        };
-      } else if (hasYieldedText && resultText && resultText !== fullText) {
-        // If we got some text from stream but result.text has more, yield the difference
-        const remainingText = resultText.slice(fullText.length);
-        if (remainingText) {
-          fullText = resultText;
-          yield {
-            textDelta: remainingText,
-            fullText,
-            toolCalls,
-          };
-        }
-      } else if (!hasYieldedText && !resultText) {
-        // No text at all - update fullText to empty string
-        fullText = '';
-      } else {
-        // Ensure fullText matches result.text
-        fullText = resultText || fullText;
-      }
+          if (part.type === 'finish') {
+            nextState.finishReason = part.reason;
+            nextState.usage = {
+              inputTokens: part.usage.inputTokens,
+              outputTokens: part.usage.outputTokens,
+              totalTokens: part.usage.totalTokens,
+            };
+            events.push({
+              type: 'usage',
+              sequence: nextState.sequence++,
+              emittedAt,
+              runId,
+              threadId,
+              messageId,
+              step: nextState.step,
+              usage: nextState.usage,
+            });
+            events.push({
+              type: 'message-end',
+              sequence: nextState.sequence++,
+              emittedAt,
+              runId,
+              threadId,
+              messageId,
+              step: nextState.step,
+              finishedAt: emittedAt,
+              finishReason: part.reason,
+            });
+          }
 
-      // Handle tool calls from final result
-      // ToolLoopAgent automatically executes tools and includes results
-      // Need to await toolCalls if it's a promise
-      const toolCallsArray = result.toolCalls ? await Promise.resolve(result.toolCalls) : [];
-      if (toolCallsArray.length > 0) {
-        // Map tool calls from result
-        toolCalls = toolCallsArray.map((tc: any) => ({
-          toolId: tc.toolName || tc.toolCallId || 'unknown',
-          args: ('args' in tc ? tc.args : {}) as Record<string, any>,
-          result: ('result' in tc ? tc.result : undefined),
-        }));
-        
-        // If we have tool results but no text, yield the tool calls
-        // The caller (Fred's streamMessage) will handle continuation if needed
-        if (toolCalls && toolCalls.length > 0 && !hasYieldedText) {
-          yield {
-            textDelta: '',
-            fullText,
-            toolCalls,
+          return [nextState, events];
+        }),
+        Stream.flatMap(([, events]) => Stream.fromIterable(events))
+      );
+
+      const finalEvent = mappedEvents.pipe(
+        Stream.runFold(initialState, (state, event) => {
+          if (event.type === 'token') {
+            return {
+              ...state,
+              text: event.accumulated,
+              sequence: event.sequence + 1,
+            };
+          }
+          if (event.type === 'usage') {
+            return {
+              ...state,
+              usage: event.usage,
+              sequence: event.sequence + 1,
+            };
+          }
+          if (event.type === 'message-end') {
+            return {
+              ...state,
+              finishReason: event.finishReason,
+              sequence: event.sequence + 1,
+            };
+          }
+          if (event.type === 'tool-call' || event.type === 'tool-result' || event.type === 'tool-error') {
+            return {
+              ...state,
+              sequence: Math.max(state.sequence, event.sequence + 1),
+            };
+          }
+          return {
+            ...state,
+            sequence: Math.max(state.sequence, event.sequence + 1),
           };
-        } else if (toolCalls && toolCalls.length > 0) {
-          // Yield tool calls with current text
-          yield {
-            textDelta: '',
-            fullText,
-            toolCalls,
+        }),
+        Effect.map((finalState) => {
+          const finishedAt = Date.now();
+          return {
+            type: 'run-end' as const,
+            sequence: finalState.sequence,
+            emittedAt: finishedAt,
+            runId,
+            threadId,
+            finishedAt,
+            durationMs: finishedAt - startedAt,
+            result: {
+              content: finalState.text,
+              toolCalls: finalState.toolCalls,
+              usage: finalState.usage,
+            },
           };
-        }
-      }
-      
-      // If we haven't yielded anything yet and we have text, yield it now
-      if (!hasYieldedText && fullText) {
-        yield {
-          textDelta: fullText,
-          fullText,
-          toolCalls,
-        };
-      }
-      
-      // Always yield at least one chunk to indicate completion (even if empty)
-      // This ensures the caller knows the stream is complete
-      if (!hasYieldedText && !fullText && (!toolCalls || toolCalls.length === 0)) {
-        yield {
-          textDelta: '',
-          fullText: '',
-          toolCalls: undefined,
-        };
-      }
+        })
+      );
+
+      return Stream.fromIterable(initialEvents).pipe(
+        Stream.concat(mappedEvents),
+        Stream.concat(Stream.fromEffect(finalEvent))
+      );
     };
 
     return { processMessage, streamMessage };
   }
 }
-
-

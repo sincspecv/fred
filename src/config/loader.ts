@@ -1,11 +1,40 @@
-import { FrameworkConfig } from './types';
+import { FrameworkConfig, ConfigStep, ConfigConditionalStep, ProviderPackConfig, PersistenceConfig } from './types';
 import { parseConfigFile } from './parser';
 import { Intent } from '../core/intent/intent';
 import { AgentConfig } from '../core/agent/agent';
-import { PipelineConfig } from '../core/pipeline/pipeline';
-import { Tool } from '../core/tool/tool';
+import { PipelineConfig, PipelineConfigV2 } from '../core/pipeline/pipeline';
+import { PipelineStep } from '../core/pipeline/steps';
+import { Tool, ToolSchemaMetadata } from '../core/tool/tool';
 import { loadPromptFile } from '../utils/prompt-loader';
 import { validateId, validatePipelineAgentCount } from '../utils/validation';
+import { Workflow } from '../core/workflow/types';
+import { ProviderConfig } from '../core/platform/provider';
+import { z } from 'zod';
+
+// =============================================================================
+// Pipeline V2 Function Registry
+// =============================================================================
+
+// Module-level registry for config-resolvable functions
+const functionRegistry = new Map<string, (ctx: any) => unknown | Promise<unknown>>();
+
+/**
+ * Register a function for use in config-defined pipelines.
+ * Must be called before loading config that references this function.
+ */
+export function registerPipelineFunction(
+  id: string,
+  fn: (ctx: any) => unknown | Promise<unknown>
+): void {
+  functionRegistry.set(id, fn);
+}
+
+/**
+ * Clear all registered pipeline functions.
+ */
+export function clearPipelineFunctions(): void {
+  functionRegistry.clear();
+}
 
 /**
  * Load configuration from a file
@@ -18,6 +47,8 @@ export function loadConfig(filePath: string): FrameworkConfig {
  * Validate config structure
  */
 export function validateConfig(config: FrameworkConfig): void {
+  const hasDefaultSystemMessage = Boolean(config.defaultSystemMessage);
+
   if (config.intents) {
     for (const intent of config.intents) {
       if (!intent.id) {
@@ -40,8 +71,8 @@ export function validateConfig(config: FrameworkConfig): void {
       if (!agent.id) {
         throw new Error('Agent must have an id');
       }
-      if (!agent.systemMessage) {
-        throw new Error(`Agent "${agent.id}" must have a systemMessage`);
+      if (!agent.systemMessage && !hasDefaultSystemMessage) {
+        throw new Error(`Agent "${agent.id}" must have a systemMessage or defaultSystemMessage must be configured`);
       }
       if (!agent.platform) {
         throw new Error(`Agent "${agent.id}" must have a platform`);
@@ -63,8 +94,12 @@ export function validateConfig(config: FrameworkConfig): void {
       if (!tool.description) {
         throw new Error(`Tool "${tool.id}" must have a description`);
       }
-      if (!tool.parameters) {
-        throw new Error(`Tool "${tool.id}" must have parameters`);
+      const schemaMetadata = tool.schema?.metadata;
+      if (tool.strict && !schemaMetadata) {
+        throw new Error(`Tool "${tool.id}" requires schema metadata when strict mode is enabled`);
+      }
+      if (schemaMetadata) {
+        validateSchemaMetadata(tool.id, schemaMetadata);
       }
     }
   }
@@ -105,8 +140,10 @@ export function validateConfig(config: FrameworkConfig): void {
           }
           // Validate inline agent ID format
           validateId(agentRef.id, `Inline agent ID in pipeline "${pipeline.id}"`);
-          if (!agentRef.systemMessage) {
-            throw new Error(`Pipeline "${pipeline.id}" has inline agent "${agentRef.id}" without a systemMessage`);
+          if (!agentRef.systemMessage && !hasDefaultSystemMessage) {
+            throw new Error(
+              `Pipeline "${pipeline.id}" has inline agent "${agentRef.id}" without a systemMessage or defaultSystemMessage`
+            );
           }
           if (!agentRef.platform) {
             throw new Error(`Pipeline "${pipeline.id}" has inline agent "${agentRef.id}" without a platform`);
@@ -116,6 +153,61 @@ export function validateConfig(config: FrameworkConfig): void {
           }
         }
       }
+    }
+  }
+
+  // Validate routing configuration
+  if (config.routing) {
+    // defaultAgent must be a string if present
+    if (config.routing.defaultAgent !== undefined && typeof config.routing.defaultAgent !== 'string') {
+      throw new Error('Routing defaultAgent must be a string');
+    }
+
+    // rules must be an array
+    if (!Array.isArray(config.routing.rules)) {
+      throw new Error('Routing rules must be an array');
+    }
+
+    // Validate each rule
+    for (const rule of config.routing.rules) {
+      if (!rule.id) {
+        throw new Error('Routing rule must have an id');
+      }
+      if (!rule.agent) {
+        throw new Error(`Routing rule "${rule.id}" must have an agent`);
+      }
+      // Don't throw on unknown agent - just warn at runtime (per project decision)
+    }
+  }
+
+  // Validate workflow configuration
+  if (config.workflows) {
+    for (const [workflowName, workflowConfig] of Object.entries(config.workflows)) {
+      if (!workflowConfig.defaultAgent) {
+        throw new Error(`Workflow "${workflowName}" must have a defaultAgent`);
+      }
+      if (!workflowConfig.agents || !Array.isArray(workflowConfig.agents)) {
+        throw new Error(`Workflow "${workflowName}" must have an agents array`);
+      }
+      if (workflowConfig.agents.length === 0) {
+        throw new Error(`Workflow "${workflowName}" must have at least one agent`);
+      }
+      // Warn if defaultAgent is not in agents array
+      if (!workflowConfig.agents.includes(workflowConfig.defaultAgent)) {
+        console.warn(
+          `[Config] Workflow "${workflowName}" defaultAgent "${workflowConfig.defaultAgent}" not in agents list`
+        );
+      }
+    }
+  }
+
+  // Validate persistence configuration
+  if (config.persistence) {
+    const validAdapters = ['postgres', 'sqlite'];
+    if (!validAdapters.includes(config.persistence.adapter)) {
+      throw new Error(
+        `Invalid persistence adapter "${config.persistence.adapter}". Valid adapters are: ${validAdapters.join(', ')}`
+      );
     }
   }
 }
@@ -134,24 +226,39 @@ export function extractIntents(config: FrameworkConfig): Intent[] {
  */
 export function extractAgents(config: FrameworkConfig, basePath?: string): AgentConfig[] {
   const agents = config.agents || [];
+  const defaultSystemMessage = config.defaultSystemMessage
+    ? loadPromptFile(config.defaultSystemMessage, basePath, false)
+    : undefined;
   
   // If basePath is provided, resolve prompt file paths
   // Paths are sandboxed to the config file's directory to prevent path traversal attacks
   if (basePath && agents.length > 0) {
     return agents.map(agent => ({
       ...agent,
-      systemMessage: loadPromptFile(agent.systemMessage, basePath, false),
+      systemMessage: agent.systemMessage
+        ? loadPromptFile(agent.systemMessage, basePath, false)
+        : defaultSystemMessage ?? '',
     }));
   }
-  
-  return agents;
+
+  return agents.map(agent => ({
+    ...agent,
+    systemMessage: agent.systemMessage ?? defaultSystemMessage ?? '',
+  }));
 }
 
 /**
  * Extract tools from config (without execute functions)
  */
 export function extractTools(config: FrameworkConfig): Omit<Tool, 'execute'>[] {
-  return config.tools || [];
+  return (config.tools || []).map(tool => ({
+    ...tool,
+    schema: tool.schema?.metadata
+      ? {
+          metadata: tool.schema.metadata,
+        }
+      : undefined,
+  }));
 }
 
 /**
@@ -161,6 +268,9 @@ export function extractTools(config: FrameworkConfig): Omit<Tool, 'execute'>[] {
  */
 export function extractPipelines(config: FrameworkConfig, basePath?: string): PipelineConfig[] {
   const pipelines = config.pipelines || [];
+  const defaultSystemMessage = config.defaultSystemMessage
+    ? loadPromptFile(config.defaultSystemMessage, basePath, false)
+    : undefined;
   
   // Always return a new array of deep-copied pipeline objects to prevent mutation
   // of the original configuration
@@ -169,17 +279,260 @@ export function extractPipelines(config: FrameworkConfig, basePath?: string): Pi
     description: pipeline.description,
     utterances: pipeline.utterances ? [...pipeline.utterances] : undefined,
     agents: pipeline.agents.map(agentRef => {
-      if (typeof agentRef === 'string' || !basePath) {
+      if (typeof agentRef === 'string') {
         return agentRef;
+      }
+      if (!basePath) {
+        return {
+          ...agentRef,
+          systemMessage: agentRef.systemMessage ?? defaultSystemMessage ?? '',
+        };
       }
       // Inline agent config - resolve systemMessage path
       // Pass allowAbsolutePaths=false to prevent absolute path attacks
       return {
         ...agentRef,
-        systemMessage: loadPromptFile(agentRef.systemMessage, basePath, false),
+        systemMessage: agentRef.systemMessage
+          ? loadPromptFile(agentRef.systemMessage, basePath, false)
+          : defaultSystemMessage ?? '',
       };
     }),
   }));
 }
 
+function validateSchemaMetadata(toolId: string, metadata: ToolSchemaMetadata): void {
+  if (metadata.type !== 'object') {
+    throw new Error(`Tool "${toolId}" schema metadata must be type "object"`);
+  }
+  if (!metadata.properties || typeof metadata.properties !== 'object') {
+    throw new Error(`Tool "${toolId}" schema metadata must include properties`);
+  }
+}
 
+/**
+ * Extract workflows from config
+ */
+export function extractWorkflows(config: FrameworkConfig): Workflow[] {
+  if (!config.workflows) return [];
+
+  return Object.entries(config.workflows).map(([name, workflowConfig]) => ({
+    name,
+    defaultAgent: workflowConfig.defaultAgent,
+    agents: workflowConfig.agents,
+    routing: workflowConfig.routing,
+  }));
+}
+
+// =============================================================================
+// Provider Extraction
+// =============================================================================
+
+/**
+ * Zod schema for provider pack configuration validation.
+ */
+const ProviderPackConfigSchema = z.object({
+  id: z.string().min(1, 'Provider id is required'),
+  package: z.string().optional(),
+  apiKeyEnvVar: z.string().optional(),
+  baseUrl: z.string().url().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  modelDefaults: z.object({
+    model: z.string().optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    maxTokens: z.number().positive().optional(),
+  }).optional(),
+});
+
+const ProvidersConfigSchema = z.array(ProviderPackConfigSchema);
+
+/**
+ * Validate providers configuration with Zod.
+ * Returns empty array if providers is null/undefined.
+ * Throws ZodError if validation fails.
+ */
+export function validateProvidersConfig(providers: unknown): ProviderPackConfig[] {
+  if (providers === undefined || providers === null) {
+    return [];
+  }
+  return ProvidersConfigSchema.parse(providers);
+}
+
+/**
+ * Extracted provider ready for runtime registration.
+ */
+export interface ExtractedProvider {
+  /** Provider ID (e.g., 'openai', 'anthropic') */
+  id: string;
+  /** Package name - either explicit or defaults to id for built-ins */
+  package: string;
+  /** Runtime configuration for the provider */
+  config: ProviderConfig;
+}
+
+/**
+ * Extract provider registrations from config.
+ * Validates with Zod, then converts ProviderPackConfig[] to ExtractedProvider[] for runtime use.
+ */
+export function extractProviders(config: FrameworkConfig): ExtractedProvider[] {
+  const validated = validateProvidersConfig(config.providers);
+  if (validated.length === 0) return [];
+
+  return validated.map((pack) => ({
+    id: pack.id,
+    package: pack.package ?? pack.id,
+    config: {
+      apiKeyEnvVar: pack.apiKeyEnvVar,
+      baseUrl: pack.baseUrl,
+      headers: pack.headers,
+      modelDefaults: pack.modelDefaults,
+    },
+  }));
+}
+
+// =============================================================================
+// Pipeline V2 Extraction
+// =============================================================================
+
+/**
+ * Extract extended pipelines from config.
+ */
+export function extractPipelinesV2(
+  config: FrameworkConfig
+): PipelineConfigV2[] {
+  if (!config.pipelinesV2) {
+    return [];
+  }
+
+  return Object.entries(config.pipelinesV2).map(([id, pipelineConfig]) => ({
+    id,
+    steps: extractPipelineSteps(pipelineConfig.steps),
+    description: pipelineConfig.description,
+    utterances: pipelineConfig.utterances,
+    failFast: pipelineConfig.failFast ?? true,
+  }));
+}
+
+/**
+ * Convert config steps to PipelineStep types.
+ */
+function extractPipelineSteps(configSteps: ConfigStep[]): PipelineStep[] {
+  return configSteps.map((step, index) => {
+    switch (step.type) {
+      case 'agent':
+        return {
+          type: 'agent',
+          name: step.name,
+          agentId: step.agentId,
+          retry: step.retry,
+          contextView: step.contextView,
+        };
+
+      case 'function': {
+        const fn = functionRegistry.get(step.functionId);
+        if (!fn) {
+          console.warn(
+            `Function "${step.functionId}" not registered, step "${step.name}" will fail at runtime`
+          );
+        }
+        return {
+          type: 'function',
+          name: step.name,
+          fn: fn ?? (() => { throw new Error(`Function "${step.functionId}" not registered`); }),
+          retry: step.retry,
+          contextView: step.contextView,
+        };
+      }
+
+      case 'conditional':
+        return {
+          type: 'conditional',
+          name: step.name,
+          condition: createConditionPredicate(step.condition),
+          whenTrue: extractPipelineSteps(step.whenTrue),
+          whenFalse: step.whenFalse ? extractPipelineSteps(step.whenFalse) : undefined,
+          retry: step.retry,
+          contextView: step.contextView,
+        };
+
+      case 'pipeline':
+        return {
+          type: 'pipeline',
+          name: step.name,
+          pipelineId: step.pipelineId,
+          retry: step.retry,
+          contextView: step.contextView,
+        };
+
+      default:
+        throw new Error(`Unknown step type at index ${index}`);
+    }
+  });
+}
+
+/**
+ * Create condition predicate from config expression.
+ */
+function createConditionPredicate(
+  condition: ConfigConditionalStep['condition']
+): (ctx: any) => boolean {
+  return (ctx: any) => {
+    // Navigate to field using dot notation
+    const value = getNestedValue(ctx, condition.field);
+
+    if (condition.exists !== undefined) {
+      return condition.exists ? value !== undefined : value === undefined;
+    }
+    if (condition.equals !== undefined) {
+      return value === condition.equals;
+    }
+    if (condition.notEquals !== undefined) {
+      return value !== condition.notEquals;
+    }
+    return false;
+  };
+}
+
+function getNestedValue(obj: any, path: string): any {
+  return path.split('.').reduce((acc, key) => acc?.[key], obj);
+}
+
+// =============================================================================
+// Observability Extraction
+// =============================================================================
+
+/**
+ * Extract observability configuration from config.
+ * Reads from config.observability and applies environment variable overrides.
+ *
+ * Environment variables:
+ * - FRED_OTEL_ENDPOINT: OTLP endpoint URL
+ * - FRED_OTEL_HEADERS: JSON object of headers (e.g., '{"Authorization":"Bearer token"}')
+ * - FRED_LOG_LEVEL: Minimum log level (trace|debug|info|warning|error|fatal)
+ *
+ * @param config - Framework configuration
+ * @returns Observability configuration with environment overrides applied
+ */
+export function extractObservability(config: FrameworkConfig): import('./types').ObservabilityConfig {
+  const base = config.observability ?? {};
+
+  // Apply environment variable overrides
+  const otlpEndpoint = process.env.FRED_OTEL_ENDPOINT ?? base.otlp?.endpoint;
+  const otlpHeadersJson = process.env.FRED_OTEL_HEADERS;
+  const otlpHeaders = otlpHeadersJson
+    ? { ...base.otlp?.headers, ...JSON.parse(otlpHeadersJson) }
+    : base.otlp?.headers;
+
+  const logLevel = (process.env.FRED_LOG_LEVEL as any) ?? base.logLevel;
+
+  return {
+    otlp: otlpEndpoint
+      ? {
+          endpoint: otlpEndpoint,
+          headers: otlpHeaders,
+        }
+      : undefined,
+    logLevel,
+    resource: base.resource,
+    enableConsoleFallback: base.enableConsoleFallback,
+  };
+}

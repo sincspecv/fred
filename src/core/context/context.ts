@@ -1,11 +1,19 @@
-import { ModelMessage } from 'ai';
+import type { ModelMessage } from '@effect/ai';
 
 /**
  * Conversation context metadata
  */
+export interface ConversationPolicy {
+  maxMessages?: number;
+  maxChars?: number;
+  strict?: boolean;
+  isolated?: boolean;
+}
+
 export interface ConversationMetadata {
   createdAt: Date;
   updatedAt: Date;
+  policy?: ConversationPolicy;
   [key: string]: any; // Allow additional metadata
 }
 
@@ -27,4 +35,3 @@ export interface ContextStorage {
   delete(id: string): Promise<void>;
   clear(): Promise<void>;
 }
-

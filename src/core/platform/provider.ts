@@ -1,35 +1,48 @@
-import { LanguageModel } from 'ai';
+import { Context, Effect, Layer } from 'effect';
+import type { LanguageModel } from '@effect/ai';
 
-/**
- * AI Provider interface for platform abstraction
- */
-export interface AIProvider {
-  /**
-   * Get the language model instance for the given model identifier
-   */
-  getModel(modelId: string): LanguageModel;
+export type ProviderAlias = string;
 
-  /**
-   * Get the platform name
-   */
-  getPlatform(): string;
+export interface ProviderModelDefaults {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
-/**
- * Provider configuration - matches AI SDK provider options
- * These are the standard options accepted by all @ai-sdk providers
- */
 export interface ProviderConfig {
-  /** API key for the provider */
-  apiKey?: string;
-  /** Base URL for the API (useful for custom endpoints or proxies) */
-  baseURL?: string;
-  /** Custom headers to include in requests */
+  apiKeyEnvVar?: string;
+  baseUrl?: string;
   headers?: Record<string, string>;
-  /** Custom fetch implementation */
-  fetch?: typeof fetch;
-  /** Additional provider-specific options */
-  [key: string]: any;
+  modelDefaults?: ProviderModelDefaults;
+  aliases?: ProviderAlias[];
+  [key: string]: unknown;
 }
 
+export interface ProviderRegistration {
+  id: string;
+  config?: ProviderConfig;
+  modelDefaults?: ProviderModelDefaults;
+  aliases?: ProviderAlias[];
+}
 
+export interface ProviderDefinition {
+  id: string;
+  aliases: ProviderAlias[];
+  config: ProviderConfig;
+  getModel: (modelId: string, options?: ProviderModelDefaults) => Effect.Effect<LanguageModel, Error>;
+  layer: Layer.Layer<never, Error>;
+}
+
+export interface ProviderConfigInput {
+  defaultModel?: string;
+  modelDefaults?: ProviderModelDefaults;
+  aliases?: Record<string, string>;
+  providers?: ProviderRegistration[];
+}
+
+export const ProviderService = Context.GenericTag<ProviderService>('Fred.ProviderService');
+
+export interface ProviderService {
+  getModel: (providerId: string, modelId?: string, overrides?: ProviderModelDefaults) => Effect.Effect<LanguageModel, Error>;
+  listProviders: () => string[];
+}

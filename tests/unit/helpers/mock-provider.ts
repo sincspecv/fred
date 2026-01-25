@@ -1,31 +1,26 @@
-import { AIProvider } from '../../../src/core/platform/provider';
-import { LanguageModel } from 'ai';
+import { Effect, Layer } from 'effect';
+import type { LanguageModel } from '@effect/ai';
+import { ProviderDefinition } from '../../../src/core/platform/provider';
 
-/**
- * Create a mock AI provider for testing
- */
-export function createMockProvider(platform: string = 'openai'): AIProvider {
-  // Create a minimal mock model that satisfies LanguageModel interface
+export function createMockProvider(platform: string = 'openai'): ProviderDefinition {
   const mockModel = {
     provider: platform,
     modelId: 'gpt-4',
   } as LanguageModel;
 
   return {
-    getModel: (modelId: string) => {
-      return {
-        ...mockModel,
-        modelId,
-      } as LanguageModel;
+    id: platform,
+    aliases: [platform],
+    config: {
+      modelDefaults: {
+        model: 'gpt-4',
+      },
     },
-    getPlatform: () => platform,
+    getModel: (modelId: string) => Effect.succeed({ ...mockModel, modelId } as LanguageModel),
+    layer: Layer.empty,
   };
 }
 
-/**
- * Create a mock provider that can be used with AgentFactory
- * This provides a minimal implementation that won't cause errors
- */
-export function createMockAIProvider(platform?: string): AIProvider {
-  return createMockProvider(platform);
+export function createMockAIProvider(platform?: string): ProviderDefinition {
+  return createMockProvider(platform ?? 'openai');
 }

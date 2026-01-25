@@ -113,7 +113,7 @@ interface ConversationMetadata {
 
 ## ContextStorage
 
-Interface for custom storage implementations.
+Interface for storage implementations.
 
 ```typescript
 interface ContextStorage {
@@ -123,6 +123,75 @@ interface ContextStorage {
   clear(): Promise<void>;
 }
 ```
+
+## Built-in Storage Adapters
+
+### SqliteContextStorage
+
+File-based persistence using Bun's built-in SQLite driver.
+
+```typescript
+import { SqliteContextStorage } from 'fred';
+
+const storage = new SqliteContextStorage({
+  path: '/path/to/fred.db',  // Optional, defaults to 'fred.db'
+});
+
+fred.getContextManager().setStorage(storage);
+
+// Close when done
+storage.close();
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `path` | `string` | `'fred.db'` | Path to SQLite database file. Use `':memory:'` for in-memory. |
+
+**Features:**
+- WAL mode for concurrent read performance
+- Foreign key constraints with cascade deletes
+- Transaction support for atomic writes
+- Best-effort recovery for corrupted rows
+
+### PostgresContextStorage
+
+Production-grade persistence using PostgreSQL.
+
+```typescript
+import { PostgresContextStorage } from 'fred';
+
+// Using connection string
+const storage = new PostgresContextStorage({
+  connectionString: 'postgres://user:pass@host:5432/database',
+});
+
+// Or with injected pool (for testing/advanced use)
+import { Pool } from 'pg';
+const pool = new Pool({ connectionString: '...' });
+const storage = new PostgresContextStorage({ pool });
+
+fred.getContextManager().setStorage(storage);
+
+// Close when shutting down
+await storage.close();
+```
+
+**Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `connectionString` | `string` | Postgres connection URL |
+| `pool` | `Pool` | Pre-configured pg Pool instance (alternative to connectionString) |
+
+One of `connectionString` or `pool` must be provided.
+
+**Features:**
+- Lazy schema initialization (tables created on first use)
+- Transactional writes for data integrity
+- Best-effort recovery with warnings for corrupted rows
+- Automatic schema migration with `CREATE TABLE IF NOT EXISTS`
 
 ## Examples
 

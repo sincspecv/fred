@@ -1,3 +1,4 @@
+import { Schema } from 'effect';
 import { Tool } from './tool';
 
 /**
@@ -17,17 +18,23 @@ export function createCalculatorTool(): Tool {
     id: 'calculator',
     name: 'calculator',
     description: 'Perform basic arithmetic operations. Use this tool to calculate mathematical expressions. Supports addition (+), subtraction (-), multiplication (*), division (/), parentheses for grouping, and decimal numbers. Example: "2 + 3 * 4" or "(10 - 5) / 2".',
-    parameters: {
-      type: 'object',
-      properties: {
-        expression: {
-          type: 'string',
-          description: 'The mathematical expression to evaluate. Can include numbers, operators (+, -, *, /), parentheses, and decimal points. Example: "2 + 3 * 4" or "(10 - 5) / 2.5"',
+    schema: {
+      input: Schema.Struct({
+        expression: Schema.String,
+      }),
+      success: Schema.String,
+      metadata: {
+        type: 'object',
+        properties: {
+          expression: {
+            type: 'string',
+            description: 'The mathematical expression to evaluate. Can include numbers, operators (+, -, *, /), parentheses, and decimal points. Example: "2 + 3 * 4" or "(10 - 5) / 2.5"',
+          },
         },
+        required: ['expression'],
       },
-      required: ['expression'],
     },
-    execute: async (args: { expression: string }): Promise<string> => {
+    execute: async (args): Promise<string> => {
       const { expression } = args;
 
       if (!expression || typeof expression !== 'string') {

@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "bun run src/dev-chat.ts",
     "server": "bun run src/server.ts",
-    "build": "bun build src/index.ts --outdir lib --target bun --format esm --minify",
+    "build": "bun build src/index.ts --outdir lib --target bun --format esm --minify --external:@effect/ai-openai --external:@effect/ai-anthropic --external:@effect/ai-google",
     "prepublishOnly": "bun run build",
     "test": "bun test",
     "test:unit": "bun test tests/unit",
@@ -41,8 +41,24 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@effect/ai": "^0.33.2",
+    "@effect/ai-anthropic": "^0.23.0",
+    "@effect/ai-google": "^0.12.1",
+    "@effect/ai-openai": "^0.37.2",
+    "@effect/opentelemetry": "^0.61.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-metrics": "^2.5.0",
+    "@opentelemetry/sdk-trace-base": "^2.5.0",
+    "@opentelemetry/sdk-trace-node": "^2.5.0",
+    "@opentelemetry/sdk-trace-web": "^2.5.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.200.0",
     "ai": "^6.0.0",
+    "better-sqlite3": "^12.6.2",
+    "effect": "^3.19.15",
+    "graphology": "^0.26.0",
+    "graphology-dag": "^0.4.1",
     "js-yaml": "^4.1.0",
+    "pg": "^8.17.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {

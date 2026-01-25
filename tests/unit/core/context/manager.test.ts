@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { ContextManager } from '../../../../src/core/context/manager';
 import { createMockStorage } from '../../helpers/mock-storage';
 import { ContextStorage, ConversationContext } from '../../../../src/core/context/context';
-import { ModelMessage } from 'ai';
+import type { ModelMessage } from '@effect/ai';
 
 describe('ContextManager', () => {
   let manager: ContextManager;
@@ -66,6 +66,12 @@ describe('ContextManager', () => {
       expect(context.id).toBe('existing-conversation');
       expect(context.messages).toHaveLength(1);
       expect(context.messages[0].content).toBe('hello');
+    });
+
+    test('should throw in strict mode when context missing', async () => {
+      await expect(manager.getContext('missing', { strict: true })).rejects.toThrow(
+        'Conversation context not found: missing'
+      );
     });
 
     test('should merge default metadata', async () => {
@@ -149,6 +155,33 @@ describe('ContextManager', () => {
       expect(history[1].content).toBe('Response 1');
       expect(history[2].content).toBe('Message 2');
     });
+
+    test('should trim messages based on maxMessages policy', async () => {
+      const conversationId = 'caps-messages';
+      await manager.setContextPolicy(conversationId, { maxMessages: 2 });
+
+      await manager.addMessage(conversationId, { role: 'user', content: 'Message 1' });
+      await manager.addMessage(conversationId, { role: 'assistant', content: 'Message 2' });
+      await manager.addMessage(conversationId, { role: 'user', content: 'Message 3' });
+
+      const history = await manager.getHistory(conversationId);
+      expect(history).toHaveLength(2);
+      expect(history[0].content).toBe('Message 2');
+      expect(history[1].content).toBe('Message 3');
+    });
+
+    test('should trim messages based on maxChars policy', async () => {
+      const conversationId = 'caps-chars';
+      await manager.setContextPolicy(conversationId, { maxChars: 4 });
+
+      await manager.addMessage(conversationId, { role: 'user', content: '12345' });
+      await manager.addMessage(conversationId, { role: 'assistant', content: '67890' });
+      await manager.addMessage(conversationId, { role: 'user', content: 'abc' });
+
+      const history = await manager.getHistory(conversationId);
+      expect(history).toHaveLength(1);
+      expect(history[0].content).toBe('abc');
+    });
   });
 
   describe('addMessages', () => {
@@ -182,6 +215,19 @@ describe('ContextManager', () => {
 
       const contextAfter = await manager.getContextById(conversationId);
       expect(contextAfter?.metadata.updatedAt.getTime()).toBeGreaterThan(beforeTime);
+    });
+
+    test('should ignore system messages', async () => {
+      const conversationId = 'system-filter';
+
+      await manager.addMessages(conversationId, [
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: 'user prompt' },
+      ]);
+
+      const history = await manager.getHistory(conversationId);
+      expect(history).toHaveLength(1);
+      expect(history[0].role).toBe('user');
     });
   });
 
@@ -274,6 +320,24 @@ describe('ContextManager', () => {
 
       expect(history1).toHaveLength(0);
       expect(history2).toHaveLength(1);
+    });
+  });
+
+  describe('resetContext', () => {
+    test('should return true when context existed', async () => {
+      const conversationId = 'reset-existing';
+      await manager.addMessage(conversationId, { role: 'user', content: 'Hello' });
+
+      const result = await manager.resetContext(conversationId);
+
+      expect(result).toBe(true);
+      const context = await manager.getContextById(conversationId);
+      expect(context).toBeNull();
+    });
+
+    test('should return false when context missing', async () => {
+      const result = await manager.resetContext('missing');
+      expect(result).toBe(false);
     });
   });
 

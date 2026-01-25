@@ -1,11 +1,18 @@
 import { Tool } from './tool';
-import { convertToAISDKTool } from './utils';
+import { normalizeToolDefinition } from './utils';
+import { validateToolSchema } from './validation';
+import { Effect, LogLevel } from 'effect';
+import { redact, type RedactionFilter, type RedactionContext } from '../observability/errors';
+import { shouldLogEvent, type VerbosityOverrides } from '../observability/otel';
 
 /**
  * Centralized tool registry
  */
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map();
+  private redactionFilter?: RedactionFilter;
+  private verbosityOverrides?: VerbosityOverrides;
+  private logLevel: LogLevel.LogLevel = LogLevel.Info;
 
   /**
    * Register a tool in the registry
@@ -14,6 +21,7 @@ export class ToolRegistry {
     if (this.tools.has(tool.id)) {
       throw new Error(`Tool with id "${tool.id}" is already registered`);
     }
+    validateToolSchema(tool);
     this.tools.set(tool.id, tool);
   }
 
@@ -45,6 +53,10 @@ export class ToolRegistry {
       }
     }
     return tools;
+  }
+
+  getMissingToolIds(ids: string[]): string[] {
+    return ids.filter((id) => !this.tools.has(id));
   }
 
   /**
@@ -82,23 +94,95 @@ export class ToolRegistry {
     return this.tools.size;
   }
 
-  /**
-   * Convert tools to Vercel AI SDK v6 format using tool() and jsonSchema()
-   * This leverages the AI SDK's tool() and jsonSchema() functions for consistency
-   * Uses inputSchema (AI SDK v6 API) instead of parameters (older API)
-   */
-  toAISDKTools(ids: string[]): Record<string, ReturnType<typeof tool>> {
+  normalizeTools(ids: string[]): Tool[] {
     const tools = this.getTools(ids);
-    const sdkTools: Record<string, ReturnType<typeof tool>> = {};
+    return tools.map((toolDef) => normalizeToolDefinition(toolDef, toolDef.execute));
+  }
 
-    for (const toolDef of tools) {
-      // Convert tool to AI SDK format using shared utility
-      // The utility handles schema normalization, Groq compatibility, and AI SDK v6 conversion
-      sdkTools[toolDef.id] = convertToAISDKTool(toolDef, toolDef.execute);
+  /**
+   * Backwards-compatible alias for normalized tools
+   */
+  toAISDKTools(ids: string[]): Record<string, Tool> {
+    const tools = this.normalizeTools(ids);
+    return Object.fromEntries(tools.map((tool) => [tool.id, tool]));
+  }
+
+  /**
+   * Set custom redaction filter for tool payload logging.
+   */
+  setRedactionFilter(filter: RedactionFilter): void {
+    this.redactionFilter = filter;
+  }
+
+  /**
+   * Set verbosity overrides for controlling high-volume event logging.
+   */
+  setVerbosityOverrides(overrides: VerbosityOverrides): void {
+    this.verbosityOverrides = overrides;
+  }
+
+  /**
+   * Set current log level for payload redaction decisions.
+   */
+  setLogLevel(level: LogLevel.LogLevel): void {
+    this.logLevel = level;
+  }
+
+  /**
+   * Log tool invocation with redaction applied.
+   *
+   * @param toolId - Tool being invoked
+   * @param input - Tool input arguments
+   * @returns Effect that logs the invocation
+   */
+  logToolInvocation(toolId: string, input: unknown): Effect.Effect<void> {
+    // Only log at debug level or if verbosity allows
+    if (!shouldLogEvent('other', this.logLevel, this.verbosityOverrides)) {
+      return Effect.void;
     }
 
-    return sdkTools;
+    const context: RedactionContext = {
+      payloadType: 'request',
+      source: `tool:${toolId}`,
+      logLevel: this.logLevel,
+    };
+
+    const redactedInput = redact(input, context, this.redactionFilter);
+
+    return Effect.logDebug(`Tool invocation: ${toolId}`).pipe(
+      Effect.annotateLogs({
+        toolId,
+        input: redactedInput,
+      })
+    );
+  }
+
+  /**
+   * Log tool result with redaction applied.
+   *
+   * @param toolId - Tool that completed
+   * @param output - Tool output result
+   * @returns Effect that logs the result
+   */
+  logToolResult(toolId: string, output: unknown): Effect.Effect<void> {
+    // Only log at debug level or if verbosity allows
+    if (!shouldLogEvent('other', this.logLevel, this.verbosityOverrides)) {
+      return Effect.void;
+    }
+
+    const context: RedactionContext = {
+      payloadType: 'response',
+      source: `tool:${toolId}`,
+      logLevel: this.logLevel,
+    };
+
+    const redactedOutput = redact(output, context, this.redactionFilter);
+
+    return Effect.logDebug(`Tool result: ${toolId}`).pipe(
+      Effect.annotateLogs({
+        toolId,
+        output: redactedOutput,
+      })
+    );
   }
 }
-
-

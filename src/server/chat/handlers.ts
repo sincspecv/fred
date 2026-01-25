@@ -1,8 +1,10 @@
-import { ModelMessage } from 'ai';
-import { convertToModelMessages } from 'ai';
+import type { ModelMessage } from '@effect/ai';
 import { Fred } from '../../index';
 import { ContextManager } from '../../core/context/manager';
 import { ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChunk, ChatMessage } from './chat';
+import { toOpenAIStream } from '../../core/stream/openai';
+import { Stream } from 'effect';
+import type { StreamEvent } from '../../core/stream/events';
 
 /**
  * Chat API handlers
@@ -24,13 +26,10 @@ export class ChatHandlers {
   ): Promise<ChatCompletionResponse> {
     const conversationId = request.conversation_id || this.contextManager.generateConversationId();
     
-    // Convert OpenAI messages to AI SDK ModelMessage format
-    const openaiMessages: Array<{ role: string; content: string }> = request.messages.map(msg => ({
-      role: msg.role,
+    const modelMessages: ModelMessage[] = request.messages.map((msg) => ({
+      role: msg.role as ModelMessage['role'],
       content: msg.content || '',
     }));
-
-    const modelMessages = await convertToModelMessages(openaiMessages);
     
     // Get conversation history
     const history = await this.contextManager.getHistory(conversationId);
@@ -97,16 +96,10 @@ export class ChatHandlers {
   ): AsyncGenerator<ChatCompletionChunk, void, unknown> {
     const conversationId = request.conversation_id || this.contextManager.generateConversationId();
     
-    // Convert OpenAI messages to AI SDK ModelMessage format
-    const openaiMessages: Array<{ role: string; content: string }> = request.messages.map(msg => ({
-      role: msg.role,
+    const modelMessages: ModelMessage[] = request.messages.map((msg) => ({
+      role: msg.role as ModelMessage['role'],
       content: msg.content || '',
     }));
-
-    const modelMessages = await convertToModelMessages(openaiMessages);
-    
-    // Get conversation history
-    const history = await this.contextManager.getHistory(conversationId);
     
     // Extract the last user message
     const lastUserMessage = modelMessages[modelMessages.length - 1];
@@ -118,48 +111,42 @@ export class ChatHandlers {
       ? lastUserMessage.content 
       : JSON.stringify(lastUserMessage.content);
 
-    // For streaming, we need to use the agent's streamText directly
-    // This is a simplified version - full implementation would use streamText from AI SDK
-    const response = await this.fred.processMessage(userMessageText, {
-      conversationId,
+    const stream = Stream.fromAsyncIterable(
+      this.fred.streamMessage(userMessageText, {
+        conversationId,
+      }),
+      (error) => error as Error
+    );
+
+    const openAIStream = toOpenAIStream(stream as Stream.Stream<StreamEvent>, {
+      model: request.model ?? 'fred-agent',
     });
 
-    if (!response) {
-      throw new Error('No response from agent');
+    let finalResponse: { content?: string; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } } = {};
+
+    for await (const chunk of Stream.toAsyncIterable(openAIStream)) {
+      yield chunk as ChatCompletionChunk;
+      if ((chunk as any).object === 'chat.completion') {
+        const completion = chunk as any;
+        finalResponse = {
+          content: completion.choices?.[0]?.message?.content ?? '',
+          usage: completion.usage
+            ? {
+                inputTokens: completion.usage.prompt_tokens,
+                outputTokens: completion.usage.completion_tokens,
+                totalTokens: completion.usage.total_tokens,
+              }
+            : undefined,
+        };
+      }
     }
 
-    // Add messages to context
-    await this.contextManager.addMessage(conversationId, lastUserMessage);
-    
-    const assistantMessage: ModelMessage = {
-      role: 'assistant',
-      content: response.content,
-    };
-    await this.contextManager.addMessage(conversationId, assistantMessage);
-
-    // Stream response in chunks (simplified - would use actual streaming in production)
-    const content = response.content;
-    const chunkSize = 10;
-    const id = `chatcmpl-${Date.now()}`;
-    
-    for (let i = 0; i < content.length; i += chunkSize) {
-      const chunk: ChatCompletionChunk = {
-        id,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: 'fred-agent',
-        choices: [
-          {
-            index: 0,
-            delta: {
-              content: content.substring(i, i + chunkSize),
-            },
-            finish_reason: i + chunkSize >= content.length ? 'stop' : null,
-          },
-        ],
+    if (finalResponse.content) {
+      const assistantMessage: ModelMessage = {
+        role: 'assistant',
+        content: finalResponse.content,
       };
-      yield chunk;
+      await this.contextManager.addMessage(conversationId, assistantMessage);
     }
   }
 }
-

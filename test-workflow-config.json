@@ -1,0 +1,26 @@
+{
+  "agents": [
+    {
+      "id": "support-agent",
+      "systemMessage": "You are a helpful support agent.",
+      "platform": "openai",
+      "model": "gpt-3.5-turbo"
+    },
+    {
+      "id": "sales-agent",
+      "systemMessage": "You are a helpful sales agent.",
+      "platform": "openai",
+      "model": "gpt-3.5-turbo"
+    }
+  ],
+  "workflows": {
+    "support": {
+      "defaultAgent": "support-agent",
+      "agents": ["support-agent"]
+    },
+    "sales": {
+      "defaultAgent": "sales-agent",
+      "agents": ["sales-agent"]
+    }
+  }
+}

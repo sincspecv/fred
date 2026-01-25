@@ -1,29 +1,36 @@
+import { Schema } from 'effect';
+
 /**
- * Tool parameter definition
+ * Tool schema metadata compatible with config-defined tools.
  */
-export interface ToolParameter {
-  type: 'string' | 'number' | 'boolean' | 'object' | 'array';
-  description: string;
-  required?: boolean;
-  enum?: (string | number)[];
-  properties?: Record<string, ToolParameter>; // For object types
-  items?: ToolParameter; // For array types
+export interface ToolSchemaMetadata {
+  type: 'object';
+  properties: Record<string, unknown>;
+  required?: string[];
+  description?: string;
+  additionalProperties?: boolean;
 }
 
 /**
- * Tool definition compatible with Vercel AI SDK
+ * Tool schema definition for programmatic tools.
  */
-export interface Tool {
+export interface ToolSchemaDefinition<Input, Output, Failure> {
+  input: Schema.Schema<Input>;
+  success: Schema.Schema<Output>;
+  failure?: Schema.Schema<Failure>;
+  metadata?: ToolSchemaMetadata;
+}
+
+/**
+ * Tool definition backed by Effect Schema.
+ */
+export interface Tool<Input = unknown, Output = unknown, Failure = unknown> {
   id: string;
   name: string;
   description: string;
-  parameters: {
-    type: 'object';
-    properties: Record<string, ToolParameter>;
-    required?: string[];
-  };
-  execute: (args: Record<string, any>) => Promise<any> | any;
-  strict?: boolean; // Enable strict validation (AI SDK v6 feature) - only defined properties allowed
+  schema?: ToolSchemaDefinition<Input, Output, Failure>;
+  execute: (args: Input) => Promise<Output> | Output;
+  strict?: boolean;
 }
 
 /**
@@ -34,5 +41,4 @@ export interface ToolResult {
   result?: any;
   error?: string;
 }
-
 

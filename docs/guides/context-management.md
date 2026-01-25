@@ -155,31 +155,94 @@ For very long conversations, consider:
 
 ## Storage
 
-By default, context is stored in-memory. For production:
+By default, context is stored in-memory. For production, Fred provides built-in SQL adapters.
 
-1. **Implement Custom Storage**: Create a `ContextStorage` implementation
-2. **Use Database**: Store conversations in a database
-3. **Persistence**: Save context to disk or cloud storage
+### Built-in SQL Adapters
 
-### Custom Storage Example
+Fred includes two production-ready persistence adapters:
+
+**PostgreSQL** - For production deployments:
+```yaml
+# fred.config.yaml
+persistence:
+  adapter: postgres
+```
+
+Requires the `FRED_POSTGRES_URL` environment variable:
+```bash
+export FRED_POSTGRES_URL="postgres://user:pass@host:5432/database"
+```
+
+**SQLite** - For local development or embedded use:
+```yaml
+# fred.config.yaml
+persistence:
+  adapter: sqlite
+```
+
+Optionally set `FRED_SQLITE_PATH` (defaults to `./fred.db`):
+```bash
+export FRED_SQLITE_PATH="/path/to/my.db"
+```
+
+### Environment Variables
+
+| Variable | Adapter | Required | Default |
+|----------|---------|----------|---------|
+| `FRED_POSTGRES_URL` | postgres | Yes | (none - throws if missing) |
+| `FRED_SQLITE_PATH` | sqlite | No | `./fred.db` |
+
+### Agent Opt-Out
+
+By default, all agents persist conversation history. To disable persistence for a specific agent:
+
+```yaml
+# fred.config.yaml
+agents:
+  - id: ephemeral-agent
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    persistHistory: false  # Conversations won't be saved
+```
+
+Or in code:
+```typescript
+const agent = new Agent({
+  id: 'ephemeral-agent',
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-20250514',
+  persistHistory: false,
+});
+```
+
+When `persistHistory` is `false`, the agent still receives conversation context during the session, but messages are not written to storage.
+
+### Custom Storage
+
+For other databases, implement the `ContextStorage` interface:
 
 ```typescript
 import { ContextStorage, ConversationContext } from 'fred';
 
-class DatabaseStorage implements ContextStorage {
+class CustomStorage implements ContextStorage {
   async get(id: string): Promise<ConversationContext | null> {
-    // Load from database
+    // Load from your database
   }
-  
+
   async set(id: string, context: ConversationContext): Promise<void> {
-    // Save to database
+    // Save to your database
   }
-  
-  // ... other methods
+
+  async delete(id: string): Promise<void> {
+    // Delete from your database
+  }
+
+  async clear(): Promise<void> {
+    // Clear all from your database
+  }
 }
 
-const storage = new DatabaseStorage();
-const contextManager = new ContextManager(storage);
+const storage = new CustomStorage();
 fred.getContextManager().setStorage(storage);
 ```
 

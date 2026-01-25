@@ -90,6 +90,21 @@ describe('AgentManager', () => {
 
       await expect(manager.createAgent(config)).rejects.toThrow('No provider registered for platform: openai');
     });
+
+    test('should use default system message when missing', async () => {
+      const provider = createMockProvider();
+      manager.registerProvider('openai', provider);
+      manager.setDefaultSystemMessage('Default system prompt');
+
+      const config: AgentConfig = {
+        id: 'default-agent',
+        platform: 'openai',
+        model: 'gpt-4',
+      };
+
+      const agent = await manager.createAgent(config);
+      expect(agent.config.systemMessage).toBe('Default system prompt');
+    });
   });
 
   describe('getAgent', () => {

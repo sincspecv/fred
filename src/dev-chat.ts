@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
 
 import { Fred } from './index';
+import { WorkflowManager, WorkflowContext } from './core/workflow';
 import { resolve, join } from 'path';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import chokidar from 'chokidar';
+import { getBuiltinPackIds } from './core/platform/packs';
 
 /**
  * Development chat interface with hot reload
@@ -15,7 +17,7 @@ import chokidar from 'chokidar';
  * Detect available AI provider from environment variables
  * Returns platform and model, or null if no provider available
  * 
- * Supports all major AI SDK providers with simple API key authentication.
+ * Supports Effect provider packs with API key authentication.
  * Providers are checked in order of preference (most stable/common first).
  */
 function detectAvailableProvider(): { platform: string; model: string } | { platform: null; model: null } {
@@ -43,7 +45,10 @@ function detectAvailableProvider(): { platform: string; model: string } | { plat
   if (process.env.GROQ_API_KEY) {
     return { platform: 'groq', model: 'openai/gpt-oss-120b' };
   }
-  
+  if (process.env.OPENROUTER_API_KEY) {
+    return { platform: 'openrouter', model: 'openai/gpt-3.5-turbo' };
+  }
+
   // Tier 3: Additional providers
   if (process.env.COHERE_API_KEY) {
     return { platform: 'cohere', model: 'command' };
@@ -63,8 +68,7 @@ function detectAvailableProvider(): { platform: string; model: string } | { plat
   if (process.env.REPLICATE_API_KEY) {
     return { platform: 'replicate', model: 'meta/llama-2-70b-chat' };
   }
-  // Note: ai21, nvidia, upstash, lepton don't have official @ai-sdk packages
-  // They may be available as community packages but are not included in auto-detection
+  // Note: ai21, nvidia, upstash, lepton don't have Effect provider packs
   // Users should configure these manually in config files if needed
   if (process.env.CEREBRAS_API_KEY) {
     return { platform: 'cerebras', model: 'llama3.3-70b' };
@@ -87,33 +91,13 @@ function detectAvailableProvider(): { platform: string; model: string } | { plat
 }
 
 /**
- * Map platform names to their @ai-sdk package names
+ * Map platform names to Effect provider pack names
  */
 function getPackageNameForPlatform(platform: string): string | null {
   const packageMap: Record<string, string> = {
-    'openai': '@ai-sdk/openai',
-    'anthropic': '@ai-sdk/anthropic',
-    'google': '@ai-sdk/google',
-    'mistral': '@ai-sdk/mistral',
-    'groq': '@ai-sdk/groq',
-    'cohere': '@ai-sdk/cohere',
-    'vercel': '@ai-sdk/vercel',
-    'azure-openai': '@ai-sdk/azure',
-    'azure-anthropic': '@ai-sdk/azure',
-    'azure': '@ai-sdk/azure',
-    'fireworks': '@ai-sdk/fireworks',
-    'xai': '@ai-sdk/xai',
-    'ollama': 'ai-sdk-ollama',
-    'bedrock': '@ai-sdk/amazon-bedrock',
-    'amazon-bedrock': '@ai-sdk/amazon-bedrock',
-    'elevenlabs': '@ai-sdk/elevenlabs',
-    'perplexity': '@ai-sdk/perplexity',
-    'replicate': '@ai-sdk/replicate',
-    'together': '@ai-sdk/togetherai',
-    'deepseek': '@ai-sdk/deepseek',
-    'cerebras': '@ai-sdk/cerebras',
-    'deepinfra': '@ai-sdk/deepinfra',
-    'baseten': '@ai-sdk/baseten',
+    openai: '@effect/ai-openai',
+    anthropic: '@effect/ai-anthropic',
+    google: '@effect/ai-google',
   };
   
   return packageMap[platform.toLowerCase()] || null;
@@ -299,7 +283,7 @@ async function ensureProviderPackageInstalled(): Promise<boolean> {
   const packageName = getPackageNameForPlatform(providerInfo.platform);
   
   if (!packageName) {
-    // Platform doesn't have a corresponding @ai-sdk package
+    // Platform doesn't have a corresponding Effect provider pack
     // (e.g., custom providers, community packages, etc.)
     return false;
   }
@@ -359,6 +343,11 @@ class DevChatRunner {
   private isWaitingForInput = false;
   private fileWatcher: chokidar.FSWatcher | null = null;
   private setupHook?: (fred: Fred) => Promise<void>;
+  private workflowContext?: WorkflowContext;
+  private options: { verbose: boolean; stream: boolean } = {
+    verbose: process.argv.includes('-v') || process.argv.includes('--verbose'),
+    stream: !process.argv.includes('--no-stream'),
+  };
 
   constructor(setupHook?: (fred: Fred) => Promise<void>) {
     this.setupHook = setupHook;
@@ -440,60 +429,69 @@ class DevChatRunner {
         try {
           // Ensure the provider is registered before creating the agent
           // Register the provider explicitly to ensure it's available
+          let providerRegistered = true;
           try {
             await newFred.useProvider(providerInfo.platform);
             if (!this.isWaitingForInput) {
               console.log(`✅ Registered ${providerInfo.platform} provider`);
             }
           } catch (providerError) {
+            providerRegistered = false;
             // Always show provider registration errors
-            const packageName = providerInfo.platform === 'google' ? 'google' : providerInfo.platform;
+            const providerPack = getPackageNameForPlatform(providerInfo.platform);
             console.error(`\n❌ Failed to register ${providerInfo.platform} provider:`, providerError instanceof Error ? providerError.message : providerError);
-            console.error(`   Install with: bun add @ai-sdk/${packageName}`);
+            if (providerPack) {
+              console.error(`   Install with: bun add ${providerPack}`);
+            }
             console.error('');
-            // Can't create agent without provider
-            throw providerError;
           }
 
-          // Now create the agent with the registered provider
-          if (!this.isWaitingForInput) {
-            console.log(`Creating dev agent with ${providerInfo.platform}/${providerInfo.model}...`);
-          }
+          if (!providerRegistered) {
+            if (!this.isWaitingForInput) {
+              console.warn(`   Skipping dev agent creation for ${providerInfo.platform}.`);
+              console.warn('   Configure a supported provider in config or install the provider pack.\n');
+            }
+          } else {
+            // Now create the agent with the registered provider
+            if (!this.isWaitingForInput) {
+              console.log(`Creating dev agent with ${providerInfo.platform}/${providerInfo.model}...`);
+            }
+            
+            await newFred.createAgent({
+              id: '__dev_agent__',
+              systemMessage: 'You are a helpful development assistant. This is a temporary agent created for dev-chat. Create your own agents in your config file or code to replace this.\n\nYou have access to a calculator tool that can perform basic arithmetic operations. When users ask mathematical questions or need calculations, use the calculator tool to get accurate results. The calculator supports addition (+), subtraction (-), multiplication (*), division (/), parentheses for grouping, and decimal numbers. **NON NEGOTIABLE**: Always use the calculator tool for mathematical expressions rather than trying to calculate them yourself.',
+              platform: providerInfo.platform,
+              model: providerInfo.model,
+              tools: ['calculator'], // Include the built-in calculator tool
+            });
           
-          await newFred.createAgent({
-            id: '__dev_agent__',
-            systemMessage: 'You are a helpful development assistant. This is a temporary agent created for dev-chat. Create your own agents in your config file or code to replace this.\n\nYou have access to a calculator tool that can perform basic arithmetic operations. When users ask mathematical questions or need calculations, use the calculator tool to get accurate results. The calculator supports addition (+), subtraction (-), multiplication (*), division (/), parentheses for grouping, and decimal numbers. **NON NEGOTIABLE**: Always use the calculator tool for mathematical expressions rather than trying to calculate them yourself.',
-            platform: providerInfo.platform,
-            model: providerInfo.model,
-            tools: ['calculator'], // Include the built-in calculator tool
-          });
-          
-          // Verify agent was created
-          const createdAgent = newFred.getAgent('__dev_agent__');
-          if (!createdAgent) {
-            throw new Error('Agent was created but could not be retrieved');
-          }
-          
-          // Set as default agent
-          newFred.setDefaultAgent('__dev_agent__');
-          
-          // Verify default agent is set
-          const defaultAgentId = newFred.getDefaultAgentId();
-          if (defaultAgentId !== '__dev_agent__') {
-            throw new Error(`Default agent not set correctly. Expected '__dev_agent__', got '${defaultAgentId}'`);
-          }
-          
-          // Verify agents list
-          const allAgents = newFred.getAgents();
-          if (allAgents.length === 0) {
-            throw new Error('Agent was created but does not appear in agents list');
-          }
-          
-          if (!this.isWaitingForInput) {
-            console.log('💡 Auto-created dev agent for testing (temporary)');
-            console.log(`   Platform: ${providerInfo.platform}, Model: ${providerInfo.model}`);
-            console.log(`   Agent ID: __dev_agent__, Default: ${newFred.getDefaultAgentId()}`);
-            console.log('   Create your own agents in config.json or code to replace this.\n');
+            // Verify agent was created
+            const createdAgent = newFred.getAgent('__dev_agent__');
+            if (!createdAgent) {
+              throw new Error('Agent was created but could not be retrieved');
+            }
+            
+            // Set as default agent
+            newFred.setDefaultAgent('__dev_agent__');
+            
+            // Verify default agent is set
+            const defaultAgentId = newFred.getDefaultAgentId();
+            if (defaultAgentId !== '__dev_agent__') {
+              throw new Error(`Default agent not set correctly. Expected '__dev_agent__', got '${defaultAgentId}'`);
+            }
+            
+            // Verify agents list
+            const allAgents = newFred.getAgents();
+            if (allAgents.length === 0) {
+              throw new Error('Agent was created but does not appear in agents list');
+            }
+            
+            if (!this.isWaitingForInput) {
+              console.log('💡 Auto-created dev agent for testing (temporary)');
+              console.log(`   Platform: ${providerInfo.platform}, Model: ${providerInfo.model}`);
+              console.log(`   Agent ID: __dev_agent__, Default: ${newFred.getDefaultAgentId()}`);
+              console.log('   Create your own agents in config.json or code to replace this.\n');
+            }
           }
         } catch (error) {
           // Failed to create agent (e.g., provider not properly registered)
@@ -502,12 +500,14 @@ class DevChatRunner {
           if (error instanceof Error && error.stack) {
             console.error('Stack trace:', error.stack);
           }
-          if (error instanceof Error && error.message.includes('not installed')) {
-            const packageName = providerInfo.platform === 'google' ? 'google' : providerInfo.platform;
-            console.error(`   Install the provider package: bun add @ai-sdk/${packageName}`);
-          } else if (error instanceof Error && error.message.includes('No provider registered')) {
-            console.error(`   The ${providerInfo.platform} provider failed to register. Check your API key.`);
-            console.error(`   Make sure ${providerInfo.platform.toUpperCase()}_API_KEY is set in your environment.`);
+      if (error instanceof Error && error.message.includes('not installed')) {
+        const packageName = getPackageNameForPlatform(providerInfo.platform);
+        if (packageName) {
+          console.error(`   Install the provider pack: bun add ${packageName}`);
+        }
+      } else if (error instanceof Error && error.message.includes('No provider registered')) {
+        console.error(`   The ${providerInfo.platform} provider failed to register. Check your API key.`);
+        console.error(`   Make sure ${providerInfo.platform.toUpperCase()}_API_KEY is set in your environment.`);
           } else {
             console.error('   Make sure the provider is properly registered and API keys are set.');
           }
@@ -667,6 +667,166 @@ class DevChatRunner {
   }
 
   /**
+   * Handle slash commands
+   */
+  private async handleSlashCommand(input: string): Promise<boolean> {
+    const parts = input.slice(1).split(/\s+/);
+    const cmd = parts[0]?.toLowerCase();
+    const args = parts.slice(1);
+
+    switch (cmd) {
+      case 'workflow':
+        await this.handleWorkflowCommand(args);
+        return true;
+      case 'route':
+        await this.handleRouteCommand(args);
+        return true;
+      case 'providers':
+        this.handleProvidersCommand();
+        return true;
+      case 'clear':
+        // Allow clear to be handled in main loop
+        return false;
+      case 'help':
+        this.showHelp();
+        return true;
+      case 'quit':
+      case 'exit':
+        console.log('\n👋 Goodbye!');
+        process.exit(0);
+      default:
+        // Unknown command - don't consume, let it pass through
+        return false;
+    }
+  }
+
+  /**
+   * Handle workflow command
+   */
+  private async handleWorkflowCommand(args: string[]): Promise<void> {
+    const workflowManager = this.fred?.getWorkflowManager();
+    if (!workflowManager) {
+      console.log('⚠️  No workflows configured\n');
+      return;
+    }
+
+    if (args.length === 0) {
+      const current = this.workflowContext?.getCurrentWorkflow();
+      const available = workflowManager.listWorkflows();
+      console.log(`\nCurrent workflow: ${current}`);
+      console.log(`Available: ${available.join(', ')}\n`);
+      return;
+    }
+
+    const newWorkflow = args[0];
+    if (!workflowManager.hasWorkflow(newWorkflow)) {
+      console.log(`\n❌ Workflow "${newWorkflow}" not found`);
+      console.log(`   Available: ${workflowManager.listWorkflows().join(', ')}\n`);
+      return;
+    }
+
+    // Switch workflow - generates fresh thread ID
+    this.workflowContext?.switchWorkflow(newWorkflow);
+
+    // Update conversation ID to match new thread
+    this.conversationId = this.workflowContext?.getThreadId();
+
+    console.log(`\n✓ Switched to workflow: ${newWorkflow}`);
+    console.log(`   New thread ID: ${this.conversationId}\n`);
+  }
+
+  /**
+   * Handle route command
+   */
+  private async handleRouteCommand(args: string[]): Promise<void> {
+    if (!this.fred) {
+      console.log('⚠️  Fred not initialized\n');
+      return;
+    }
+
+    const message = args.join(' ').replace(/^["']|["']$/g, '');
+    if (!message) {
+      console.log('Usage: /route "your message here"\n');
+      return;
+    }
+
+    const decision = await this.fred.testRoute(message);
+    if (!decision) {
+      console.log('⚠️  Routing not configured\n');
+      return;
+    }
+
+    console.log(`\n📍 Route test: "${message}"`);
+    console.log(`   → Agent: ${decision.agent}`);
+    console.log(`   → Match: ${decision.matchType || 'fallback'}`);
+    if (decision.fallback) {
+      console.log(`   → Fallback: yes`);
+    }
+    if (decision.specificity !== undefined) {
+      console.log(`   → Specificity: ${decision.specificity}`);
+    }
+    if (decision.rule) {
+      console.log(`   → Rule ID: ${decision.rule.id}`);
+    }
+    console.log('');
+  }
+
+  /**
+   * Handle providers command
+   */
+  private handleProvidersCommand(): void {
+    if (!this.fred) {
+      console.log('⚠️  Fred not initialized\n');
+      return;
+    }
+
+    const providers = this.fred.listProviders();
+
+    console.log('\n  Provider Packs\n');
+
+    if (providers.length === 0) {
+      console.log('  No providers registered.\n');
+      console.log('  Add providers to fred.config.yaml:');
+      console.log('');
+      console.log('    providers:');
+      console.log('      - id: openai');
+      console.log('        modelDefaults:');
+      console.log('          model: gpt-4');
+      console.log('');
+      return;
+    }
+
+    console.log('  Registered:');
+    for (const id of providers.sort()) {
+      console.log(`    [x] ${id}`);
+    }
+    console.log('');
+
+    const builtins = getBuiltinPackIds();
+    const unregistered = builtins.filter((id) => !providers.includes(id));
+    if (unregistered.length > 0) {
+      console.log('  Available (not configured):');
+      for (const id of unregistered.sort()) {
+        console.log(`    [ ] ${id}`);
+      }
+      console.log('');
+    }
+  }
+
+  /**
+   * Show help message
+   */
+  private showHelp(): void {
+    console.log('\n📖 Commands:');
+    console.log('  /workflow [name]  - Show or switch workflow');
+    console.log('  /route "msg"      - Test routing without execution');
+    console.log('  /providers        - List registered provider packs');
+    console.log('  /clear            - Clear conversation context');
+    console.log('  /help             - Show this help');
+    console.log('  /quit, /exit      - Exit dev chat\n');
+  }
+
+  /**
    * Read a line from stdin with better handling
    */
   private async readLine(): Promise<string> {
@@ -757,21 +917,46 @@ class DevChatRunner {
     // If a package was missing, ensureProviderPackageInstalled() will have
     // prompted the user and exited the process
     await this.initializeFred();
-    
+
     if (!this.fred) {
       console.error('❌ Failed to initialize Fred');
       process.exit(1);
     }
 
-    // Generate conversation ID if not already set
-    if (!this.conversationId) {
-      this.conversationId = this.fred.getContextManager().generateConversationId();
+    // Check for workflows and initialize workflow context
+    const workflowManager = this.fred.getWorkflowManager();
+    const workflows = workflowManager?.listWorkflows() ?? [];
+
+    if (workflows.length > 1) {
+      console.log('\nAvailable workflows:');
+      workflows.forEach(w => console.log(`  - ${w}`));
+      process.stdout.write('\nSelect workflow (or press Enter for first): ');
+      const selected = await this.readLine();
+      const workflowName = selected.trim() || workflows[0];
+
+      if (!workflowManager?.hasWorkflow(workflowName)) {
+        console.log(`\n⚠️  Unknown workflow "${workflowName}", using "${workflows[0]}"`);
+        this.workflowContext = new WorkflowContext(workflows[0]);
+      } else {
+        this.workflowContext = new WorkflowContext(workflowName);
+      }
+    } else if (workflows.length === 1) {
+      this.workflowContext = new WorkflowContext(workflows[0]);
+    } else {
+      // No workflows defined - use 'default' as workflow name
+      this.workflowContext = new WorkflowContext('default');
     }
 
+    // Set conversation ID from workflow context
+    this.conversationId = this.workflowContext.getThreadId();
+
     console.log(`\n💬 Fred Dev Chat`);
+    if (this.workflowContext && this.workflowContext.getCurrentWorkflow() !== 'default') {
+      console.log(`📋 Workflow: ${this.workflowContext.getCurrentWorkflow()}`);
+    }
     console.log(`📝 Conversation ID: ${this.conversationId}`);
     console.log('💡 Type your messages and press Enter. Code changes auto-reload!');
-    console.log('📖 Type "help" for commands\n');
+    console.log('📖 Type /help for commands\n');
 
     while (true) {
       // Ensure fred is still available (might have been cleared during reload)
@@ -797,7 +982,11 @@ class DevChatRunner {
         process.exit(1);
       }
 
-      process.stdout.write('> ');
+      // Show workflow in prompt
+      const workflowName = this.workflowContext?.getCurrentWorkflow() || 'default';
+      const promptPrefix = workflowName !== 'default' ? `[${workflowName}] ` : '';
+      process.stdout.write(`${promptPrefix}> `);
+
       let message: string;
       try {
         message = await this.readLine();
@@ -815,6 +1004,13 @@ class DevChatRunner {
         continue;
       }
 
+      // Parse slash commands first
+      if (message.startsWith('/')) {
+        const handled = await this.handleSlashCommand(message);
+        if (handled) continue;
+        // Unknown /command or clear - fall through
+      }
+
       const cmd = message.toLowerCase().trim();
 
       if (cmd === 'exit' || cmd === 'quit') {
@@ -827,18 +1023,21 @@ class DevChatRunner {
         if (this.fred) {
           const contextManager = this.fred.getContextManager();
           await contextManager.clearContext(this.conversationId!);
-          this.conversationId = this.fred.getContextManager().generateConversationId();
+          // Generate new conversation ID via workflow context
+          if (this.workflowContext) {
+            const currentWorkflow = this.workflowContext.getCurrentWorkflow();
+            this.workflowContext.switchWorkflow(currentWorkflow); // Regenerates thread ID
+            this.conversationId = this.workflowContext.getThreadId();
+          } else {
+            this.conversationId = this.fred.getContextManager().generateConversationId();
+          }
           console.log(`\n🧹 Conversation cleared. New ID: ${this.conversationId}\n`);
         }
         continue;
       }
 
       if (cmd === 'help' || cmd === '/help') {
-        console.log('\n📖 Commands:');
-        console.log('  exit, quit     - Exit the chat');
-        console.log('  clear, /clear   - Clear conversation context');
-        console.log('  help, /help    - Show this help message');
-        console.log('  reload, /reload - Manually reload Fred\n');
+        this.showHelp();
         continue;
       }
 
@@ -911,7 +1110,7 @@ class DevChatRunner {
           }
           
           // Write to stdout - stdout.write is safe for text content
-          // The AI SDK should already sanitize content, but we trust it here
+          // Stream output should already be sanitized, but we trust it here
           process.stdout.write(text);
           lastWriteTime = Date.now();
         })();
@@ -920,13 +1119,21 @@ class DevChatRunner {
           pendingWrite = null;
         };
 
+        // Show verbose routing info if -v flag
+        if (this.options.verbose) {
+          const decision = await this.fred.testRoute(message);
+          if (decision) {
+            console.log(`[DEBUG] Agent: ${decision.agent}, Match: ${decision.matchType || 'fallback'}`);
+          }
+        }
+
         // Start streaming response
         await writeImmediate('\n🤖 ');
 
         // Track if stream was aborted for proper cleanup
         let streamAborted = false;
         let streamController: AbortController | null = null;
-        
+
         try {
           // Create abort controller for stream cleanup
           streamController = new AbortController();
@@ -940,7 +1147,7 @@ class DevChatRunner {
           // Note: We can't directly abort the async generator, but we can track the abort state
           // The for-await loop will naturally exit when the generator completes or throws
           
-          for await (const chunk of this.fred.streamMessage(message, {
+          for await (const event of this.fred.streamMessage(message, {
             conversationId: this.conversationId,
           })) {
             // Check if stream was aborted
@@ -950,27 +1157,18 @@ class DevChatRunner {
             
             hasReceivedChunk = true;
 
-            // Handle tool calls - show indicator when tools are detected
-            if (chunk.toolCalls && chunk.toolCalls.length > 0) {
-              // First pass: track which tools are being used
-              for (const toolCall of chunk.toolCalls) {
-                if (toolCall.toolId && !toolCallsUsed.includes(toolCall.toolId)) {
-                  toolCallsUsed.push(toolCall.toolId);
-                  
-                  // Track calculator tool usage for subtle indicator
-                  if (toolCall.toolId === 'calculator') {
-                    calculatorToolUsed = true;
-                  }
+            if (event.type === 'tool-call') {
+              if (event.toolName && !toolCallsUsed.includes(event.toolName)) {
+                toolCallsUsed.push(event.toolName);
+                if (event.toolName === 'calculator') {
+                  calculatorToolUsed = true;
                 }
               }
-              
-              // Show tool indicator only once, with subtle calculator hint
+
               if (!hasShownToolIndicator) {
-                // If we've already written some text, add a newline before tool indicator
                 if (fullText) {
                   await writeImmediate('\n');
                 }
-                // Show subtle indicator - include calculator emoji if calculator is being used
                 if (calculatorToolUsed) {
                   await writeImmediate('🔧 🧮 Using calculator...\n');
                 } else {
@@ -980,20 +1178,15 @@ class DevChatRunner {
               }
             }
 
-            // Write text delta as it arrives - write with throttling for readability
-            // Each chunk should appear in real-time as it's received from the AI SDK stream
-            if (chunk.textDelta && chunk.textDelta.length > 0) {
-              // Write the delta with throttling - the AI SDK should provide incremental chunks
-              await writeImmediate(chunk.textDelta);
-              fullText = chunk.fullText || fullText;
-            } else if (chunk.fullText && chunk.fullText !== fullText) {
-              // If we get a fullText update without a delta, write the difference
-              // This handles cases where textDelta might be empty but fullText updated
-              const diff = chunk.fullText.slice(fullText.length);
-              if (diff) {
-                await writeImmediate(diff);
+            if (event.type === 'token') {
+              if (event.delta && event.delta.length > 0) {
+                await writeImmediate(event.delta);
+                fullText = event.accumulated || fullText;
               }
-              fullText = chunk.fullText;
+            }
+
+            if (event.type === 'run-end' && event.result.content) {
+              fullText = event.result.content;
             }
           }
           

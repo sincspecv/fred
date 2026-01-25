@@ -1,3 +1,4 @@
+import { Schema } from 'effect';
 import { Tool } from './tool';
 import { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
@@ -28,25 +29,38 @@ export function createHandoffTool(
     id: 'handoff_to_agent',
     name: 'handoff_to_agent',
     description: 'Transfer the conversation to another agent. Use this when the current agent cannot handle the request and another agent would be better suited.',
-    parameters: {
-      type: 'object',
-      properties: {
-        agentId: {
-          type: 'string',
-          description: 'The ID of the agent to transfer the conversation to',
+    schema: {
+      input: Schema.Struct({
+        agentId: Schema.String,
+        message: Schema.optional(Schema.String),
+        context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+      }),
+      success: Schema.Struct({
+        type: Schema.Literal('handoff'),
+        agentId: Schema.String,
+        message: Schema.String,
+        context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+      }),
+      metadata: {
+        type: 'object',
+        properties: {
+          agentId: {
+            type: 'string',
+            description: 'The ID of the agent to transfer the conversation to',
+          },
+          message: {
+            type: 'string',
+            description: 'The message to send to the target agent. If not provided, the original user message will be used.',
+          },
+          context: {
+            type: 'object',
+            description: 'Optional context to pass to the target agent',
+          },
         },
-        message: {
-          type: 'string',
-          description: 'The message to send to the target agent. If not provided, the original user message will be used.',
-        },
-        context: {
-          type: 'object',
-          description: 'Optional context to pass to the target agent',
-        },
+        required: ['agentId'],
       },
-      required: ['agentId'],
     },
-    execute: async (args: { agentId: string; message?: string; context?: Record<string, any> }) => {
+    execute: async (args) => {
       const { agentId, message, context } = args;
 
       // Create span for handoff tool execution

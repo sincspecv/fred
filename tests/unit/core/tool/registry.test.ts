@@ -1,6 +1,9 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { ToolRegistry } from '../../../../src/core/tool/registry';
 import { Tool } from '../../../../src/core/tool/tool';
+import { Effect, LogLevel } from 'effect';
+import type { RedactionFilter, RedactionContext } from '../../../../src/core/observability/errors';
+import type { VerbosityOverrides } from '../../../../src/core/observability/otel';
 
 describe('ToolRegistry', () => {
   let registry: ToolRegistry;
@@ -14,17 +17,7 @@ describe('ToolRegistry', () => {
       id,
       name: name || `tool-${id}`,
       description: `Description for ${id}`,
-      parameters: {
-        type: 'object',
-        properties: {
-          input: {
-            type: 'string',
-            description: 'Input parameter',
-          },
-        },
-        required: ['input'],
-      },
-      execute: async (args: Record<string, any>) => {
+      execute: async (args: { input: string }) => {
         return { result: `executed ${id} with ${args.input}` };
       },
     };
@@ -62,6 +55,25 @@ describe('ToolRegistry', () => {
       expect(registry.hasTool('tool-1')).toBe(true);
       expect(registry.hasTool('tool-2')).toBe(true);
       expect(registry.hasTool('tool-3')).toBe(true);
+    });
+
+    test('should throw error for strict tool missing schema', () => {
+      const tool = {
+        ...createMockTool('strict-tool'),
+        strict: true,
+      };
+
+      expect(() => {
+        registry.registerTool(tool);
+      }).toThrow('Tool "strict-tool" requires an input schema when strict mode is enabled');
+    });
+
+    test('should allow non-strict tool without schema', () => {
+      const tool = createMockTool('lenient-tool');
+
+      expect(() => {
+        registry.registerTool(tool);
+      }).not.toThrow();
     });
   });
 
@@ -259,6 +271,77 @@ describe('ToolRegistry', () => {
       expect(sdkTools['tool-1']).toBeDefined();
       expect(sdkTools['tool-3']).toBeDefined();
       expect(sdkTools['tool-2']).toBeUndefined();
+    });
+  });
+
+  describe('Payload Logging with Redaction', () => {
+    test('should apply redaction filter to tool invocation logs', async () => {
+      const customFilter: RedactionFilter = (payload: unknown, context: RedactionContext) => {
+        if (context.payloadType === 'request' && typeof payload === 'object' && payload !== null) {
+          const obj = payload as any;
+          return { ...obj, apiKey: '[MASKED]' };
+        }
+        return payload;
+      };
+
+      registry.setRedactionFilter(customFilter);
+      registry.setLogLevel(LogLevel.Debug);
+
+      const logEffect = registry.logToolInvocation('test-tool', { apiKey: 'secret', query: 'visible' });
+
+      // Effect should execute without errors
+      await expect(Effect.runPromise(logEffect)).resolves.toBeUndefined();
+    });
+
+    test('should apply redaction filter to tool result logs', async () => {
+      const customFilter: RedactionFilter = (payload: unknown, context: RedactionContext) => {
+        if (context.payloadType === 'response' && typeof payload === 'object' && payload !== null) {
+          const obj = payload as any;
+          return { ...obj, token: '[MASKED]' };
+        }
+        return payload;
+      };
+
+      registry.setRedactionFilter(customFilter);
+      registry.setLogLevel(LogLevel.Debug);
+
+      const logEffect = registry.logToolResult('test-tool', { token: 'secret', data: 'visible' });
+
+      // Effect should execute without errors
+      await expect(Effect.runPromise(logEffect)).resolves.toBeUndefined();
+    });
+
+    test('should respect verbosity overrides for tool logging', async () => {
+      const verbosity: VerbosityOverrides = {
+        gateTokenStreams: true,
+        gateHeartbeats: true,
+      };
+
+      registry.setVerbosityOverrides(verbosity);
+      registry.setLogLevel(LogLevel.Info);
+
+      // At info level with default verbosity, should not log (returns void immediately)
+      const logEffect = registry.logToolInvocation('test-tool', { data: 'test' });
+
+      await expect(Effect.runPromise(logEffect)).resolves.toBeUndefined();
+    });
+
+    test('should log tool invocations at debug level', async () => {
+      registry.setLogLevel(LogLevel.Debug);
+
+      const logEffect = registry.logToolInvocation('test-tool', { input: 'data' });
+
+      // Should log without errors at debug level
+      await expect(Effect.runPromise(logEffect)).resolves.toBeUndefined();
+    });
+
+    test('should log tool results at debug level', async () => {
+      registry.setLogLevel(LogLevel.Debug);
+
+      const logEffect = registry.logToolResult('test-tool', { output: 'result' });
+
+      // Should log without errors at debug level
+      await expect(Effect.runPromise(logEffect)).resolves.toBeUndefined();
     });
   });
 });

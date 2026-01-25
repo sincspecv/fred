@@ -132,7 +132,24 @@ describe('Config Loader', () => {
           ],
         };
 
-        expect(() => validateConfig(config)).toThrow('Agent "test-agent" must have a systemMessage');
+        expect(() => validateConfig(config)).toThrow(
+          'Agent "test-agent" must have a systemMessage or defaultSystemMessage must be configured'
+        );
+      });
+
+      test('should allow agent without systemMessage when defaultSystemMessage configured', () => {
+        const config: FrameworkConfig = {
+          defaultSystemMessage: 'You are a default agent',
+          agents: [
+            {
+              id: 'test-agent',
+              platform: 'openai',
+              model: 'gpt-4',
+            },
+          ],
+        };
+
+        expect(() => validateConfig(config)).not.toThrow();
       });
 
       test('should throw error when agent missing platform', () => {
@@ -174,10 +191,26 @@ describe('Config Loader', () => {
               id: 'test-tool',
               name: 'Test Tool',
               description: 'A test tool',
-              parameters: {
-                type: 'object',
-                properties: {},
+              schema: {
+                metadata: {
+                  type: 'object',
+                  properties: {},
+                },
               },
+            },
+          ],
+        };
+
+        expect(() => validateConfig(config)).not.toThrow();
+      });
+
+      test('should allow tools without schema metadata when not strict', () => {
+        const config: FrameworkConfig = {
+          tools: [
+            {
+              id: 'test-tool',
+              name: 'Test Tool',
+              description: 'A test tool',
             },
           ],
         };
@@ -192,9 +225,11 @@ describe('Config Loader', () => {
               id: '',
               name: 'Test Tool',
               description: 'Test',
-              parameters: {
-                type: 'object',
-                properties: {},
+              schema: {
+                metadata: {
+                  type: 'object',
+                  properties: {},
+                },
               },
             },
           ],
@@ -210,9 +245,11 @@ describe('Config Loader', () => {
               id: 'test-tool',
               name: '',
               description: 'Test',
-              parameters: {
-                type: 'object',
-                properties: {},
+              schema: {
+                metadata: {
+                  type: 'object',
+                  properties: {},
+                },
               },
             },
           ],
@@ -228,9 +265,11 @@ describe('Config Loader', () => {
               id: 'test-tool',
               name: 'Test Tool',
               description: '',
-              parameters: {
-                type: 'object',
-                properties: {},
+              schema: {
+                metadata: {
+                  type: 'object',
+                  properties: {},
+                },
               },
             },
           ],
@@ -239,19 +278,39 @@ describe('Config Loader', () => {
         expect(() => validateConfig(config)).toThrow('Tool "test-tool" must have a description');
       });
 
-      test('should throw error when tool missing parameters', () => {
+      test('should throw error when strict tool missing schema metadata', () => {
         const config: FrameworkConfig = {
           tools: [
             {
               id: 'test-tool',
               name: 'Test Tool',
               description: 'Test',
-              parameters: null as any,
+              strict: true,
             },
           ],
         };
 
-        expect(() => validateConfig(config)).toThrow('Tool "test-tool" must have parameters');
+        expect(() => validateConfig(config)).toThrow('Tool "test-tool" requires schema metadata when strict mode is enabled');
+      });
+
+      test('should throw error when schema metadata is invalid', () => {
+        const config: FrameworkConfig = {
+          tools: [
+            {
+              id: 'test-tool',
+              name: 'Test Tool',
+              description: 'Test',
+              schema: {
+                metadata: {
+                  type: 'string' as any,
+                  properties: {},
+                },
+              },
+            },
+          ],
+        };
+
+        expect(() => validateConfig(config)).toThrow('Tool "test-tool" schema metadata must be type "object"');
       });
     });
 
@@ -369,13 +428,92 @@ describe('Config Loader', () => {
           ],
         };
 
-        expect(() => validateConfig(config)).toThrow('Pipeline "test-pipeline" has inline agent "inline-agent" without a systemMessage');
+        expect(() => validateConfig(config)).toThrow(
+          'Pipeline "test-pipeline" has inline agent "inline-agent" without a systemMessage or defaultSystemMessage'
+        );
+      });
+
+      test('should allow inline agent without systemMessage when defaultSystemMessage configured', () => {
+        const config: FrameworkConfig = {
+          defaultSystemMessage: 'Default prompt',
+          pipelines: [
+            {
+              id: 'test-pipeline',
+              agents: [
+                {
+                  id: 'inline-agent',
+                  platform: 'openai',
+                  model: 'gpt-4',
+                },
+              ],
+            },
+          ],
+        };
+
+        expect(() => validateConfig(config)).not.toThrow();
       });
     });
 
     test('should validate empty config', () => {
       const config: FrameworkConfig = {};
       expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    test('should allow memory defaults', () => {
+      const config: FrameworkConfig = {
+        memory: {
+          policy: {
+            maxMessages: 25,
+            maxChars: 1000,
+            strict: true,
+            isolated: true,
+          },
+          requireConversationId: true,
+          sequentialVisibility: false,
+        },
+      };
+
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    describe('persistence validation', () => {
+      test('should accept postgres adapter', () => {
+        const config: FrameworkConfig = {
+          persistence: {
+            adapter: 'postgres',
+          },
+        };
+
+        expect(() => validateConfig(config)).not.toThrow();
+      });
+
+      test('should accept sqlite adapter', () => {
+        const config: FrameworkConfig = {
+          persistence: {
+            adapter: 'sqlite',
+          },
+        };
+
+        expect(() => validateConfig(config)).not.toThrow();
+      });
+
+      test('should throw error for invalid adapter', () => {
+        const config: FrameworkConfig = {
+          persistence: {
+            adapter: 'mysql' as any,
+          },
+        };
+
+        expect(() => validateConfig(config)).toThrow(
+          'Invalid persistence adapter "mysql". Valid adapters are: postgres, sqlite'
+        );
+      });
+
+      test('should allow config without persistence', () => {
+        const config: FrameworkConfig = {};
+
+        expect(() => validateConfig(config)).not.toThrow();
+      });
     });
   });
 
@@ -406,18 +544,18 @@ describe('Config Loader', () => {
     });
   });
 
-  describe('extractAgents', () => {
-    test('should extract agents from config', () => {
-      const config: FrameworkConfig = {
-        agents: [
-          {
-            id: 'agent-1',
-            systemMessage: 'Agent 1',
-            platform: 'openai',
-            model: 'gpt-4',
-          },
-        ],
-      };
+    describe('extractAgents', () => {
+      test('should extract agents from config', () => {
+        const config: FrameworkConfig = {
+          agents: [
+            {
+              id: 'agent-1',
+              systemMessage: 'Agent 1',
+              platform: 'openai',
+              model: 'gpt-4',
+            },
+          ],
+        };
 
       const agents = extractAgents(config);
       expect(agents).toHaveLength(1);
@@ -430,41 +568,59 @@ describe('Config Loader', () => {
       expect(agents).toEqual([]);
     });
 
-    test('should handle basePath for prompt file resolution', () => {
-      const config: FrameworkConfig = {
-        agents: [
-          {
-            id: 'agent-1',
-            systemMessage: './prompts/agent.md',
-            platform: 'openai',
-            model: 'gpt-4',
-          },
-        ],
-      };
+      test('should handle basePath for prompt file resolution', () => {
+        const config: FrameworkConfig = {
+          agents: [
+            {
+              id: 'agent-1',
+              systemMessage: './prompts/agent.md',
+              platform: 'openai',
+              model: 'gpt-4',
+            },
+          ],
+        };
 
       const agents = extractAgents(config, '/path/to/config.yaml');
       expect(agents).toHaveLength(1);
       // loadPromptFile will attempt to resolve the path
       // If file doesn't exist, it returns the original string
-      expect(agents[0].systemMessage).toBeDefined();
+        expect(agents[0].systemMessage).toBeDefined();
+      });
+
+      test('should apply default system message when agent systemMessage missing', () => {
+        const config: FrameworkConfig = {
+          defaultSystemMessage: 'Default prompt',
+          agents: [
+            {
+              id: 'agent-1',
+              platform: 'openai',
+              model: 'gpt-4',
+            },
+          ],
+        };
+
+        const agents = extractAgents(config);
+        expect(agents[0].systemMessage).toBe('Default prompt');
+      });
     });
-  });
 
   describe('extractTools', () => {
-    test('should extract tools from config', () => {
-      const config: FrameworkConfig = {
-        tools: [
-          {
-            id: 'tool-1',
-            name: 'Tool 1',
-            description: 'Description',
-            parameters: {
-              type: 'object',
-              properties: {},
+      test('should extract tools from config', () => {
+        const config: FrameworkConfig = {
+          tools: [
+            {
+              id: 'tool-1',
+              name: 'Tool 1',
+              description: 'Description',
+              schema: {
+                metadata: {
+                  type: 'object',
+                  properties: {},
+                },
+              },
             },
-          },
-        ],
-      };
+          ],
+        };
 
       const tools = extractTools(config);
       expect(tools).toHaveLength(1);
