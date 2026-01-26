@@ -14,7 +14,7 @@ Fred is a powerful framework that allows you to:
 - **Pipeline Hooks**: Intercept and modify the message pipeline at 12 strategic points
 - **MCP Server Integration**: Connect agents to MCP (Model Context Protocol) servers for automatic tool discovery
 - **Multi-Platform Support**: Use any AI provider supported by the Vercel AI SDK (OpenAI, Anthropic, Google, Groq, and 20+ more)
-- **Tool Integration**: Assign reusable tools to agents for extended capabilities
+- **Tool Integration**: Assign reusable tools to agents for extended capabilities, including built-in tools like the calculator
 - **Global Context**: Maintain conversation context across multiple agents seamlessly
 - **OpenAI-Compatible API**: Works with standard AI chat tools like Misty, Chatbox, etc.
 
@@ -56,7 +56,11 @@ Define agents with custom system messages, AI platform integration, and tool ass
 
 ### 🛠️ Tool Registry
 
-Create reusable tools that can be shared across multiple agents.
+Create custom reusable tools or use production-ready built-in tools (like calculator) that can be shared across multiple agents.
+
+### 📦 Built-in Tools
+
+Production-ready tools included with Fred (calculator tool for safe arithmetic evaluation) for immediate use - no configuration needed.
 
 ### 🌐 Multi-Platform Support
 

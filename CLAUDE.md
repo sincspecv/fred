@@ -40,7 +40,9 @@ bun run docs:build
 - **Agents**: AI-powered entities with system prompts and tools (`src/core/agent/`)
 - **Pipelines**: Sequential/graph-based agent orchestration with checkpointing (`src/core/pipeline/`)
 - **Intents**: Message routing based on exact/regex/semantic matching (`src/core/intent/`)
-- **Tools**: Reusable functions agents can call (`src/core/tool/`)
+- **Tools**: Reusable functions agents can call (`src/core/tool/`). Includes built-in tools (calculator) and support for custom tools
+- **Built-in Tools**: Production-ready tools available out-of-the-box:
+  - Calculator tool (`createCalculatorTool()` from `src/core/tool/calculator.ts`) - Safe arithmetic evaluation
 - **Providers**: AI platform integrations via Effect provider packs (`src/core/platform/`)
 
 ### Key Patterns
@@ -64,6 +66,31 @@ import { BUILTIN_PACKS } from './core/platform/packs';
 ```
 
 **Pipeline Context**: Pipelines share state through `PipelineContext` with checkpoint support for pause/resume.
+
+**Tool Schema Formats**: Tools support two schema formats:
+- **Effect Schema format (recommended)**: Uses `schema` property with Effect Schema definitions for better type safety
+- **Legacy parameters format**: Uses `parameters` property with JSON Schema
+```typescript
+// Effect Schema format (used by built-in tools)
+import { Schema } from 'effect';
+const tool: Tool = {
+  schema: {
+    input: Schema.Struct({ expression: Schema.String }),
+    success: Schema.String,
+    metadata: { /* JSON Schema for AI */ }
+  },
+  // ...
+};
+
+// Legacy format (still supported)
+const tool: Tool = {
+  parameters: {
+    type: 'object',
+    properties: { /* ... */ }
+  },
+  // ...
+};
+```
 
 ### Directory Structure
 

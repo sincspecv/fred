@@ -76,44 +76,24 @@ const generalResponse = await fred.processMessage('Tell me a joke');
 // Routes to default-agent
 ```
 
-## With Tools
+## With Built-in Tools
+
+The easiest way to add tools is using Fred's built-in tools:
 
 ```typescript
 import { Fred } from 'fred';
+import { createCalculatorTool } from 'fred';
 
 const fred = new Fred();
 await fred.useProvider('openai', { apiKey: process.env.OPENAI_API_KEY });
 
-// Register a tool
-fred.registerTool({
-  id: 'calculator',
-  name: 'calculator',
-  description: 'Perform basic arithmetic',
-  parameters: {
-    type: 'object',
-    properties: {
-      operation: { type: 'string', enum: ['add', 'subtract', 'multiply', 'divide'] },
-      a: { type: 'number' },
-      b: { type: 'number' },
-    },
-    required: ['operation', 'a', 'b'],
-  },
-  execute: async (args) => {
-    const { operation, a, b } = args;
-    switch (operation) {
-      case 'add': return a + b;
-      case 'subtract': return a - b;
-      case 'multiply': return a * b;
-      case 'divide': return a / b;
-    }
-  },
-  strict: false, // Optional: Enable strict validation (AI SDK v6)
-});
+// Register the built-in calculator tool
+fred.registerTool(createCalculatorTool());
 
 // Create agent with tool
 await fred.createAgent({
   id: 'math-agent',
-  systemMessage: 'You are a math assistant. Use the calculator tool.',
+  systemMessage: 'You are a math assistant. Use the calculator for mathematical operations.',
   platform: 'openai',
   model: 'gpt-4',
   tools: ['calculator'],
@@ -122,8 +102,12 @@ await fred.createAgent({
 fred.setDefaultAgent('math-agent');
 
 // Agent can now use the calculator tool
-const response = await fred.processMessage('What is 123 * 456?');
+const response = await fred.processMessage('What is (123 + 456) * 2?');
+// Agent calls calculator with expression "(123 + 456) * 2"
+// Response: "The result is 1158."
 ```
+
+See the [Tools Guide](../guides/tools.md) to learn about creating custom tools.
 
 ## With Context
 

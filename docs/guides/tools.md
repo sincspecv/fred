@@ -19,6 +19,151 @@ interface Tool {
 }
 ```
 
+## Built-in Tools
+
+Fred includes production-ready tools that you can use immediately without writing any code.
+
+### Calculator Tool
+
+The calculator tool provides safe arithmetic evaluation for agents. It's perfect for mathematical operations and can handle complex expressions.
+
+**Features:**
+- Basic arithmetic: `+`, `-`, `*`, `/`
+- Parentheses for grouping
+- Decimal and negative numbers
+- Input validation and security
+- Division by zero detection
+- Safe evaluation (no code injection)
+
+**Import and Registration:**
+
+```typescript
+import { Fred } from 'fred';
+import { createCalculatorTool } from 'fred';
+
+const fred = new Fred();
+
+// Register the calculator
+fred.registerTool(createCalculatorTool());
+
+// Assign to agent
+await fred.createAgent({
+  id: 'assistant',
+  systemMessage: 'You are a helpful assistant.',
+  platform: 'openai',
+  model: 'gpt-4',
+  tools: ['calculator'],
+});
+```
+
+**Agent usage:**
+
+```
+User: What is (15 + 25) * 2?
+Agent: [Calls calculator tool with expression "(15 + 25) * 2"]
+Agent: The result is 80.
+
+User: Calculate 123.45 / 6.7
+Agent: [Calls calculator tool]
+Agent: The result is approximately 18.425.
+```
+
+**Expression Format:**
+
+The calculator accepts a single expression string containing:
+- Numbers (integers and decimals)
+- Operators: `+`, `-`, `*`, `/`
+- Parentheses for grouping: `(`, `)`
+- Negative numbers (e.g., `-5 + 10`)
+
+```typescript
+// Valid expressions:
+"2 + 3"
+"(10 - 5) * 2"
+"123.45 / 6.7"
+"-5 + 10"
+"(100 / 4) + (50 * 2)"
+```
+
+## Tool Schema Formats
+
+Fred supports two schema formats for defining tool inputs. The Effect Schema format is recommended for new tools.
+
+### Effect Schema Format (Recommended)
+
+New tools should use Effect Schema for better type safety and integration:
+
+```typescript
+import { Schema } from 'effect';
+import { Tool } from 'fred';
+
+const myTool: Tool = {
+  id: 'my-tool',
+  name: 'my-tool',
+  description: 'Description for the AI',
+  schema: {
+    input: Schema.Struct({
+      param1: Schema.String,
+      param2: Schema.Number,
+      param3: Schema.optional(Schema.Boolean),
+    }),
+    success: Schema.String,
+    metadata: {
+      type: 'object',
+      properties: {
+        param1: { type: 'string', description: 'First parameter' },
+        param2: { type: 'number', description: 'Second parameter' },
+        param3: { type: 'boolean', description: 'Optional third parameter' },
+      },
+      required: ['param1', 'param2'],
+    },
+  },
+  execute: async (args) => {
+    const { param1, param2, param3 } = args;
+    // Implementation
+    return 'Result';
+  },
+};
+```
+
+The Effect Schema format uses:
+- `input`: Effect Schema definition for type validation
+- `success`: Effect Schema for return type
+- `metadata`: JSON Schema for AI provider compatibility
+
+**Built-in tools (like calculator) use this format.**
+
+### Legacy Parameters Format
+
+The older "parameters" format is still supported for backward compatibility:
+
+```typescript
+const myTool: Tool = {
+  id: 'my-tool',
+  name: 'my-tool',
+  description: 'Description for the AI',
+  parameters: {
+    type: 'object',
+    properties: {
+      param1: { type: 'string', description: 'First parameter' },
+      param2: { type: 'number', description: 'Second parameter' },
+    },
+    required: ['param1', 'param2'],
+  },
+  execute: async (args) => {
+    // Implementation
+    return 'Result';
+  },
+};
+```
+
+Use this format when:
+- Working with legacy tools
+- You don't need Effect's type system benefits
+- Keeping things simple for basic tools
+
+**Recommendation:** Use Effect Schema format for new tools to benefit from better type safety and consistency with Fred's architecture.
+
 ## Creating Tools
 
 ### Basic Tool

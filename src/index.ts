@@ -1862,6 +1862,7 @@ export type {
   HumanInputResumeOptions,
 } from './core/pipeline/pause/types';
 export { createRequestHumanInputTool } from './core/pipeline/pause';
+export { createCalculatorTool } from './core/tool/calculator';
 
 export { HookManager } from './core/hooks/manager';
 export * from './core/hooks/types';

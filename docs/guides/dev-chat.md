@@ -23,6 +23,7 @@ Dev-chat works immediately without any configuration:
 - **Auto-Detection**: Automatically detects available AI providers from environment variables
 - **Auto-Installation**: Prompts to install missing provider packages (e.g., `@ai-sdk/groq`)
 - **Auto-Agent Creation**: Creates a temporary dev agent if no agents are configured
+- **Built-in Calculator Tool**: Temporary dev agent includes calculator for testing mathematical operations
 - **No Setup Required**: Just set an API key environment variable and run `bun run dev`
 
 Example:
@@ -158,6 +159,26 @@ If no agents are configured, dev-chat automatically:
 4. Sets it as the default agent
 
 This allows you to start testing immediately without any configuration!
+
+#### Built-in Tools
+
+The temporary dev agent automatically includes the **calculator tool**, allowing you to test mathematical operations immediately:
+
+```
+> What is 123 * 456?
+
+🤖 [Calls calculator tool with expression "123 * 456"]
+🤖 The result is 56,088.
+
+> Calculate (100 + 50) / 3
+
+🤖 [Calls calculator tool]
+🤖 The result is 50.
+```
+
+No configuration needed - the calculator tool works out of the box! This demonstrates Fred's tool system and gives you something to test with immediately.
+
+To add the calculator to your own agents, see the [Tools Guide](tools.md#built-in-tools).
 
 #### API Key Environment Variables
 

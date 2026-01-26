@@ -2,7 +2,90 @@
 
 API reference for tool configuration and management.
 
-## Tool
+## Built-in Tools
+
+### createCalculatorTool
+
+Creates a production-ready calculator tool for safe arithmetic evaluation.
+
+```typescript
+import { createCalculatorTool } from 'fred';
+
+function createCalculatorTool(): Tool
+```
+
+**Returns:** A Tool object configured for arithmetic operations.
+
+**Features:**
+- Safe expression evaluation (no code injection)
+- Supports: `+`, `-`, `*`, `/`, parentheses, decimals, negative numbers
+- Input validation and security
+- Division by zero detection
+
+**Example:**
+
+```typescript
+import { Fred } from 'fred';
+import { createCalculatorTool } from 'fred';
+
+const fred = new Fred();
+fred.registerTool(createCalculatorTool());
+
+await fred.createAgent({
+  id: 'assistant',
+  tools: ['calculator'],
+  // ...
+});
+```
+
+**Tool Schema:**
+
+The calculator tool uses Effect Schema format:
+
+```typescript
+{
+  id: 'calculator',
+  name: 'calculator',
+  description: 'Perform basic arithmetic operations...',
+  schema: {
+    input: Schema.Struct({
+      expression: Schema.String,
+    }),
+    success: Schema.String,
+    metadata: { /* ... */ }
+  },
+  execute: async (args) => { /* ... */ }
+}
+```
+
+## Tool Interface
+
+Fred supports two schema formats for tools:
+
+### Effect Schema Format (Recommended)
+
+```typescript
+import { Schema } from 'effect';
+
+interface Tool {
+  id: string;                    // Unique tool identifier
+  name: string;                  // Tool name
+  description: string;            // Description for the AI
+  schema: {
+    input: Schema.Schema<any>;   // Effect Schema for input validation
+    success: Schema.Schema<any>; // Effect Schema for output type
+    metadata: {                  // JSON Schema for AI provider
+      type: 'object';
+      properties: Record<string, ToolParameter>;
+      required?: string[];
+    };
+  };
+  execute: (args: Record<string, any>) => Promise<any> | any;
+  strict?: boolean;              // Enable strict validation (AI SDK v6)
+}
+```
+
+### Legacy Parameters Format
 
 ```typescript
 interface Tool {
@@ -15,9 +98,11 @@ interface Tool {
     required?: string[];
   };
   execute: (args: Record<string, any>) => Promise<any> | any;
-  strict?: boolean;              // Enable strict validation (AI SDK v6) - only defined properties allowed
+  strict?: boolean;              // Enable strict validation (AI SDK v6)
 }
 ```
+
+**Note:** Built-in tools use the Effect Schema format. For new tools, Effect Schema is recommended for better type safety.
 
 ## ToolParameter
 
@@ -143,5 +228,50 @@ fred.registerTool({
     return { success: true };
   },
 });
+```
+
+### Tool with Effect Schema Format
+
+```typescript
+import { Schema } from 'effect';
+
+fred.registerTool({
+  id: 'user-lookup',
+  name: 'user-lookup',
+  description: 'Look up user information by ID',
+  schema: {
+    input: Schema.Struct({
+      userId: Schema.String,
+      includeDetails: Schema.optional(Schema.Boolean),
+    }),
+    success: Schema.String,
+    metadata: {
+      type: 'object',
+      properties: {
+        userId: { type: 'string', description: 'User ID to look up' },
+        includeDetails: { type: 'boolean', description: 'Include detailed information' },
+      },
+      required: ['userId'],
+    },
+  },
+  execute: async (args) => {
+    const { userId, includeDetails = false } = args;
+    // Fetch user data
+    return JSON.stringify({ userId, name: 'John Doe', /* ... */ });
+  },
+});
+```
+
+## Import Paths
+
+```typescript
+// Built-in tools
+import { createCalculatorTool } from 'fred';
+
+// Core types
+import type { Tool, ToolParameter } from 'fred';
+
+// Effect Schema
+import { Schema } from 'effect';
 ```
 
