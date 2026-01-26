@@ -40,7 +40,7 @@ import {
   CheckpointCleanupTask,
 } from './core/pipeline/checkpoint';
 import type { CheckpointStorage } from './core/pipeline/checkpoint';
-import type { ModelMessage } from '@effect/ai';
+import { Prompt } from '@effect/ai';
 import { HookManager, HookType, HookHandler } from './core/hooks';
 import { Tracer, Span } from './core/tracing';
 import { NoOpTracer } from './core/tracing/noop-tracer';
@@ -773,11 +773,11 @@ export class Fred {
         rootSpan.setAttribute('conversation.id', conversationId);
       }
 
-      // Get conversation history (already in ModelMessage format)
+      // Get conversation history (already in Prompt message format)
       const history = await this.contextManager.getHistory(conversationId);
 
       // Filter to user/assistant messages for agent processing
-      // Since AgentMessage is now ModelMessage, we can use history directly
+      // Since AgentMessage is Prompt message-encoded, we can use history directly
       const previousMessages: AgentMessage[] = history.filter(
         msg => msg.role === 'user' || msg.role === 'assistant'
       ) as AgentMessage[];
@@ -945,7 +945,7 @@ export class Fred {
 
       if (shouldPersistHistory) {
         // Add user message to context
-        const userMessage: ModelMessage = {
+        const userMessage: Prompt.MessageEncoded = {
           role: 'user',
           content: message,
         };
@@ -960,38 +960,58 @@ export class Fred {
           if (hasToolResults) {
             // Add assistant message with tool calls to context
             // Use toolCalls array in assistant messages for tool results
-            const assistantMessage: ModelMessage = {
+            const baseTimestamp = Date.now();
+            const toolCallIds = currentResponse.toolCalls.map(
+              (toolCall, idx) => `call_${toolCall.toolId}_${baseTimestamp}_${idx}`
+            );
+            const assistantParts: Array<Prompt.AssistantMessagePartEncoded> = [];
+            if (currentResponse.content) {
+              assistantParts.push(Prompt.makePart('text', { text: currentResponse.content }));
+            }
+            currentResponse.toolCalls.forEach((toolCall, idx) => {
+              assistantParts.push(
+                Prompt.makePart('tool-call', {
+                  id: toolCallIds[idx],
+                  name: toolCall.toolId,
+                  params: toolCall.args,
+                  providerExecuted: false,
+                })
+              );
+            });
+            await this.contextManager.addMessage(conversationId, {
               role: 'assistant',
-              content: currentResponse.content || '', // May be empty if only tool calls
-              toolCalls: currentResponse.toolCalls.map((tc, idx) => ({
-                toolCallId: `call_${tc.toolId}_${Date.now()}_${idx}`,
-                toolName: tc.toolId,
-                args: tc.args,
-              })),
-            };
-            await this.contextManager.addMessage(conversationId, assistantMessage);
+              content: assistantParts,
+            });
 
             // Add tool results to context ("tool" role for tool results)
             for (let idx = 0; idx < currentResponse.toolCalls.length; idx++) {
               const toolCall = currentResponse.toolCalls[idx];
               if (toolCall.result !== undefined) {
-                const toolCallId = `call_${toolCall.toolId}_${Date.now()}_${idx}`;
-                const toolResultMessage: ModelMessage = {
+                await this.contextManager.addMessage(conversationId, {
                   role: 'tool',
-                  content: typeof toolCall.result === 'string'
-                    ? toolCall.result
-                    : JSON.stringify(toolCall.result),
-                  toolCallId,
-                };
-                await this.contextManager.addMessage(conversationId, toolResultMessage);
+                  content: [
+                    Prompt.makePart('tool-result', {
+                      id: toolCallIds[idx],
+                      name: toolCall.toolId,
+                      result: toolCall.result,
+                      isFailure: false,
+                      providerExecuted: false,
+                    }),
+                  ],
+                });
               }
             }
           }
         }
 
-        // Add assistant response to context (if no tool calls or tool calls already handled)
-        if (currentResponse.content) {
-          const assistantMessage: ModelMessage = {
+        // Add assistant response to context only if no tool calls were handled
+        // (Tool calls already include the text content in the assistant message)
+        const toolCallsHandled = currentResponse.toolCalls &&
+          currentResponse.toolCalls.length > 0 &&
+          currentResponse.toolCalls.some(tc => tc.result !== undefined);
+
+        if (currentResponse.content && !toolCallsHandled) {
+          const assistantMessage: Prompt.MessageEncoded = {
             role: 'assistant',
             content: currentResponse.content,
           };
@@ -1081,13 +1101,13 @@ export class Fred {
             }
 
             // For pipelines/intents, persist history by default (no specific agent to check)
-            const userMessage: ModelMessage = {
+            const userMessage: Prompt.MessageEncoded = {
               role: 'user',
               content: message,
             };
             yield* Effect.promise(() => this.contextManager.addMessage(conversationId, userMessage));
 
-            const assistantMessage: ModelMessage = {
+            const assistantMessage: Prompt.MessageEncoded = {
               role: 'assistant',
               content: route.response.content,
             };
@@ -1191,8 +1211,6 @@ export class Fred {
             const shouldPersistHistory = agent.config.persistHistory !== false;
 
             if (agent.streamMessage) {
-              let finalText = '';
-
               // Add user message if persistence is enabled
               if (shouldPersistHistory) {
                 yield* Effect.promise(() =>
@@ -1203,6 +1221,32 @@ export class Fred {
                 );
               }
 
+              // Track per-step state for persistence
+              type StepState = {
+                stepIndex: number;
+                text: string;
+                toolCalls: Array<{
+                  id: string;
+                  toolName: string;
+                  args: Record<string, unknown>;
+                  result?: unknown;
+                  isFailure?: boolean;
+                }>;
+              };
+
+              const stepStates = new Map<number, StepState>();
+
+              const getOrCreateStepState = (stepIndex: number): StepState => {
+                if (!stepStates.has(stepIndex)) {
+                  stepStates.set(stepIndex, {
+                    stepIndex,
+                    text: '',
+                    toolCalls: [],
+                  });
+                }
+                return stepStates.get(stepIndex)!;
+              };
+
               const updates = agent.streamMessage(
                 message,
                 sequentialVisibility ? previousMessages : [],
@@ -1210,20 +1254,88 @@ export class Fred {
               );
               return updates.pipe(
                 Stream.tap((event) => {
-                  if (event.type === 'token') {
-                    finalText = event.accumulated;
+                  // Track per-step text and tool calls/results
+                  if (event.type === 'token' && 'step' in event) {
+                    const state = getOrCreateStepState(event.step);
+                    state.text = event.accumulated;
                   }
-                  if (event.type === 'run-end') {
-                    finalText = event.result.content;
-                    if (finalText && shouldPersistHistory) {
-                      return Effect.promise(() =>
-                        this.contextManager.addMessage(conversationId, {
-                          role: 'assistant',
-                          content: finalText,
-                        })
-                      );
+
+                  if (event.type === 'tool-call' && 'step' in event) {
+                    const state = getOrCreateStepState(event.step);
+                    state.toolCalls.push({
+                      id: event.toolCallId,
+                      toolName: event.toolName,
+                      args: event.input,
+                    });
+                  }
+
+                  if (event.type === 'tool-result' && 'step' in event) {
+                    const state = getOrCreateStepState(event.step);
+                    const toolCall = state.toolCalls.find(tc => tc.id === event.toolCallId);
+                    if (toolCall) {
+                      toolCall.result = event.output;
+                      toolCall.isFailure = false;
                     }
                   }
+
+                  if (event.type === 'tool-error' && 'step' in event) {
+                    const state = getOrCreateStepState(event.step);
+                    const toolCall = state.toolCalls.find(tc => tc.id === event.toolCallId);
+                    if (toolCall) {
+                      toolCall.result = event.error.message;
+                      toolCall.isFailure = true;
+                    }
+                  }
+
+                  // On step-complete, persist history for that step
+                  if (event.type === 'step-complete' && shouldPersistHistory) {
+                    const state = stepStates.get(event.stepIndex);
+                    if (state && state.toolCalls.length > 0) {
+                      // Persist assistant message with tool calls
+                      return Effect.promise(async () => {
+                        const assistantParts: Array<Prompt.AssistantMessagePartEncoded> = [];
+                        if (state.text) {
+                          assistantParts.push(Prompt.makePart('text', { text: state.text }));
+                        }
+                        state.toolCalls.forEach((tc) => {
+                          assistantParts.push(
+                            Prompt.makePart('tool-call', {
+                              id: tc.id,
+                              name: tc.toolName,
+                              params: tc.args,
+                              providerExecuted: false,
+                            })
+                          );
+                        });
+                        await this.contextManager.addMessage(conversationId, {
+                          role: 'assistant',
+                          content: assistantParts,
+                        });
+
+                        // Add tool results
+                        for (const tc of state.toolCalls) {
+                          if (tc.result !== undefined) {
+                            await this.contextManager.addMessage(conversationId, {
+                              role: 'tool',
+                              content: [
+                                Prompt.makePart('tool-result', {
+                                  id: tc.id,
+                                  name: tc.toolName,
+                                  result: tc.result,
+                                  isFailure: tc.isFailure ?? false,
+                                  providerExecuted: false,
+                                }),
+                              ],
+                            });
+                          }
+                        }
+
+                        // Clear step state after persistence
+                        stepStates.delete(event.stepIndex);
+                      });
+                    }
+                  }
+
                   return Effect.void;
                 })
               );
@@ -1371,8 +1483,8 @@ export class Fred {
       throw new Error('Conversation ID is required for this request');
     }
 
-    const modelMessages: ModelMessage[] = messages.map((message) => ({
-      role: message.role as ModelMessage['role'],
+    const modelMessages: Prompt.MessageEncoded[] = messages.map((message) => ({
+      role: message.role as Prompt.MessageEncoded['role'],
       content: message.content,
     }));
 

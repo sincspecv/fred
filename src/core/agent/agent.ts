@@ -1,6 +1,6 @@
 import { Action } from '../intent/intent';
 import { MCPServerConfig } from '../mcp/types';
-import type { ModelMessage } from '@effect/ai';
+import type { Prompt } from '@effect/ai';
 import type { Stream } from 'effect';
 import type { StreamEvent } from '../stream/events';
 
@@ -71,9 +71,9 @@ export interface AgentInstance {
 
 /**
  * Message to send to an agent
- * Aligned with Effect ModelMessage for type compatibility
+ * Aligned with Effect Prompt message encoding for type compatibility
  */
-export type AgentMessage = ModelMessage;
+export type AgentMessage = Prompt.MessageEncoded;
 
 /**
  * Agent response

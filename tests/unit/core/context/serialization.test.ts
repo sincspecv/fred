@@ -7,7 +7,7 @@ import {
 } from '../../../../src/core/context/storage/serialization';
 import type { ConversationMetadata } from '../../../../src/core/context/context';
 
-// Helper to create a mock ModelMessage matching @effect/ai structure
+// Helper to create a mock Prompt message matching @effect/ai structure
 const MessageTypeId = '~effect/ai/Prompt/Message';
 const PartTypeId = '~effect/ai/Prompt/Part';
 

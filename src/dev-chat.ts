@@ -43,7 +43,7 @@ function detectAvailableProvider(): { platform: string; model: string } | { plat
     return { platform: 'deepseek', model: 'deepseek-chat' };
   }
   if (process.env.GROQ_API_KEY) {
-    return { platform: 'groq', model: 'openai/gpt-oss-120b' };
+    return { platform: 'groq', model: 'llama-3.1-8b-instant' };
   }
   if (process.env.OPENROUTER_API_KEY) {
     return { platform: 'openrouter', model: 'openai/gpt-3.5-turbo' };
@@ -1067,9 +1067,12 @@ class DevChatRunner {
 
         let hasReceivedChunk = false;
         let fullText = '';
+        let hasStreamedText = false;
         let toolCallsUsed: string[] = [];
         let hasShownToolIndicator = false;
         let calculatorToolUsed = false;
+        let currentStepIndex = -1;
+        let stepToolCalls: string[] = [];
 
         // Ensure stdout is ready for immediate writes
         // Unbuffer stdout if it's corked (shouldn't be, but ensure it)
@@ -1127,8 +1130,25 @@ class DevChatRunner {
           }
         }
 
-        // Start streaming response
+        // Start response
         await writeImmediate('\n🤖 ');
+
+        // Non-streaming mode: use processMessage directly
+        if (!this.options.stream) {
+          try {
+            const response = await this.fred.processMessage(message, {
+              conversationId: this.conversationId,
+            });
+            if (response?.content) {
+              await writeImmediate(response.content);
+              hasReceivedChunk = true;
+            }
+            await writeImmediate('\n\n');
+          } catch (err) {
+            process.stderr.write(`\n❌ Error: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
+          return;
+        }
 
         // Track if stream was aborted for proper cleanup
         let streamAborted = false;
@@ -1137,16 +1157,16 @@ class DevChatRunner {
         try {
           // Create abort controller for stream cleanup
           streamController = new AbortController();
-          
+
           // Set up signal handler for graceful shutdown
           const abortHandler = () => {
             streamAborted = true;
             streamController?.abort();
           };
-          
+
           // Note: We can't directly abort the async generator, but we can track the abort state
           // The for-await loop will naturally exit when the generator completes or throws
-          
+
           for await (const event of this.fred.streamMessage(message, {
             conversationId: this.conversationId,
           })) {
@@ -1154,27 +1174,41 @@ class DevChatRunner {
             if (streamAborted || streamController?.signal.aborted) {
               break;
             }
-            
+
             hasReceivedChunk = true;
 
+            if (event.type === 'step-start') {
+              // Track step state internally (no visible output)
+              currentStepIndex = event.stepIndex;
+              stepToolCalls = [];
+              hasShownToolIndicator = false;
+            }
+
             if (event.type === 'tool-call') {
+              // Track tool calls internally (no visible output)
               if (event.toolName && !toolCallsUsed.includes(event.toolName)) {
                 toolCallsUsed.push(event.toolName);
                 if (event.toolName === 'calculator') {
                   calculatorToolUsed = true;
                 }
               }
+              if (event.toolName && !stepToolCalls.includes(event.toolName)) {
+                stepToolCalls.push(event.toolName);
+              }
+              hasShownToolIndicator = true;
+            }
 
-              if (!hasShownToolIndicator) {
-                if (fullText) {
-                  await writeImmediate('\n');
-                }
-                if (calculatorToolUsed) {
-                  await writeImmediate('🔧 🧮 Using calculator...\n');
-                } else {
-                  await writeImmediate('🔧 Using tools...\n');
-                }
-                hasShownToolIndicator = true;
+            if (event.type === 'step-end') {
+              // Step completed - no visible output needed
+            }
+
+            if (event.type === 'stream-error') {
+              // Print error and indicate partial text preservation
+              await writeImmediate('\n');
+              await writeImmediate(`❌ Stream error: ${event.error}\n`);
+              if (event.partialText && event.partialText.trim().length > 0) {
+                await writeImmediate(`[Partial response preserved: ${event.partialText.length} chars]\n`);
+                fullText = event.partialText;
               }
             }
 
@@ -1182,29 +1216,57 @@ class DevChatRunner {
               if (event.delta && event.delta.length > 0) {
                 await writeImmediate(event.delta);
                 fullText = event.accumulated || fullText;
+                hasStreamedText = true;
               }
             }
 
             if (event.type === 'run-end' && event.result.content) {
-              fullText = event.result.content;
+              // Check if the final content differs from what was streamed
+              // This can happen when text is generated after tool execution
+              // but wasn't streamed via token events
+              const finalContent = event.result.content;
+              if (finalContent !== fullText && finalContent.length > fullText.length) {
+                // There's additional content that wasn't streamed - output it
+                const additionalContent = finalContent.slice(fullText.length);
+                if (additionalContent.trim().length > 0) {
+                  await writeImmediate(additionalContent);
+                }
+              }
+              fullText = finalContent;
             }
           }
-          
+
           // Clean up abort handler
           streamController = null;
+
+          // If no text was streamed but we have a final response, print it now
+          if (!streamAborted && !hasStreamedText && fullText) {
+            await writeImmediate(fullText);
+            hasStreamedText = true;
+          }
+
+          // Fallback: if streaming produced no text, run non-streamed response
+          if (!streamAborted && !hasStreamedText) {
+            try {
+              const fallback = await this.fred.processMessage(message, {
+                conversationId: this.conversationId,
+              });
+              if (fallback?.content) {
+                await writeImmediate(fallback.content);
+                hasStreamedText = true;
+              }
+            } catch (fallbackError) {
+              console.error('\n❌ Fallback error:', fallbackError instanceof Error ? fallbackError.message : fallbackError);
+            }
+          }
 
           // After streaming completes, add final newline (only if not aborted)
           if (!streamAborted) {
             await writeImmediate('\n');
           }
 
-          // Show tools used summary if any tools were called
-          if (toolCallsUsed.length > 0) {
-            console.log(`🔧 Tools used: ${toolCallsUsed.join(', ')}\n`);
-          } else {
-            // Add extra newline for spacing if no tools were used
-            console.log('');
-          }
+          // Add extra newline for spacing
+          console.log('');
 
           // If no chunks were received, provide debugging information
           if (!hasReceivedChunk) {

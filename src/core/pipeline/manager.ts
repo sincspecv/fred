@@ -2,7 +2,7 @@ import { PipelineConfig, PipelineInstance, PipelineAgentRef, PipelineConfigV2 } 
 import { PipelineStep } from './steps';
 import { executePipelineV2 as executePipelineV2Fn, PipelineResult, ExecutorOptions } from './executor';
 import { ContextManager } from '../context/manager';
-import type { ModelMessage } from '@effect/ai';
+import { Prompt } from '@effect/ai';
 import { AgentManager } from '../agent/manager';
 import { AgentMessage, AgentResponse } from '../agent/agent';
 import { HookManager } from '../hooks/manager';
@@ -850,29 +850,43 @@ export class PipelineManager {
           // Only persist to context if agent allows it (default: true)
           const shouldPersistHistory = agent.config.persistHistory !== false;
           if (appendToContext && this.contextManager && conversationId && shouldPersistHistory) {
-            const messagesToAdd: ModelMessage[] = [userEntry];
+            const messagesToAdd: Prompt.MessageEncoded[] = [userEntry];
 
             if (response.toolCalls && response.toolCalls.length > 0) {
-              const assistantMessage: ModelMessage = {
-                role: 'assistant',
-                content: response.content || '',
-                toolCalls: response.toolCalls.map((tc, idx) => ({
-                  toolCallId: `call_${tc.toolId}_${Date.now()}_${idx}`,
-                  toolName: tc.toolId,
-                  args: tc.args,
-                })),
-              };
-              messagesToAdd.push(assistantMessage);
+              const baseTimestamp = Date.now();
+              const toolCallIds = response.toolCalls.map(
+                (toolCall, idx) => `call_${toolCall.toolId}_${baseTimestamp}_${idx}`
+              );
+              const assistantParts: Array<Prompt.AssistantMessagePartEncoded> = [];
+              if (response.content) {
+                assistantParts.push(Prompt.makePart('text', { text: response.content }));
+              }
+              response.toolCalls.forEach((toolCall, idx) => {
+                assistantParts.push(
+                  Prompt.makePart('tool-call', {
+                    id: toolCallIds[idx],
+                    name: toolCall.toolId,
+                    params: toolCall.args,
+                    providerExecuted: false,
+                  })
+                );
+              });
+              messagesToAdd.push({ role: 'assistant', content: assistantParts });
 
               for (let idx = 0; idx < response.toolCalls.length; idx++) {
                 const toolCall = response.toolCalls[idx];
                 if (toolCall.result !== undefined) {
                   messagesToAdd.push({
                     role: 'tool',
-                    content: typeof toolCall.result === 'string'
-                      ? toolCall.result
-                      : JSON.stringify(toolCall.result),
-                    toolCallId: `call_${toolCall.toolId}_${Date.now()}_${idx}`,
+                    content: [
+                      Prompt.makePart('tool-result', {
+                        id: toolCallIds[idx],
+                        name: toolCall.toolId,
+                        result: toolCall.result,
+                        isFailure: false,
+                        providerExecuted: false,
+                      }),
+                    ],
                   });
                 }
               }

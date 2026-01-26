@@ -23,15 +23,16 @@ export const OpenAiProviderFactory: EffectProviderFactory = {
     const apiKey = process.env[apiKeyEnvVar];
 
     // Use OpenAiClient.layer or OpenAiLayer.layer based on package version
+    // Note: @effect/ai-openai uses 'apiUrl' not 'baseUrl'
     const layer =
       module.OpenAiClient?.layer?.({
         apiKey,
-        baseUrl: config.baseUrl,
+        apiUrl: config.baseUrl,
         headers: config.headers,
       }) ??
       module.OpenAiLayer?.layer?.({
         apiKey,
-        baseUrl: config.baseUrl,
+        apiUrl: config.baseUrl,
         headers: config.headers,
       });
 

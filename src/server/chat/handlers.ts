@@ -1,10 +1,10 @@
-import type { ModelMessage } from '@effect/ai';
 import { Fred } from '../../index';
 import { ContextManager } from '../../core/context/manager';
 import { ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChunk, ChatMessage } from './chat';
 import { toOpenAIStream } from '../../core/stream/openai';
 import { Stream } from 'effect';
 import type { StreamEvent } from '../../core/stream/events';
+import type { Prompt } from '@effect/ai';
 
 /**
  * Chat API handlers
@@ -26,8 +26,8 @@ export class ChatHandlers {
   ): Promise<ChatCompletionResponse> {
     const conversationId = request.conversation_id || this.contextManager.generateConversationId();
     
-    const modelMessages: ModelMessage[] = request.messages.map((msg) => ({
-      role: msg.role as ModelMessage['role'],
+    const modelMessages: Prompt.MessageEncoded[] = request.messages.map((msg) => ({
+      role: msg.role as Prompt.MessageEncoded['role'],
       content: msg.content || '',
     }));
     
@@ -35,7 +35,7 @@ export class ChatHandlers {
     const history = await this.contextManager.getHistory(conversationId);
     
     // Combine history with new messages
-    const allMessages: ModelMessage[] = [...history, ...modelMessages];
+    const allMessages: Prompt.MessageEncoded[] = [...history, ...modelMessages];
     
     // Extract the last user message
     const lastUserMessage = modelMessages[modelMessages.length - 1];
@@ -60,7 +60,7 @@ export class ChatHandlers {
     await this.contextManager.addMessage(conversationId, lastUserMessage);
     
     // Add assistant response to context
-    const assistantMessage: ModelMessage = {
+    const assistantMessage: Prompt.MessageEncoded = {
       role: 'assistant',
       content: response.content,
     };
@@ -96,8 +96,8 @@ export class ChatHandlers {
   ): AsyncGenerator<ChatCompletionChunk, void, unknown> {
     const conversationId = request.conversation_id || this.contextManager.generateConversationId();
     
-    const modelMessages: ModelMessage[] = request.messages.map((msg) => ({
-      role: msg.role as ModelMessage['role'],
+    const modelMessages: Prompt.MessageEncoded[] = request.messages.map((msg) => ({
+      role: msg.role as Prompt.MessageEncoded['role'],
       content: msg.content || '',
     }));
     
@@ -142,7 +142,7 @@ export class ChatHandlers {
     }
 
     if (finalResponse.content) {
-      const assistantMessage: ModelMessage = {
+      const assistantMessage: Prompt.MessageEncoded = {
         role: 'assistant',
         content: finalResponse.content,
       };

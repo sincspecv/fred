@@ -1,5 +1,6 @@
-import type { ModelMessage } from '@effect/ai';
+import type { Prompt } from '@effect/ai';
 import { ConversationContext, ConversationMetadata, ConversationPolicy, ContextStorage } from './context';
+import { normalizeMessage, normalizeMessages } from '../messages';
 
 /**
  * In-memory context storage implementation
@@ -90,12 +91,13 @@ export class ContextManager {
   /**
    * Add a message to the conversation context
    */
-  async addMessage(conversationId: string, message: ModelMessage): Promise<void> {
-    if (message.role === 'system') {
+  async addMessage(conversationId: string, message: Prompt.MessageEncoded): Promise<void> {
+    const normalized = normalizeMessage(message);
+    if (normalized.role === 'system') {
       return;
     }
     const context = await this.getContext(conversationId);
-    context.messages.push(message);
+    context.messages.push(normalized);
     this.applyCaps(context);
     context.metadata.updatedAt = new Date();
     await this.storage.set(conversationId, context);
@@ -104,9 +106,9 @@ export class ContextManager {
   /**
    * Add multiple messages to the conversation context
    */
-  async addMessages(conversationId: string, messages: ModelMessage[]): Promise<void> {
+  async addMessages(conversationId: string, messages: Prompt.MessageEncoded[]): Promise<void> {
     const context = await this.getContext(conversationId);
-    const filteredMessages = messages.filter(message => message.role !== 'system');
+    const filteredMessages = normalizeMessages(messages).filter(message => message.role !== 'system');
     if (filteredMessages.length === 0) {
       return;
     }
@@ -119,9 +121,9 @@ export class ContextManager {
   /**
    * Get conversation history
    */
-  async getHistory(conversationId: string): Promise<ModelMessage[]> {
+  async getHistory(conversationId: string): Promise<Prompt.MessageEncoded[]> {
     const context = await this.getContext(conversationId);
-    return context.messages;
+    return normalizeMessages(context.messages);
   }
 
   /**
@@ -214,13 +216,22 @@ export class ContextManager {
     }
   }
 
-  private countMessageChars(message: ModelMessage): number {
+  private countMessageChars(message: Prompt.MessageEncoded): number {
     const content = message.content;
     if (typeof content === 'string') {
       return content.length;
     }
     if (content == null) {
       return 0;
+    }
+    if (Array.isArray(content)) {
+      return content.reduce((sum, part) => {
+        if (part && typeof part === 'object' && 'type' in part && part.type === 'text') {
+          const text = (part as { text?: string }).text;
+          return sum + (typeof text === 'string' ? text.length : 0);
+        }
+        return sum + JSON.stringify(part).length;
+      }, 0);
     }
     return JSON.stringify(content).length;
   }

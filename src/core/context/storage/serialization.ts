@@ -1,11 +1,11 @@
 /**
- * JSON-safe serialization utilities for ModelMessage and ConversationMetadata.
+ * JSON-safe serialization utilities for Prompt messages and ConversationMetadata.
  *
  * Handles special types (Date, URL, Uint8Array) that require custom encoding
  * for safe storage and round-trip restoration.
  */
 
-import type { ModelMessage } from '@effect/ai';
+import type { Prompt } from '@effect/ai';
 import type { ConversationMetadata } from '../context';
 
 // -----------------------------------------------------------------------------
@@ -123,10 +123,10 @@ export interface SerializedMessage {
 }
 
 /**
- * Serialize a ModelMessage for SQL storage.
+ * Serialize a Prompt message for SQL storage.
  * Encodes special types (Date, URL, Uint8Array) as typed markers.
  */
-export function serializeMessage(message: ModelMessage): SerializedMessage {
+export function serializeMessage(message: Prompt.MessageEncoded): SerializedMessage {
   const encoded = deepTransform(message, jsonReplacer);
   return {
     payload: JSON.stringify(encoded),
@@ -134,12 +134,12 @@ export function serializeMessage(message: ModelMessage): SerializedMessage {
 }
 
 /**
- * Deserialize a ModelMessage from SQL storage.
+ * Deserialize a Prompt message from SQL storage.
  * Accepts either a JSON string (SQLite TEXT) or parsed object (Postgres JSONB).
  */
-export function deserializeMessage(input: string | object): ModelMessage {
+export function deserializeMessage(input: string | object): Prompt.MessageEncoded {
   const parsed = typeof input === 'string' ? JSON.parse(input) : input;
-  return deepTransform(parsed, jsonReviver) as ModelMessage;
+  return deepTransform(parsed, jsonReviver) as Prompt.MessageEncoded;
 }
 
 // -----------------------------------------------------------------------------

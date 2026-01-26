@@ -444,8 +444,12 @@ describe('PipelineManager', () => {
 
       const history = await contextManager.getHistory('thread-1');
       expect(history.map(msg => msg.role)).toEqual(['user', 'assistant', 'tool']);
-      expect(history[1].toolCalls?.[0].toolName).toBe('weather');
-      expect(history[2].content).toContain('72');
+      const assistantParts = Array.isArray(history[1].content) ? history[1].content : [];
+      const toolCallPart = assistantParts.find((part) => part && typeof part === 'object' && 'type' in part && part.type === 'tool-call');
+      expect((toolCallPart as any)?.name).toBe('weather');
+      const toolParts = Array.isArray(history[2].content) ? history[2].content : [];
+      const toolResultPart = toolParts.find((part) => part && typeof part === 'object' && 'type' in part && part.type === 'tool-result');
+      expect(JSON.stringify((toolResultPart as any)?.result)).toContain('72');
     });
 
     test('should skip appending when agent has persistHistory=false', async () => {

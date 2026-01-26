@@ -22,18 +22,19 @@ export const OpenRouterProviderFactory: EffectProviderFactory = {
 
     const apiKeyEnvVar = config.apiKeyEnvVar ?? 'OPENROUTER_API_KEY';
     const apiKey = process.env[apiKeyEnvVar];
-    const baseUrl = config.baseUrl ?? 'https://openrouter.ai/api/v1';
+    const apiUrl = config.baseUrl ?? 'https://openrouter.ai/api/v1';
 
     // Use OpenAiClient.layer or OpenAiLayer.layer based on package version
+    // Note: @effect/ai-openai uses 'apiUrl' not 'baseUrl'
     const layer =
       module.OpenAiClient?.layer?.({
         apiKey,
-        baseUrl,
+        apiUrl,
         headers: config.headers,
       }) ??
       module.OpenAiLayer?.layer?.({
         apiKey,
-        baseUrl,
+        apiUrl,
         headers: config.headers,
       });
 

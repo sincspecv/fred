@@ -1,4 +1,6 @@
 import { Effect } from 'effect';
+import * as HttpClient from '@effect/platform/HttpClient';
+import * as HttpClientRequest from '@effect/platform/HttpClientRequest';
 import type { EffectProviderFactory } from '../base';
 import type { ProviderConfig, ProviderModelDefaults } from '../provider';
 
@@ -22,11 +24,23 @@ export const GoogleProviderFactory: EffectProviderFactory = {
     const apiKeyEnvVar = config.apiKeyEnvVar ?? 'GOOGLE_GENERATIVE_AI_API_KEY';
     const apiKey = process.env[apiKeyEnvVar];
 
-    // Use GoogleAiClient.layer for client initialization
-    const layer = module.GoogleAiClient?.layer?.({
+    const transformClient = config.headers
+      ? (client: HttpClient.HttpClient) =>
+          client.pipe(
+            HttpClient.mapRequest((request) =>
+              Object.entries(config.headers ?? {}).reduce(
+                (next, [key, value]) => HttpClientRequest.setHeader(key, value)(next),
+                request
+              )
+            )
+          )
+      : undefined;
+
+    // Use GoogleClient.layer for client initialization
+    const layer = module.GoogleClient?.layer?.({
       apiKey,
-      baseUrl: config.baseUrl,
-      headers: config.headers,
+      apiUrl: config.baseUrl,
+      transformClient,
     });
 
     if (!layer) {

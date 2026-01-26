@@ -166,13 +166,11 @@ export function validateToolSchema(tool: Tool): void {
 export function wrapToolExecution<Input, Output>(
   tool: Tool<Input, Output>,
   execute: (args: Input) => Promise<Output> | Output
-): (args: unknown) => Promise<{ result: Output; metadata: ToolValidationMetadata }> {
+): (args: unknown) => Promise<Output> {
   return async (args: unknown) => {
     const decoded = getDecodedToolInputs(tool, args);
     const result = await execute(decoded.output);
-    return {
-      result,
-      metadata: decoded.metadata,
-    };
+    // Return just the result - @effect/ai expects the raw output matching the tool's success schema
+    return result;
   };
 }

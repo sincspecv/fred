@@ -1,5 +1,5 @@
-import type { ModelMessage } from '@effect/ai';
-
+import type { Prompt } from '@effect/ai';
+import type { Prompt } from '@effect/ai';
 /**
  * Conversation context metadata
  */
@@ -22,7 +22,7 @@ export interface ConversationMetadata {
  */
 export interface ConversationContext {
   id: string;
-  messages: ModelMessage[];
+  messages: Prompt.MessageEncoded[];
   metadata: ConversationMetadata;
 }
 

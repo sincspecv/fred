@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { ContextManager } from '../../../../src/core/context/manager';
 import { createMockStorage } from '../../helpers/mock-storage';
 import { ContextStorage, ConversationContext } from '../../../../src/core/context/context';
-import type { ModelMessage } from '@effect/ai';
+import type { Prompt } from '@effect/ai';
 
 describe('ContextManager', () => {
   let manager: ContextManager;
@@ -111,7 +111,7 @@ describe('ContextManager', () => {
   describe('addMessage', () => {
     test('should add message to conversation', async () => {
       const conversationId = 'test-conv';
-      const message: ModelMessage = {
+      const message: Prompt.MessageEncoded = {
         role: 'user',
         content: 'Hello',
       };
@@ -125,7 +125,7 @@ describe('ContextManager', () => {
 
     test('should update metadata timestamp when adding message', async () => {
       const conversationId = 'test-conv';
-      const message: ModelMessage = {
+      const message: Prompt.MessageEncoded = {
         role: 'user',
         content: 'Hello',
       };
@@ -187,7 +187,7 @@ describe('ContextManager', () => {
   describe('addMessages', () => {
     test('should add multiple messages at once', async () => {
       const conversationId = 'test-conv';
-      const messages: ModelMessage[] = [
+      const messages: Prompt.MessageEncoded[] = [
         { role: 'user', content: 'Message 1' },
         { role: 'assistant', content: 'Response 1' },
         { role: 'user', content: 'Message 2' },
