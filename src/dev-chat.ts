@@ -459,7 +459,7 @@ class DevChatRunner {
             
             await newFred.createAgent({
               id: '__dev_agent__',
-              systemMessage: 'You are a helpful development assistant. This is a temporary agent created for dev-chat. Create your own agents in your config file or code to replace this.\n\nYou have access to a calculator tool that can perform basic arithmetic operations. When users ask mathematical questions or need calculations, use the calculator tool to get accurate results. The calculator supports addition (+), subtraction (-), multiplication (*), division (/), parentheses for grouping, and decimal numbers. **NON NEGOTIABLE**: Always use the calculator tool for mathematical expressions rather than trying to calculate them yourself.',
+              systemMessage: 'You are a helpful assistant. Answer questions naturally and conversationally.\n\nYou have access to a calculator tool for arithmetic. When you need to calculate a mathematical expression, use the calculator tool. Do not generate text that looks like XML tags or function calls - use the actual tool calling feature.\n\nThis is a temporary agent for dev-chat. Users can create custom agents in their config files.',
               platform: providerInfo.platform,
               model: providerInfo.model,
               tools: ['calculator'], // Include the built-in calculator tool
@@ -1073,6 +1073,8 @@ class DevChatRunner {
         let calculatorToolUsed = false;
         let currentStepIndex = -1;
         let stepToolCalls: string[] = [];
+        let currentStepHasToolCalls = false;
+        let bufferedTextForCurrentStep = '';
 
         // Ensure stdout is ready for immediate writes
         // Unbuffer stdout if it's corked (shouldn't be, but ensure it)
@@ -1182,9 +1184,16 @@ class DevChatRunner {
               currentStepIndex = event.stepIndex;
               stepToolCalls = [];
               hasShownToolIndicator = false;
+              currentStepHasToolCalls = false;
+              bufferedTextForCurrentStep = '';
             }
 
             if (event.type === 'tool-call') {
+              // Mark that this step has tool calls - we won't output its text
+              currentStepHasToolCalls = true;
+              // Discard buffered text for this step since it's just tool-calling text
+              bufferedTextForCurrentStep = '';
+
               // Track tool calls internally (no visible output)
               if (event.toolName && !toolCallsUsed.includes(event.toolName)) {
                 toolCallsUsed.push(event.toolName);
@@ -1198,8 +1207,36 @@ class DevChatRunner {
               hasShownToolIndicator = true;
             }
 
+            if (event.type === 'tool-error') {
+              // Display tool error for genuine failures (exceptions, timeouts, etc.)
+              // Note: Well-behaved tools like calculator return error messages as strings
+              // rather than throwing, so this only catches genuine failures
+              await writeImmediate('\n');
+              await writeImmediate(`⚠️  Tool error: ${event.error.message}\n`);
+              hasStreamedText = true;
+            }
+
             if (event.type === 'step-end') {
-              // Step completed - no visible output needed
+              // Step completed - output buffered text only if this step had no tool calls
+              if (!currentStepHasToolCalls && bufferedTextForCurrentStep) {
+                // Filter out malformed XML-like tool call text
+                // Detect patterns like <function=...>...</function> or <tool...>...</tool>
+                const xmlToolCallPattern = /<(?:function|tool)[^>]*>.*?<\/(?:function|tool)>/gi;
+                const filteredText = bufferedTextForCurrentStep.replace(xmlToolCallPattern, '').trim();
+
+                // Debug logging if verbose mode and malformed tool call detected
+                if (this.options.verbose && filteredText !== bufferedTextForCurrentStep.trim()) {
+                  console.log('[DEBUG] Filtered malformed XML tool call from output');
+                }
+
+                // Only output if there's actual text remaining after filtering
+                if (filteredText) {
+                  await writeImmediate(filteredText);
+                  fullText += filteredText;
+                  hasStreamedText = true;
+                }
+                bufferedTextForCurrentStep = '';
+              }
             }
 
             if (event.type === 'stream-error') {
@@ -1214,22 +1251,30 @@ class DevChatRunner {
 
             if (event.type === 'token') {
               if (event.delta && event.delta.length > 0) {
-                await writeImmediate(event.delta);
-                fullText = event.accumulated || fullText;
-                hasStreamedText = true;
+                // Buffer text for current step - only output it at step-end if no tool calls were made
+                bufferedTextForCurrentStep += event.delta;
+                // Don't set hasStreamedText yet - we'll set it when we actually output at step-end
               }
             }
 
             if (event.type === 'run-end' && event.result.content) {
-              // Check if the final content differs from what was streamed
-              // This can happen when text is generated after tool execution
-              // but wasn't streamed via token events
-              const finalContent = event.result.content;
-              if (finalContent !== fullText && finalContent.length > fullText.length) {
-                // There's additional content that wasn't streamed - output it
-                const additionalContent = finalContent.slice(fullText.length);
-                if (additionalContent.trim().length > 0) {
-                  await writeImmediate(additionalContent);
+              // The final content is what we want to show
+              // If we haven't streamed anything yet (all steps had tool calls), output the final content now
+              let finalContent = event.result.content;
+
+              // Filter out malformed XML-like tool call text from final content
+              const xmlToolCallPattern = /<(?:function|tool)[^>]*>.*?<\/(?:function|tool)>/gi;
+              finalContent = finalContent.replace(xmlToolCallPattern, '').trim();
+
+              if (!hasStreamedText && finalContent) {
+                await writeImmediate(finalContent);
+                hasStreamedText = true;
+              } else if (finalContent !== fullText) {
+                // There's a mismatch - output the final content (it's the complete final response)
+                // This shouldn't normally happen with our buffering logic, but handle it as a fallback
+                if (fullText.length === 0 && finalContent) {
+                  await writeImmediate(finalContent);
+                  hasStreamedText = true;
                 }
               }
               fullText = finalContent;
@@ -1296,12 +1341,13 @@ class DevChatRunner {
           streamAborted = true;
           streamController?.abort();
           streamController = null;
-          
+
           // If streaming fails, try to provide helpful error message
           // Don't show error if it was an abort (user interruption)
           if (!streamAborted || (streamError instanceof Error && streamError.name !== 'AbortError')) {
             console.error('\n❌ Streaming error:', streamError instanceof Error ? streamError.message : streamError);
-            if (streamError instanceof Error && streamError.stack) {
+            // Only show stack trace in verbose mode
+            if (this.options.verbose && streamError instanceof Error && streamError.stack) {
               console.error(streamError.stack);
             }
             console.log('');
@@ -1309,7 +1355,8 @@ class DevChatRunner {
         }
       } catch (error) {
         console.error('\n❌ Error:', error instanceof Error ? error.message : error);
-        if (error instanceof Error && error.stack) {
+        // Only show stack trace in verbose mode
+        if (this.options.verbose && error instanceof Error && error.stack) {
           console.error(error.stack);
         }
         console.log('');

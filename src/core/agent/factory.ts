@@ -19,8 +19,15 @@ import { normalizeMessages } from '../messages';
 import { streamMultiStep } from './streaming';
 
 function getSafeToolErrorMessage(toolId: string, error: unknown): string {
-  console.error(`Tool execution failed for "${toolId}":`, error);
-  return `Tool "${toolId}" execution failed. Please try again or use a different approach.`;
+  // Extract user-friendly error message
+  const errorMessage = error instanceof Error ? error.message : String(error);
+
+  // Log the error for debugging (genuine tool failures)
+  console.error(`Tool "${toolId}" failed:`, errorMessage);
+
+  // Return the actual error message to the user
+  // Note: The error will be displayed via tool-error events in the streaming UI
+  return errorMessage;
 }
 
 export interface MCPClientMetrics {
