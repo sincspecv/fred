@@ -50,6 +50,8 @@ interface OutputState {
   fullText: string;
   /** Track if we've started outputting for current step (for immediate mode) */
   currentStepStartedOutput: boolean;
+  /** Track successful tool executions for error recovery detection */
+  successfulToolCalls: Array<{ name: string; id: string }>;
 }
 
 /**
@@ -73,6 +75,18 @@ const processEvent = (
         currentStepHasToolCalls: false,
         bufferedTextForCurrentStep: '',
         currentStepStartedOutput: false,
+        successfulToolCalls: [], // Reset for new step
+      },
+      textToOutput: null,
+    };
+  }
+
+  // Track successful tool executions
+  if (event.type === 'tool-result') {
+    return {
+      newState: {
+        ...state,
+        successfulToolCalls: [...state.successfulToolCalls, { name: event.toolName, id: event.toolCallId }],
       },
       textToOutput: null,
     };
@@ -199,6 +213,7 @@ export const streamOutput = (
       bufferedTextForCurrentStep: '',
       fullText: '',
       currentStepStartedOutput: false,
+      successfulToolCalls: [],
     });
 
     // Write helper using Effect.sync
@@ -215,7 +230,7 @@ export const streamOutput = (
       (error) => new StreamOutputError('Stream iteration failed', error)
     );
 
-    // Process stream events using Effect
+    // Process stream events using Effect with error recovery
     yield* pipe(
       effectStream,
       Stream.mapEffect((event) =>
@@ -224,12 +239,38 @@ export const streamOutput = (
           const { newState, textToOutput } = processEvent(event, currentState, immediateTokens);
           yield* Ref.set(stateRef, newState);
 
+          // Detect stream-error events that occur after tool execution
+          if (event.type === 'stream-error' && currentState.successfulToolCalls.length > 0) {
+            console.warn(
+              `[Fred] Stream error occurred after ${currentState.successfulToolCalls.length} tool(s) executed successfully. ` +
+              `Tools: ${currentState.successfulToolCalls.map(t => t.name).join(', ')}. ` +
+              `Note: Tool side effects may have persisted despite the error. ` +
+              `Error: ${event.error}`
+            );
+          }
+
           if (textToOutput) {
             yield* writeText(textToOutput);
           }
         })
       ),
-      Stream.runDrain
+      Stream.runDrain,
+      Effect.catchAll((error) =>
+        Effect.gen(function* () {
+          // If stream processing fails, check if tools were executed
+          const currentState = yield* Ref.get(stateRef);
+          if (currentState.successfulToolCalls.length > 0) {
+            console.warn(
+              `[Fred] Stream processing failed after ${currentState.successfulToolCalls.length} tool(s) executed successfully. ` +
+              `Tools: ${currentState.successfulToolCalls.map(t => t.name).join(', ')}. ` +
+              `CRITICAL: Tool side effects may have persisted despite the error. ` +
+              `Consider implementing idempotent tools or transaction support.`
+            );
+          }
+          // Re-throw the error
+          return Effect.fail(error);
+        })
+      )
     );
 
     // Get final state

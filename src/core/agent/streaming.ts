@@ -1,3 +1,42 @@
+/**
+ * Multi-step agent streaming with tool execution
+ *
+ * IMPORTANT: Tool Execution Timing and Error Recovery
+ *
+ * Tools execute immediately after the model produces tool-call parts, BEFORE
+ * the full response is validated. This provides real-time tool execution for
+ * responsive multi-step agentic flows, but creates a potential atomicity issue:
+ *
+ * 1. Model streams response with tool-call parts
+ * 2. Tools execute (side effects committed to database, APIs, etc.)
+ * 3. Tool results added to conversation history
+ * 4. Stream continues or completes
+ * 5. Response validation happens (in @effect/ai or downstream)
+ * 6. If validation fails → Error bubbles up BUT tools already executed
+ *
+ * This means: User sees error, but tool side effects persisted.
+ *
+ * Mitigation Strategies:
+ *
+ * 1. **Idempotent Tools**: Design tools to be safely retriable
+ *    - Check if operation already completed before executing
+ *    - Use unique request IDs to prevent duplicate operations
+ *
+ * 2. **Read-Only Tools**: Prefer read-only tools where possible
+ *    - Query operations have no side effects
+ *    - Safe to execute multiple times
+ *
+ * 3. **Transaction Support** (future):
+ *    - Implement two-phase commit for database tools
+ *    - Tools return prepare() → commit() handles
+ *    - Only commit after validation succeeds
+ *
+ * 4. **Error Recovery**: The streamOutput utility detects this situation
+ *    and logs a warning when stream processing fails after tool execution
+ *
+ * See: FRED_IMPROVEMENTS.md in client projects for detailed analysis
+ */
+
 import { Effect, Stream, pipe } from 'effect';
 import { LanguageModel, Prompt, Toolkit } from '@effect/ai';
 import type {
