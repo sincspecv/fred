@@ -1287,7 +1287,7 @@ export class Fred {
                     }
                   }
 
-                  // On step-complete, persist history for that step
+                  // On step-complete, persist history for that step (only if tool calls)
                   if (event.type === 'step-complete' && shouldPersistHistory) {
                     const state = stepStates.get(event.stepIndex);
                     if (state && state.toolCalls.length > 0) {
@@ -1332,6 +1332,26 @@ export class Fred {
 
                         // Clear step state after persistence
                         stepStates.delete(event.stepIndex);
+                      });
+                    }
+                  }
+
+                  // On run-end, persist any remaining text response (for steps without tool calls)
+                  if (event.type === 'run-end' && shouldPersistHistory) {
+                    // Collect any remaining text from step states that weren't persisted
+                    // (steps without tool calls)
+                    const remainingText = Array.from(stepStates.values())
+                      .filter(state => state.text && state.toolCalls.length === 0)
+                      .map(state => state.text)
+                      .join('');
+
+                    if (remainingText) {
+                      return Effect.promise(async () => {
+                        await this.contextManager.addMessage(conversationId, {
+                          role: 'assistant',
+                          content: remainingText,
+                        });
+                        stepStates.clear();
                       });
                     }
                   }
