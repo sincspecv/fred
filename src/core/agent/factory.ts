@@ -17,6 +17,7 @@ import { annotateSpan } from '../observability/otel';
 import { attachErrorToSpan } from '../observability/errors';
 import { normalizeMessages } from '../messages';
 import { streamMultiStep } from './streaming';
+import { resolveTemplate } from '../variables/template';
 
 function getSafeToolErrorMessage(toolId: string, error: unknown): string {
   // Extract user-friendly error message
@@ -57,10 +58,15 @@ export class AgentFactory {
     connectionsByAgent: {},
   };
   private shutdownHooksRegistered = false;
+  private globalVariablesResolver?: () => Record<string, string | number | boolean>;
 
   constructor(toolRegistry: ToolRegistry, tracer?: Tracer) {
     this.toolRegistry = toolRegistry;
     this.tracer = tracer;
+  }
+
+  setGlobalVariablesResolver(resolver: () => Record<string, string | number | boolean>): void {
+    this.globalVariablesResolver = resolver;
   }
 
   setDefaultSystemMessage(systemMessage?: string): void {
@@ -409,7 +415,25 @@ export class AgentFactory {
       ? toolkit.toLayer(toolHandlers)
       : Layer.empty;
 
-    const systemMessage = loadPromptFile(resolvedSystemMessage, undefined, false);
+    // Load the system message template (may contain {{ var_name }} placeholders)
+    const systemMessageTemplate = loadPromptFile(resolvedSystemMessage, undefined, false);
+
+    // Helper function to resolve system message with current variable values
+    const resolveSystemMessage = (): string => {
+      let resolved = systemMessageTemplate;
+
+      // Resolve {{ var_name }} template variables if resolver is available
+      if (this.globalVariablesResolver) {
+        const globalVars = this.globalVariablesResolver();
+        const resolveEffect = resolveTemplate(resolved, globalVars, {
+          strict: false,
+          removeUnresolved: false,
+        });
+        resolved = Effect.runSync(resolveEffect);
+      }
+
+      return resolved;
+    };
 
     const processMessage = async (
       message: string,
@@ -442,8 +466,11 @@ export class AgentFactory {
       Effect.runPromise(modelAnnotation).catch(() => {});
 
       try {
+        // Resolve system message with current variable values
+        const resolvedSystemMessage = resolveSystemMessage();
+
         const promptMessages = normalizeMessages([
-          { role: 'system', content: systemMessage },
+          { role: 'system', content: resolvedSystemMessage },
           ...previousMessages,
           { role: 'user', content: message },
         ]);
@@ -616,8 +643,11 @@ export class AgentFactory {
       const messageId = `msg_${startedAt}_${Math.random().toString(36).slice(2, 6)}`;
       const threadId = options?.threadId;
 
+      // Resolve system message with current variable values
+      const resolvedSystemMessage = resolveSystemMessage();
+
       const promptMessages = normalizeMessages([
-        { role: 'system', content: systemMessage },
+        { role: 'system', content: resolvedSystemMessage },
         ...previousMessages,
         { role: 'user', content: message },
       ]);

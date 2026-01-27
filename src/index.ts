@@ -55,6 +55,11 @@ import { WorkflowManager } from './core/workflow/manager';
 import { Workflow } from './core/workflow/types';
 import { buildObservabilityLayers, type ObservabilityLayers } from './core/observability/otel';
 import type { ObservabilityConfig } from './config/types';
+import {
+  GlobalVariablesService,
+  GlobalVariablesServiceLive,
+  type VariableFactory,
+} from './core/variables';
 
 /**
  * Fred - Main class for building AI agents
@@ -83,6 +88,7 @@ export class Fred {
   private messageRouter?: MessageRouter;
   private workflowManager?: WorkflowManager;
   private observabilityLayers?: ObservabilityLayers;
+  private globalVariables: Map<string, VariableFactory> = new Map();
 
   constructor(tracer?: Tracer) {
     this.toolRegistry = new ToolRegistry();
@@ -94,15 +100,15 @@ export class Fred {
     this.contextManager = new ContextManager();
     this.pipelineManager = new PipelineManager(this.agentManager, tracer, this.contextManager);
     this.hookManager = new HookManager();
-    
+
     // Set tracer on hook manager if provided
     if (this.tracer) {
       this.hookManager.setTracer(this.tracer);
     }
-    
+
     // Register built-in tools
     this.registerBuiltInTools();
-    
+
     // Register shutdown hooks for MCP client cleanup
     this.agentManager.registerShutdownHooks();
   }
@@ -127,6 +133,74 @@ export class Fred {
     this.pipelineManager.setTracer(this.tracer);
     this.pipelineManager.setContextManager(this.contextManager);
     this.hookManager.setTracer(this.tracer);
+  }
+
+  /**
+   * Register a global variable with an Effect factory
+   * @param name - Variable name
+   * @param factory - Effect that produces the variable value
+   * @example
+   * await fred.registerGlobalVariable('currentDate', () =>
+   *   Effect.succeed(new Date().toISOString())
+   * )
+   */
+  async registerGlobalVariable(
+    name: string,
+    factory: VariableFactory
+  ): Promise<void> {
+    this.globalVariables.set(name, factory);
+    this.updateGlobalVariablesResolver();
+  }
+
+  /**
+   * Register multiple global variables at once
+   * @param variables - Object mapping variable names to Effect factories
+   * @example
+   * await fred.registerGlobalVariables({
+   *   currentDate: () => Effect.succeed(new Date().toISOString()),
+   *   timezone: () => Effect.succeed('America/New_York')
+   * })
+   */
+  async registerGlobalVariables(
+    variables: Record<string, VariableFactory>
+  ): Promise<void> {
+    for (const [name, factory] of Object.entries(variables)) {
+      this.globalVariables.set(name, factory);
+    }
+    this.updateGlobalVariablesResolver();
+  }
+
+  /**
+   * Get the current value of a global variable (async)
+   */
+  async getGlobalVariable(name: string): Promise<string | number | boolean | undefined> {
+    const factory = this.globalVariables.get(name);
+    if (!factory) return undefined;
+    return Effect.runPromise(factory());
+  }
+
+  /**
+   * Get all global variable values (async)
+   */
+  async getGlobalVariables(): Promise<Record<string, string | number | boolean>> {
+    const result: Record<string, string | number | boolean> = {};
+    for (const [name, factory] of this.globalVariables.entries()) {
+      result[name] = await Effect.runPromise(factory());
+    }
+    return result;
+  }
+
+  /**
+   * Internal: Update the agent manager with the current global variables resolver
+   */
+  private updateGlobalVariablesResolver(): void {
+    this.agentManager.setGlobalVariablesResolver(() => {
+      const result: Record<string, string | number | boolean> = {};
+      for (const [name, factory] of this.globalVariables.entries()) {
+        result[name] = Effect.runSync(factory());
+      }
+      return result;
+    });
   }
 
   /**
@@ -779,7 +853,7 @@ export class Fred {
       // Filter to user/assistant messages for agent processing
       // Since AgentMessage is Prompt message-encoded, we can use history directly
       const previousMessages: AgentMessage[] = history.filter(
-        msg => msg.role === 'user' || msg.role === 'assistant'
+        msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
       ) as AgentMessage[];
 
       // Create semantic matcher if enabled
@@ -1072,7 +1146,7 @@ export class Fred {
       const history = yield* Effect.promise(() => this.contextManager.getHistory(conversationId));
 
       const previousMessages: AgentMessage[] = history.filter(
-        msg => msg.role === 'user' || msg.role === 'assistant'
+        msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
       ) as AgentMessage[];
 
       const semanticMatcher = useSemantic
@@ -1906,3 +1980,6 @@ export type { ObservabilityLayers } from './core/observability/otel';
 // Stream output utilities
 export { streamOutput, streamOutputSimple, StreamOutputError } from './core/stream/output';
 export type { StreamOutputOptions } from './core/stream/output';
+
+// Global variables
+export type { VariableFactory, VariableValue } from './core/variables';

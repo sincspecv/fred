@@ -40,6 +40,13 @@ export class AgentManager {
   }
 
   /**
+   * Set the global variables resolver for injecting context into agent prompts
+   */
+  setGlobalVariablesResolver(resolver: () => Record<string, string | number | boolean>): void {
+    this.factory.setGlobalVariablesResolver(resolver);
+  }
+
+  /**
    * Get MCP client connection metrics
    */
   getMCPMetrics() {
