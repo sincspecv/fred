@@ -150,22 +150,21 @@ export const streamOutput = (
   const prefix = options?.prefix ?? '';
   const suffix = options?.suffix ?? '\n\n';
 
-  return Effect.gen(function* (_) {
+  return Effect.gen(function* () {
     // Create state ref for tracking output
-    const stateRef = yield* _(Ref.make<OutputState>({
+    const stateRef = yield* Ref.make<OutputState>({
       hasStreamedText: false,
       currentStepHasToolCalls: false,
       bufferedTextForCurrentStep: '',
       fullText: '',
-    }));
+    });
 
     // Write helper using Effect.sync
-    const writeText = (text: string) =>
-      Effect.sync(() => write(text));
+    const writeText = (text: string) => Effect.sync(() => write(text));
 
     // Show prefix if provided
     if (prefix) {
-      yield* _(writeText(prefix));
+      yield* writeText(prefix);
     }
 
     // Convert to Effect Stream for proper error handling
@@ -175,30 +174,28 @@ export const streamOutput = (
     );
 
     // Process stream events using Effect
-    yield* _(
-      pipe(
-        effectStream,
-        Stream.mapEffect((event) =>
-          Effect.gen(function* (_) {
-            const currentState = yield* _(Ref.get(stateRef));
-            const { newState, textToOutput } = processEvent(event, currentState);
-            yield* _(Ref.set(stateRef, newState));
+    yield* pipe(
+      effectStream,
+      Stream.mapEffect((event) =>
+        Effect.gen(function* () {
+          const currentState = yield* Ref.get(stateRef);
+          const { newState, textToOutput } = processEvent(event, currentState);
+          yield* Ref.set(stateRef, newState);
 
-            if (textToOutput) {
-              yield* _(writeText(textToOutput));
-            }
-          })
-        ),
-        Stream.runDrain
-      )
+          if (textToOutput) {
+            yield* writeText(textToOutput);
+          }
+        })
+      ),
+      Stream.runDrain
     );
 
     // Get final state
-    const finalState = yield* _(Ref.get(stateRef));
+    const finalState = yield* Ref.get(stateRef);
 
     // Show suffix if we streamed text
     if (finalState.hasStreamedText && suffix) {
-      yield* _(writeText(suffix));
+      yield* writeText(suffix);
     }
 
     return finalState.fullText;

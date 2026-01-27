@@ -1,4 +1,4 @@
-import { Effect, Stream, Ref, pipe, Queue, Deferred } from 'effect';
+import { Effect, Stream, pipe } from 'effect';
 import { LanguageModel, Prompt, Toolkit } from '@effect/ai';
 import type {
   StreamEvent,
@@ -74,11 +74,11 @@ const executeToolEffect = (
   stepIndex: number,
   sequence: number
 ): Effect.Effect<{ event: ToolResultEvent | ToolErrorEvent; result: unknown; isError: boolean }, never> =>
-  Effect.gen(function* (_) {
+  Effect.gen(function* () {
     const executor = toolHandlers?.get(toolCall.name);
     const toolStartTime = Date.now();
 
-    const result = yield* _(
+    const result = yield* (
       executor
         ? Effect.tryPromise({
             try: () => Promise.resolve(executor(toolCall.params as Record<string, any>)),
@@ -274,20 +274,20 @@ export const streamMultiStep = (
 
   // Use Stream.asyncPush for true real-time event emission with Effect
   return Stream.asyncPush<StreamEvent, Error>((emit) =>
-    Effect.gen(function* (_) {
+    Effect.gen(function* () {
       let currentMessages = [...messages];
       let sequenceCounter = 0;
 
       // Multi-step loop using Effect
       for (let stepIndex = 0; stepIndex < config.maxSteps; stepIndex++) {
         // Emit step-start immediately
-        yield* _(emit.single(makeStepStartEvent({
+        yield* emit.single(makeStepStartEvent({
           runId,
           threadId,
           stepIndex,
           sequence: sequenceCounter++,
           emittedAt: Date.now(),
-        })));
+        }));
 
         // Initialize state for this step
         let state: StreamState = {
@@ -310,29 +310,27 @@ export const streamMultiStep = (
         });
 
         // Process model stream, emitting events in real-time
-        yield* _(
-          Stream.runForEach(modelStream, (part) =>
-            Effect.gen(function* (_) {
-              const { event, newState } = processStreamPart(
-                part,
-                state,
-                runId,
-                threadId,
-                messageId
-              );
-              state = newState;
-              sequenceCounter = state.sequence;
+        yield* Stream.runForEach(modelStream, (part) =>
+          Effect.gen(function* () {
+            const { event, newState } = processStreamPart(
+              part,
+              state,
+              runId,
+              threadId,
+              messageId
+            );
+            state = newState;
+            sequenceCounter = state.sequence;
 
-              if (event) {
-                yield* _(emit.single(event));
-              }
-            })
-          )
+            if (event) {
+              yield* emit.single(event);
+            }
+          })
         );
 
         // Emit message-end if we had a finish
         if (state.finishReason) {
-          yield* _(emit.single({
+          yield* emit.single({
             type: 'message-end',
             sequence: sequenceCounter++,
             emittedAt: Date.now(),
@@ -342,17 +340,17 @@ export const streamMultiStep = (
             step: stepIndex,
             finishedAt: Date.now(),
             finishReason: state.finishReason,
-          } as MessageEndEvent));
+          } as MessageEndEvent);
         }
 
         // Emit step-end
-        yield* _(emit.single(makeStepEndEvent({
+        yield* emit.single(makeStepEndEvent({
           runId,
           threadId,
           stepIndex,
           sequence: sequenceCounter++,
           emittedAt: Date.now(),
-        })));
+        }));
 
         // Check for tool calls
         if (state.pendingToolCalls.length === 0) {
@@ -378,20 +376,18 @@ export const streamMultiStep = (
           }));
 
           // Execute tool using Effect
-          const { event, result, isError } = yield* _(
-            executeToolEffect(
-              toolCall,
-              config.toolHandlers,
-              runId,
-              threadId,
-              messageId,
-              stepIndex,
-              sequenceCounter++
-            )
+          const { event, result, isError } = yield* executeToolEffect(
+            toolCall,
+            config.toolHandlers,
+            runId,
+            threadId,
+            messageId,
+            stepIndex,
+            sequenceCounter++
           );
 
           // Emit tool result/error immediately
-          yield* _(emit.single(event));
+          yield* emit.single(event);
 
           toolResultMessages.push({
             role: 'tool',
@@ -408,13 +404,13 @@ export const streamMultiStep = (
         }
 
         // Emit step-complete
-        yield* _(emit.single(makeStepCompleteEvent({
+        yield* emit.single(makeStepCompleteEvent({
           runId,
           threadId,
           stepIndex,
           sequence: sequenceCounter++,
           emittedAt: Date.now(),
-        })));
+        }));
 
         // Build messages for next step
         currentMessages = [
@@ -425,12 +421,12 @@ export const streamMultiStep = (
       }
 
       // Signal stream completion
-      yield* _(emit.end());
+      yield* emit.end();
     }).pipe(
       Effect.catchAllCause((cause) =>
-        Effect.gen(function* (_) {
+        Effect.gen(function* () {
           const error = cause.failures[0] ?? new Error('Unknown streaming error');
-          yield* _(emit.fail(error instanceof Error ? error : new Error(String(error))));
+          yield* emit.fail(error instanceof Error ? error : new Error(String(error)));
         })
       )
     )
