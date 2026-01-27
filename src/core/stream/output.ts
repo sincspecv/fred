@@ -30,6 +30,14 @@ export interface StreamOutputOptions {
   prefix?: string;
   /** Suffix to show after streaming ends */
   suffix?: string;
+  /**
+   * Stream tokens immediately as they arrive (true) or buffer until step-end (false).
+   * Immediate mode shows real-time streaming but may show partial "thinking" text
+   * if the model decides to use tools. Buffered mode waits until step-end to ensure
+   * only final response text is shown, but has no progressive output.
+   * Default: true (immediate streaming)
+   */
+  immediateTokens?: boolean;
 }
 
 /**
@@ -40,14 +48,21 @@ interface OutputState {
   currentStepHasToolCalls: boolean;
   bufferedTextForCurrentStep: string;
   fullText: string;
+  /** Track if we've started outputting for current step (for immediate mode) */
+  currentStepStartedOutput: boolean;
 }
 
 /**
  * Process a stream event and update state accordingly
+ *
+ * @param event The stream event to process
+ * @param state Current output state
+ * @param immediateTokens If true, output tokens immediately; if false, buffer until step-end
  */
 const processEvent = (
   event: StreamEvent,
-  state: OutputState
+  state: OutputState,
+  immediateTokens: boolean
 ): { newState: OutputState; textToOutput: string | null } => {
   const xmlToolCallPattern = /<(?:function|tool)[^>]*>.*?<\/(?:function|tool)>/gi;
 
@@ -57,34 +72,53 @@ const processEvent = (
         ...state,
         currentStepHasToolCalls: false,
         bufferedTextForCurrentStep: '',
+        currentStepStartedOutput: false,
       },
       textToOutput: null,
     };
   }
 
   if (event.type === 'tool-call') {
+    // If we were in immediate mode and had started outputting, add newline to separate
+    const needsNewline = immediateTokens && state.currentStepStartedOutput;
     return {
       newState: {
         ...state,
         currentStepHasToolCalls: true,
         bufferedTextForCurrentStep: '',
+        currentStepStartedOutput: false,
       },
-      textToOutput: null,
+      textToOutput: needsNewline ? '\n' : null,
     };
   }
 
   if (event.type === 'token' && event.delta) {
-    return {
-      newState: {
-        ...state,
-        bufferedTextForCurrentStep: state.bufferedTextForCurrentStep + event.delta,
-      },
-      textToOutput: null,
-    };
+    if (immediateTokens && !state.currentStepHasToolCalls) {
+      // Immediate mode: output tokens as they arrive (unless tool calls detected)
+      return {
+        newState: {
+          ...state,
+          hasStreamedText: true,
+          fullText: state.fullText + event.delta,
+          currentStepStartedOutput: true,
+        },
+        textToOutput: event.delta,
+      };
+    } else {
+      // Buffered mode: accumulate for step-end
+      return {
+        newState: {
+          ...state,
+          bufferedTextForCurrentStep: state.bufferedTextForCurrentStep + event.delta,
+        },
+        textToOutput: null,
+      };
+    }
   }
 
   if (event.type === 'step-end') {
-    if (!state.currentStepHasToolCalls && state.bufferedTextForCurrentStep) {
+    // In buffered mode, output accumulated text at step-end
+    if (!immediateTokens && !state.currentStepHasToolCalls && state.bufferedTextForCurrentStep) {
       const filteredText = state.bufferedTextForCurrentStep
         .replace(xmlToolCallPattern, '')
         .trim();
@@ -96,18 +130,24 @@ const processEvent = (
             hasStreamedText: true,
             fullText: state.fullText + filteredText,
             bufferedTextForCurrentStep: '',
+            currentStepStartedOutput: false,
           },
           textToOutput: filteredText,
         };
       }
     }
     return {
-      newState: { ...state, bufferedTextForCurrentStep: '' },
+      newState: {
+        ...state,
+        bufferedTextForCurrentStep: '',
+        currentStepStartedOutput: false,
+      },
       textToOutput: null,
     };
   }
 
   if (event.type === 'run-end' && event.result?.content && !state.hasStreamedText) {
+    // Fallback: if nothing was streamed, output the final content
     const finalContent = event.result.content
       .replace(xmlToolCallPattern, '')
       .trim();
@@ -149,6 +189,7 @@ export const streamOutput = (
   const write = options?.write ?? ((text: string) => process.stdout.write(text));
   const prefix = options?.prefix ?? '';
   const suffix = options?.suffix ?? '\n\n';
+  const immediateTokens = options?.immediateTokens ?? true; // Default to immediate streaming
 
   return Effect.gen(function* () {
     // Create state ref for tracking output
@@ -157,6 +198,7 @@ export const streamOutput = (
       currentStepHasToolCalls: false,
       bufferedTextForCurrentStep: '',
       fullText: '',
+      currentStepStartedOutput: false,
     });
 
     // Write helper using Effect.sync
@@ -179,7 +221,7 @@ export const streamOutput = (
       Stream.mapEffect((event) =>
         Effect.gen(function* () {
           const currentState = yield* Ref.get(stateRef);
-          const { newState, textToOutput } = processEvent(event, currentState);
+          const { newState, textToOutput } = processEvent(event, currentState, immediateTokens);
           yield* Ref.set(stateRef, newState);
 
           if (textToOutput) {

@@ -625,6 +625,34 @@ export class AgentFactory {
       // Compose all layers together with proper dependency resolution
       const providerWithHttp = provider.layer.pipe(Layer.provide(FetchHttpClient.layer));
 
+      // Track state for run-end event during single pass through stream
+      type StreamState = {
+        sequence: number;
+        text: string;
+        toolCalls: Array<{
+          toolId: string;
+          args: Record<string, unknown>;
+          result?: unknown;
+          error?: {
+            message: string;
+            name?: string;
+            stack?: string;
+          };
+          metadata?: Record<string, unknown>;
+        }>;
+        usage?: {
+          inputTokens?: number;
+          outputTokens?: number;
+          totalTokens?: number;
+        };
+      };
+
+      let streamState: StreamState = {
+        sequence: 2,
+        text: '',
+        toolCalls: [],
+      };
+
       const streamEffect = modelEffect.pipe(
         Effect.map((model) => {
           // Compose model with its OpenAiClient dependency, then merge with other layers
@@ -654,8 +682,6 @@ export class AgentFactory {
         })
       );
 
-      const multiStepStream = Stream.unwrap(streamEffect);
-
       // Emit run-start and message-start before step-start events
       const initialEvents: StreamEvent[] = [
         {
@@ -682,115 +708,85 @@ export class AgentFactory {
         },
       ];
 
-      // Collect final state for run-end event
-      type StreamState = {
-        sequence: number;
-        text: string;
-        toolCalls: Array<{
-          toolId: string;
-          args: Record<string, unknown>;
-          result?: unknown;
-          error?: {
-            message: string;
-            name?: string;
-            stack?: string;
-          };
-          metadata?: Record<string, unknown>;
-        }>;
-        usage?: {
-          inputTokens?: number;
-          outputTokens?: number;
-          totalTokens?: number;
-        };
-      };
+      // Single pass: emit events and track state for run-end
+      const multiStepWithTracking = Stream.unwrap(streamEffect).pipe(
+        Stream.tap((event) =>
+          Effect.sync(() => {
+            if (event.type === 'token') {
+              streamState = {
+                ...streamState,
+                text: event.accumulated,
+                sequence: Math.max(streamState.sequence, event.sequence + 1),
+              };
+            } else if (event.type === 'usage') {
+              streamState = {
+                ...streamState,
+                usage: event.usage,
+                sequence: Math.max(streamState.sequence, event.sequence + 1),
+              };
+            } else if (event.type === 'tool-call') {
+              streamState = {
+                ...streamState,
+                toolCalls: [
+                  ...streamState.toolCalls,
+                  { toolId: event.toolName, args: event.input },
+                ],
+                sequence: Math.max(streamState.sequence, event.sequence + 1),
+              };
+            } else if (event.type === 'tool-result') {
+              streamState = {
+                ...streamState,
+                toolCalls: streamState.toolCalls.map((call) =>
+                  call.toolId === event.toolName && call.result === undefined && call.error === undefined
+                    ? { ...call, result: event.output, metadata: event.metadata }
+                    : call
+                ),
+                sequence: Math.max(streamState.sequence, event.sequence + 1),
+              };
+            } else if (event.type === 'tool-error') {
+              streamState = {
+                ...streamState,
+                toolCalls: streamState.toolCalls.map((call) =>
+                  call.toolId === event.toolName && call.result === undefined && call.error === undefined
+                    ? { ...call, error: event.error }
+                    : call
+                ),
+                sequence: Math.max(streamState.sequence, event.sequence + 1),
+              };
+            } else {
+              streamState = {
+                ...streamState,
+                sequence: Math.max(streamState.sequence, event.sequence + 1),
+              };
+            }
+          })
+        )
+      );
 
-      const initialState: StreamState = {
-        sequence: 2,
-        text: '',
-        toolCalls: [],
-      };
-
-      const finalEvent = multiStepStream.pipe(
-        Stream.runFold(initialState, (state, event) => {
-          if (event.type === 'token') {
-            return {
-              ...state,
-              text: event.accumulated,
-              sequence: Math.max(state.sequence, event.sequence + 1),
-            };
-          }
-          if (event.type === 'usage') {
-            return {
-              ...state,
-              usage: event.usage,
-              sequence: Math.max(state.sequence, event.sequence + 1),
-            };
-          }
-          if (event.type === 'tool-call') {
-            // Add new tool call
-            return {
-              ...state,
-              toolCalls: [
-                ...state.toolCalls,
-                {
-                  toolId: event.toolName,
-                  args: event.input,
-                },
-              ],
-              sequence: Math.max(state.sequence, event.sequence + 1),
-            };
-          }
-          if (event.type === 'tool-result') {
-            // Update tool call with result
-            return {
-              ...state,
-              toolCalls: state.toolCalls.map((call) =>
-                call.toolId === event.toolName && call.result === undefined && call.error === undefined
-                  ? { ...call, result: event.output, metadata: event.metadata }
-                  : call
-              ),
-              sequence: Math.max(state.sequence, event.sequence + 1),
-            };
-          }
-          if (event.type === 'tool-error') {
-            // Update tool call with error
-            return {
-              ...state,
-              toolCalls: state.toolCalls.map((call) =>
-                call.toolId === event.toolName && call.result === undefined && call.error === undefined
-                  ? { ...call, error: event.error }
-                  : call
-              ),
-              sequence: Math.max(state.sequence, event.sequence + 1),
-            };
-          }
-          return {
-            ...state,
-            sequence: Math.max(state.sequence, event.sequence + 1),
-          };
-        }),
-        Effect.map((finalState) => {
+      // Generate run-end event after stream completes
+      const runEndEvent = Stream.fromEffect(
+        Effect.sync(() => {
           const finishedAt = Date.now();
           return {
             type: 'run-end' as const,
-            sequence: finalState.sequence,
+            sequence: streamState.sequence,
             emittedAt: finishedAt,
             runId,
             threadId,
             finishedAt,
             durationMs: finishedAt - startedAt,
             result: {
-              content: finalState.text,
-              toolCalls: finalState.toolCalls,
-              usage: finalState.usage,
+              content: streamState.text,
+              toolCalls: streamState.toolCalls,
+              usage: streamState.usage,
             },
           };
         })
       );
 
       return Stream.fromIterable(initialEvents).pipe(
-        Stream.concat(multiStepStream),
-        Stream.concat(Stream.fromEffect(finalEvent))
+        Stream.concat(multiStepWithTracking),
+        Stream.concat(runEndEvent)
       );
     };
 
