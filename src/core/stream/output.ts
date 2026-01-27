@@ -4,11 +4,10 @@
  * Provides native streaming output functionality that handles:
  * - Step-based buffering (suppresses tool-calling text)
  * - XML tool call filtering
- * - Throttled output for readability
- * - Effect-based error handling
+ * - Effect-based error handling throughout
  */
 
-import { Effect, Stream } from 'effect';
+import { Effect, Stream, Ref, pipe } from 'effect';
 import type { StreamEvent } from './events.js';
 
 /**
@@ -34,6 +33,101 @@ export interface StreamOutputOptions {
 }
 
 /**
+ * State for tracking step-based buffering
+ */
+interface OutputState {
+  hasStreamedText: boolean;
+  currentStepHasToolCalls: boolean;
+  bufferedTextForCurrentStep: string;
+  fullText: string;
+}
+
+/**
+ * Process a stream event and update state accordingly
+ */
+const processEvent = (
+  event: StreamEvent,
+  state: OutputState
+): { newState: OutputState; textToOutput: string | null } => {
+  const xmlToolCallPattern = /<(?:function|tool)[^>]*>.*?<\/(?:function|tool)>/gi;
+
+  if (event.type === 'step-start') {
+    return {
+      newState: {
+        ...state,
+        currentStepHasToolCalls: false,
+        bufferedTextForCurrentStep: '',
+      },
+      textToOutput: null,
+    };
+  }
+
+  if (event.type === 'tool-call') {
+    return {
+      newState: {
+        ...state,
+        currentStepHasToolCalls: true,
+        bufferedTextForCurrentStep: '',
+      },
+      textToOutput: null,
+    };
+  }
+
+  if (event.type === 'token' && event.delta) {
+    return {
+      newState: {
+        ...state,
+        bufferedTextForCurrentStep: state.bufferedTextForCurrentStep + event.delta,
+      },
+      textToOutput: null,
+    };
+  }
+
+  if (event.type === 'step-end') {
+    if (!state.currentStepHasToolCalls && state.bufferedTextForCurrentStep) {
+      const filteredText = state.bufferedTextForCurrentStep
+        .replace(xmlToolCallPattern, '')
+        .trim();
+
+      if (filteredText) {
+        return {
+          newState: {
+            ...state,
+            hasStreamedText: true,
+            fullText: state.fullText + filteredText,
+            bufferedTextForCurrentStep: '',
+          },
+          textToOutput: filteredText,
+        };
+      }
+    }
+    return {
+      newState: { ...state, bufferedTextForCurrentStep: '' },
+      textToOutput: null,
+    };
+  }
+
+  if (event.type === 'run-end' && event.result?.content && !state.hasStreamedText) {
+    const finalContent = event.result.content
+      .replace(xmlToolCallPattern, '')
+      .trim();
+
+    if (finalContent) {
+      return {
+        newState: {
+          ...state,
+          hasStreamedText: true,
+          fullText: finalContent,
+        },
+        textToOutput: finalContent,
+      };
+    }
+  }
+
+  return { newState: state, textToOutput: null };
+};
+
+/**
  * Process a Fred stream and output text to stdout (or custom writer)
  *
  * This is the native Fred streaming output function that:
@@ -41,6 +135,8 @@ export interface StreamOutputOptions {
  * - Discards text from steps with tool calls (hides "thinking" text)
  * - Filters malformed XML tool call patterns
  * - Outputs clean response text
+ *
+ * Uses Effect throughout for proper functional composition and error handling.
  *
  * @param stream - AsyncIterable of StreamEvents from Fred.streamMessage()
  * @param options - Output configuration
@@ -51,38 +147,25 @@ export const streamOutput = (
   options?: StreamOutputOptions
 ): Effect.Effect<string, StreamOutputError> => {
   const write = options?.write ?? ((text: string) => process.stdout.write(text));
-  const throttleMs = options?.throttleMs ?? 0;
   const prefix = options?.prefix ?? '';
   const suffix = options?.suffix ?? '\n\n';
 
   return Effect.gen(function* (_) {
-    let fullText = '';
-    let hasStreamedText = false;
-    let currentStepHasToolCalls = false;
-    let bufferedTextForCurrentStep = '';
-    let lastWriteTime = 0;
+    // Create state ref for tracking output
+    const stateRef = yield* _(Ref.make<OutputState>({
+      hasStreamedText: false,
+      currentStepHasToolCalls: false,
+      bufferedTextForCurrentStep: '',
+      fullText: '',
+    }));
 
-    // Throttled write helper
-    const throttledWrite = (text: string): Effect.Effect<void, never> =>
-      Effect.sync(() => {
-        if (throttleMs > 0) {
-          const now = Date.now();
-          const timeSinceLastWrite = now - lastWriteTime;
-          if (timeSinceLastWrite < throttleMs) {
-            // Note: For true async throttling, would need Effect.sleep
-            // For now, this is synchronous
-          }
-          lastWriteTime = Date.now();
-        }
-        write(text);
-      });
-
-    // XML pattern for filtering malformed tool calls
-    const xmlToolCallPattern = /<(?:function|tool)[^>]*>.*?<\/(?:function|tool)>/gi;
+    // Write helper using Effect.sync
+    const writeText = (text: string) =>
+      Effect.sync(() => write(text));
 
     // Show prefix if provided
     if (prefix) {
-      yield* _(throttledWrite(prefix));
+      yield* _(writeText(prefix));
     }
 
     // Convert to Effect Stream for proper error handling
@@ -91,74 +174,42 @@ export const streamOutput = (
       (error) => new StreamOutputError('Stream iteration failed', error)
     );
 
-    // Process stream events
+    // Process stream events using Effect
     yield* _(
-      Stream.runForEach(effectStream, (event) =>
-        Effect.gen(function* (_) {
-          if (event.type === 'step-start') {
-            currentStepHasToolCalls = false;
-            bufferedTextForCurrentStep = '';
-          }
+      pipe(
+        effectStream,
+        Stream.mapEffect((event) =>
+          Effect.gen(function* (_) {
+            const currentState = yield* _(Ref.get(stateRef));
+            const { newState, textToOutput } = processEvent(event, currentState);
+            yield* _(Ref.set(stateRef, newState));
 
-          if (event.type === 'tool-call') {
-            currentStepHasToolCalls = true;
-            bufferedTextForCurrentStep = ''; // Discard text from this step
-          }
-
-          if (event.type === 'token' && event.delta) {
-            bufferedTextForCurrentStep += event.delta;
-          }
-
-          if (event.type === 'step-end') {
-            // Only output buffered text if this step had NO tool calls
-            if (!currentStepHasToolCalls && bufferedTextForCurrentStep) {
-              const filteredText = bufferedTextForCurrentStep
-                .replace(xmlToolCallPattern, '')
-                .trim();
-
-              if (filteredText) {
-                yield* _(throttledWrite(filteredText));
-                fullText += filteredText;
-                hasStreamedText = true;
-              }
+            if (textToOutput) {
+              yield* _(writeText(textToOutput));
             }
-            bufferedTextForCurrentStep = '';
-          }
-
-          if (event.type === 'run-end' && event.result?.content && !hasStreamedText) {
-            // Fallback: if no tokens streamed, output final content
-            const finalContent = event.result.content
-              .replace(xmlToolCallPattern, '')
-              .trim();
-
-            if (finalContent) {
-              yield* _(throttledWrite(finalContent));
-              fullText = finalContent;
-              hasStreamedText = true;
-            }
-          }
-
-          if (event.type === 'stream-error') {
-            yield* _(Effect.logError(`Stream error: ${event.error}`));
-          }
-        })
+          })
+        ),
+        Stream.runDrain
       )
     );
 
+    // Get final state
+    const finalState = yield* _(Ref.get(stateRef));
+
     // Show suffix if we streamed text
-    if (hasStreamedText && suffix) {
-      yield* _(throttledWrite(suffix));
+    if (finalState.hasStreamedText && suffix) {
+      yield* _(writeText(suffix));
     }
 
-    return fullText;
+    return finalState.fullText;
   });
 };
 
 /**
- * Simple streaming output - just streams text without Effect wrapper
+ * Simple streaming output - runs the Effect and returns a Promise
  *
- * For consumers who don't want Effect, this provides a simple async function
- * that handles all the streaming logic internally.
+ * For consumers who prefer Promise-based APIs, this provides a simple
+ * async function that handles all the streaming logic internally.
  *
  * @param stream - AsyncIterable of StreamEvents from Fred.streamMessage()
  * @param options - Output configuration
