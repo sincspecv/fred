@@ -1882,3 +1882,7 @@ export * from './core/eval/assertion-runner';
 // Observability exports
 export { buildObservabilityLayers, annotateSpan, withFredSpan } from './core/observability/otel';
 export type { ObservabilityLayers } from './core/observability/otel';
+
+// Stream output utilities
+export { streamOutput, streamOutputSimple, StreamOutputError } from './core/stream/output';
+export type { StreamOutputOptions } from './core/stream/output';

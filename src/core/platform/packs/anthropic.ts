@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Effect, Redacted } from 'effect';
 import type { EffectProviderFactory } from '../base';
 import type { ProviderConfig, ProviderModelDefaults } from '../provider';
 
@@ -20,7 +20,8 @@ export const AnthropicProviderFactory: EffectProviderFactory = {
     const module = await dynamicImport('@effect/ai-anthropic');
 
     const apiKeyEnvVar = config.apiKeyEnvVar ?? 'ANTHROPIC_API_KEY';
-    const apiKey = process.env[apiKeyEnvVar];
+    const apiKeyString = process.env[apiKeyEnvVar];
+    const apiKey = apiKeyString ? Redacted.make(apiKeyString) : undefined;
 
     // Use AnthropicClient.layer for client initialization
     const layer = module.AnthropicClient?.layer?.({
