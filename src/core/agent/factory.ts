@@ -489,168 +489,42 @@ export class AgentFactory {
         const modelWithClient = Layer.provide(model, providerWithHttp);
         const fullLayer = Layer.mergeAll(modelWithClient, toolLayer, BunContext.layer);
 
-        const maxSteps = config.maxSteps ?? 20;
+        // Use @effect/ai's built-in multi-step execution
+        // This prevents double execution (no manual loop to duplicate toolkit execution)
+        // Use conservative maxSteps to prevent runaway tool calling
+        const maxSteps = Math.min(config.maxSteps ?? 3, 3);
 
-        // CRITICAL FIX: When toolkit is provided, @effect/ai will execute tools automatically
-        // via the toolLayer. We should NOT do manual execution on top of that.
-        // Instead, let @effect/ai handle the entire multi-step flow.
+        const prompt = Prompt.make(promptMessages);
+        const program = LanguageModel.generateText({
+          prompt,
+          toolkit,
+          maxSteps,
+          toolChoice: config.toolChoice,
+          temperature: config.temperature,
+        });
 
-        if (toolkit) {
-          // Use @effect/ai's built-in multi-step execution
-          const prompt = Prompt.make(promptMessages);
-          const program = LanguageModel.generateText({
-            prompt,
-            toolkit,
-            maxSteps, // Let @effect/ai handle multi-step
-            toolChoice: config.toolChoice,
-            temperature: config.temperature,
-          });
+        const result = await Effect.runPromise(
+          program.pipe(Effect.provide(fullLayer))
+        );
 
-          const result = await Effect.runPromise(
-            program.pipe(Effect.provide(fullLayer))
-          );
+        // Extract tool calls from result
+        const allToolCalls = (result.toolCalls ?? []).map(tc => ({
+          toolId: tc.name,
+          args: tc.params as Record<string, any>,
+          result: undefined, // @effect/ai doesn't expose results in the response
+        }));
 
-          // Extract tool calls from result (though we don't have full details)
-          const allToolCalls = (result.toolCalls ?? []).map(tc => ({
-            toolId: tc.name,
-            args: tc.params as Record<string, any>,
-            result: undefined, // @effect/ai doesn't expose results
-          }));
+        const usage = {
+          inputTokens: result.usage?.inputTokens ?? 0,
+          outputTokens: result.usage?.outputTokens ?? 0,
+          totalTokens: result.usage?.totalTokens ?? 0,
+        };
 
-          const usage = {
-            inputTokens: result.usage?.inputTokens ?? 0,
-            outputTokens: result.usage?.outputTokens ?? 0,
-            totalTokens: result.usage?.totalTokens ?? 0,
-          };
-
-          return {
-            content: result.text,
-            toolCalls: allToolCalls,
-            usage,
-          };
-        }
-
-        // Fallback: Manual multi-step execution (when no toolkit)
-        let currentMessages = [...promptMessages];
-        let finalText = '';
-        let allToolCalls: Array<{ toolId: string; args: Record<string, any>; result?: unknown; metadata?: Record<string, unknown> }> = [];
-        let totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-
-        for (let step = 0; step < maxSteps; step++) {
-          const prompt = Prompt.make(currentMessages);
-          const program = LanguageModel.generateText({
-            prompt,
-            // No toolkit in manual mode
-            toolChoice: step === 0 ? config.toolChoice : undefined,
-            temperature: config.temperature,
-          });
-
-          const result = await Effect.runPromise(
-            program.pipe(Effect.provide(fullLayer))
-          );
-
-          // Accumulate usage
-          if (result.usage) {
-            totalUsage.inputTokens += result.usage.inputTokens ?? 0;
-            totalUsage.outputTokens += result.usage.outputTokens ?? 0;
-            totalUsage.totalTokens += result.usage.totalTokens ?? 0;
-          }
-
-          // Accumulate text
-          finalText = result.text;
-
-          // Check if there are tool calls that need execution
-          const allToolCallsInResult = result.toolCalls ?? [];
-
-          if (allToolCallsInResult.length === 0) {
-            // No tool calls at all - we're done
-            break;
-          }
-
-          // All tools need manual execution
-          const pendingToolCalls = allToolCallsInResult;
-
-          // Execute tools and build messages for next iteration
-          const assistantParts: Array<Prompt.AssistantMessagePartEncoded> = [];
-          if (result.text) {
-            assistantParts.push(Prompt.makePart('text', { text: result.text }));
-          }
-
-          const toolResultMessages: Prompt.MessageEncoded[] = [];
-
-          for (const toolCall of pendingToolCalls) {
-            // Add tool call to assistant message
-            assistantParts.push(Prompt.makePart('tool-call', {
-              id: toolCall.id,
-              name: toolCall.name,
-              params: toolCall.params,
-              providerExecuted: false,
-            }));
-
-            // Execute the tool
-            const executor = toolExecutors.get(toolCall.name);
-            let toolResult: unknown;
-            let toolError: Error | undefined;
-
-            if (executor) {
-              try {
-                toolResult = await executor(toolCall.params as Record<string, any>);
-              } catch (err) {
-                toolError = err instanceof Error ? err : new Error(String(err));
-                toolResult = `Error: ${toolError.message}`;
-              }
-            } else {
-              toolResult = `Error: Tool "${toolCall.name}" not found`;
-            }
-
-            // Add tool result message
-            toolResultMessages.push({
-              role: 'tool',
-              content: [
-                Prompt.makePart('tool-result', {
-                  id: toolCall.id,
-                  name: toolCall.name,
-                  result: toolResult,
-                  isFailure: !!toolError,
-                  providerExecuted: false,
-                }),
-              ],
-            });
-
-            // Track tool call with result
-            allToolCalls.push({
-              toolId: toolCall.name,
-              args: toolCall.params as Record<string, any>,
-              result: toolResult,
-              metadata: toolCall.metadata as Record<string, unknown> | undefined,
-            });
-          }
-
-          // Add assistant message with tool calls
-          currentMessages.push({
-            role: 'assistant',
-            content: assistantParts,
-          });
-
-          // Add tool result messages
-          currentMessages.push(...toolResultMessages);
-        }
-
-        if (modelSpan) {
-          modelSpan.setAttributes({
-            'response.length': finalText.length,
-            'response.finishReason': 'stop',
-            'toolCalls.count': allToolCalls.length,
-          });
-          modelSpan.setStatus('ok');
-        }
-
-        const usage = totalUsage.totalTokens > 0 ? totalUsage : undefined;
-
+        // Check for handoff
         const handoffCall = allToolCalls.find((call) => call.toolId === 'handoff_to_agent');
         if (handoffCall && handoffCall.result && typeof handoffCall.result === 'object' && 'type' in handoffCall.result) {
           return {
-            content: finalText,
+            content: result.text,
             toolCalls: allToolCalls,
             usage,
             handoff: handoffCall.result as HandoffResult,
@@ -658,7 +532,7 @@ export class AgentFactory {
         }
 
         return {
-          content: finalText,
+          content: result.text,
           toolCalls: allToolCalls,
           usage,
         };
