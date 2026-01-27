@@ -396,10 +396,18 @@ const streamSingleStep = (
 };
 
 /**
- * Stream multi-step agent responses with real-time event emission.
+ * Stream multi-step agent responses using @effect/ai's automatic multi-step execution.
  *
- * Uses Effect Stream composition for proper layer context propagation.
- * Events are emitted in real-time as they're produced by the model.
+ * CRITICAL FIX: Removed manual tool execution loop to prevent double execution.
+ * When toolkit + toolLayer are provided, @effect/ai executes tools automatically.
+ * Manual execution on top caused duplicates.
+ *
+ * Trade-off: We lose granular tool events (tool-call-start, tool-result) but gain:
+ * - No duplicate tool executions
+ * - Simpler, more maintainable code
+ * - Aligned with @effect/ai's intended usage
+ *
+ * Text streaming still works - users see responses in real-time.
  */
 export const streamMultiStep = (
   initialMessages: Array<Prompt.MessageEncoded | any>,
@@ -413,167 +421,109 @@ export const streamMultiStep = (
   const { runId, threadId, messageId } = options;
   const messages = normalizeMessages(initialMessages);
 
-  // Use recursive stream composition for multi-step
-  const createStepStream = (
-    currentMessages: Prompt.MessageEncoded[],
-    stepIndex: number,
-    sequenceStart: number
-  ): Stream.Stream<StreamEvent, Error, any> => {
-    if (stepIndex >= config.maxSteps) {
-      return Stream.empty;
-    }
+  return Stream.unwrap(
+    Effect.gen(function* () {
+      let sequence = 0;
+      const stepIndex = 0;
 
-    return Stream.unwrap(
-      Effect.gen(function* () {
-        let state: StreamState = {
-          sequence: sequenceStart + 1,
-          stepIndex,
-          accumulatedText: '',
-          toolStarts: new Map(),
-          pendingToolCalls: [],
-        };
+      // Step-start event
+      const stepStartEvent = makeStepStartEvent({
+        runId,
+        threadId,
+        stepIndex,
+        sequence: sequence++,
+        emittedAt: Date.now(),
+      });
 
-        // Step-start event
-        const stepStartEvent = makeStepStartEvent({
+      // Use @effect/ai's automatic multi-step execution
+      // Let it handle tool calling internally
+      const prompt = Prompt.make(messages);
+      const modelStream = LanguageModel.streamText({
+        model: config.model,
+        prompt,
+        toolkit: config.toolkit,
+        maxSteps: config.maxSteps, // Let @effect/ai handle multi-step
+        toolChoice: config.toolChoice as any,
+        temperature: config.temperature,
+      });
+
+      // Transform stream parts into our event format
+      // We lose tool-call/tool-result granularity but keep text streaming
+      let accumulatedText = '';
+      let finishReason: string | undefined;
+
+      const eventStream = pipe(
+        modelStream,
+        Stream.map((part): StreamEvent | null => {
+          const emittedAt = Date.now();
+
+          // Text delta - emit as content event
+          if (part.type === 'text-delta') {
+            accumulatedText += part.textDelta;
+            return {
+              type: 'content',
+              sequence: sequence++,
+              emittedAt,
+              runId,
+              threadId,
+              messageId,
+              step: stepIndex,
+              delta: part.textDelta,
+            } as ContentEvent;
+          }
+
+          // Finish - capture reason
+          if (part.type === 'finish') {
+            finishReason = part.finishReason;
+            return {
+              type: 'usage',
+              sequence: sequence++,
+              emittedAt,
+              runId,
+              threadId,
+              messageId,
+              step: stepIndex,
+              inputTokens: part.usage.inputTokens,
+              outputTokens: part.usage.outputTokens,
+              totalTokens: part.usage.totalTokens,
+            } as UsageEvent;
+          }
+
+          // Skip tool events - @effect/ai handles them internally
+          // We don't emit tool-call or tool-result events anymore
+          return null;
+        }),
+        Stream.filter((event): event is StreamEvent => event !== null)
+      );
+
+      // Post-stream events
+      const postStreamEvents = Stream.make(
+        makeStepEndEvent({
           runId,
           threadId,
           stepIndex,
-          sequence: sequenceStart,
+          sequence: sequence++,
           emittedAt: Date.now(),
-        });
+        }),
+        {
+          type: 'message-end',
+          sequence: sequence++,
+          emittedAt: Date.now(),
+          runId,
+          threadId,
+          messageId,
+          step: stepIndex,
+          finishedAt: Date.now(),
+          finishReason: finishReason || 'stop',
+        } as MessageEndEvent
+      );
 
-        // Create prompt and get model stream
-        const prompt = Prompt.make(currentMessages);
-        const modelStream = LanguageModel.streamText({
-          model: config.model,
-          prompt,
-          toolkit: config.toolkit,
-          maxSteps: 1,
-          toolChoice: stepIndex === 0 ? (config.toolChoice as any) : undefined,
-          temperature: config.temperature,
-        });
-
-        // Transform model stream, capturing state mutations
-        const eventStream = pipe(
-          modelStream,
-          Stream.map((part) => {
-            const { event, newState } = processStreamPart(part, state, runId, threadId, messageId);
-            state = newState;
-            return event;
-          }),
-          Stream.filter((event): event is StreamEvent => event !== null)
-        );
-
-        // After model stream, emit step-end and decide if we continue
-        const postStepStream = Stream.unwrap(
-          Effect.gen(function* () {
-            const events: StreamEvent[] = [];
-
-            // Message-end if we had a finish
-            if (state.finishReason) {
-              events.push({
-                type: 'message-end',
-                sequence: state.sequence++,
-                emittedAt: Date.now(),
-                runId,
-                threadId,
-                messageId,
-                step: stepIndex,
-                finishedAt: Date.now(),
-                finishReason: state.finishReason,
-              } as MessageEndEvent);
-            }
-
-            // Step-end
-            events.push(makeStepEndEvent({
-              runId,
-              threadId,
-              stepIndex,
-              sequence: state.sequence++,
-              emittedAt: Date.now(),
-            }));
-
-            // No tool calls - we're done
-            if (state.pendingToolCalls.length === 0) {
-              return Stream.fromIterable(events);
-            }
-
-            // Execute tools and prepare for next step
-            const assistantParts: Array<Prompt.AssistantMessagePartEncoded> = [];
-            if (state.accumulatedText) {
-              assistantParts.push(Prompt.makePart('text', { text: state.accumulatedText }));
-            }
-
-            const toolResultMessages: Prompt.MessageEncoded[] = [];
-            const toolEvents: StreamEvent[] = [];
-
-            for (const toolCall of state.pendingToolCalls) {
-              assistantParts.push(Prompt.makePart('tool-call', {
-                id: toolCall.id,
-                name: toolCall.name,
-                params: toolCall.params,
-                providerExecuted: false,
-              }));
-
-              const { event, result, isError } = yield* executeToolEffect(
-                toolCall,
-                config.toolHandlers,
-                runId,
-                threadId,
-                messageId,
-                stepIndex,
-                state.sequence++
-              );
-
-              toolEvents.push(event);
-
-              toolResultMessages.push({
-                role: 'tool',
-                content: [
-                  Prompt.makePart('tool-result', {
-                    id: toolCall.id,
-                    name: toolCall.name,
-                    result,
-                    isFailure: isError,
-                    providerExecuted: false,
-                  }),
-                ],
-              });
-            }
-
-            // Step-complete
-            toolEvents.push(makeStepCompleteEvent({
-              runId,
-              threadId,
-              stepIndex,
-              sequence: state.sequence++,
-              emittedAt: Date.now(),
-            }));
-
-            // Build next messages
-            const nextMessages = [
-              ...currentMessages,
-              { role: 'assistant' as const, content: assistantParts },
-              ...toolResultMessages,
-            ];
-
-            // Emit events then continue to next step
-            return pipe(
-              Stream.fromIterable([...events, ...toolEvents]),
-              Stream.concat(createStepStream(nextMessages, stepIndex + 1, state.sequence))
-            );
-          })
-        );
-
-        // Combine: step-start, model events, post-step handling
-        return pipe(
-          Stream.make(stepStartEvent),
-          Stream.concat(eventStream),
-          Stream.concat(postStepStream)
-        );
-      })
-    );
-  };
-
-  return createStepStream([...messages], 0, 0);
+      // Combine: step-start, model events, post-stream
+      return pipe(
+        Stream.make(stepStartEvent),
+        Stream.concat(eventStream),
+        Stream.concat(postStreamEvents)
+      );
+    })
+  );
 };
