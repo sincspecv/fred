@@ -15,7 +15,7 @@ import { SpanKind } from '../tracing/types';
 import { wrapToolExecution } from '../tool/validation';
 import { annotateSpan } from '../observability/otel';
 import { attachErrorToSpan } from '../observability/errors';
-import { normalizeMessages } from '../messages';
+import { normalizeMessages, filterHistoryForAgent } from '../messages';
 import { streamMultiStep } from './streaming';
 import { resolveTemplate } from '../variables/template';
 
@@ -415,6 +415,9 @@ export class AgentFactory {
       ? toolkit.toLayer(toolHandlers)
       : Layer.empty;
 
+    // Create set of available tool names for history filtering
+    const availableToolNames = new Set(effectTools.map((tool) => tool.name));
+
     // Load the system message template (may contain {{ var_name }} placeholders)
     const systemMessageTemplate = loadPromptFile(resolvedSystemMessage, undefined, false);
 
@@ -469,11 +472,16 @@ export class AgentFactory {
         // Resolve system message with current variable values
         const resolvedSystemMessage = resolveSystemMessage();
 
-        const promptMessages = normalizeMessages([
+        // Normalize all messages
+        const normalizedMessages = normalizeMessages([
           { role: 'system', content: resolvedSystemMessage },
           ...previousMessages,
           { role: 'user', content: message },
         ]);
+
+        // Filter history to only include tool calls available to this agent
+        // This prevents confusion when agents see tool calls from other agents
+        const promptMessages = filterHistoryForAgent(normalizedMessages, availableToolNames);
 
         // Get the model (AiModel) and compose all layers with proper dependency resolution
         const model = await Effect.runPromise(modelEffect);
@@ -646,11 +654,16 @@ export class AgentFactory {
       // Resolve system message with current variable values
       const resolvedSystemMessage = resolveSystemMessage();
 
-      const promptMessages = normalizeMessages([
+      // Normalize all messages
+      const normalizedMessages = normalizeMessages([
         { role: 'system', content: resolvedSystemMessage },
         ...previousMessages,
         { role: 'user', content: message },
       ]);
+
+      // Filter history to only include tool calls available to this agent
+      // This prevents confusion when agents see tool calls from other agents
+      const promptMessages = filterHistoryForAgent(normalizedMessages, availableToolNames);
 
       // Compose all layers together with proper dependency resolution
       const providerWithHttp = provider.layer.pipe(Layer.provide(FetchHttpClient.layer));

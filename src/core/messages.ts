@@ -126,3 +126,64 @@ export const normalizeMessage = (message: PromptMessage | LegacyMessage): Prompt
 
 export const normalizeMessages = (messages: Array<PromptMessage | LegacyMessage>): PromptMessage[] =>
   messages.map((message) => normalizeMessage(message));
+
+/**
+ * Filter conversation history to only include tool calls available to the current agent.
+ *
+ * This prevents agents from seeing tool calls from other agents in the conversation history,
+ * which can confuse the model into thinking it has access to tools it doesn't.
+ *
+ * For example, if brain-agent (only has handoff_to_agent) loads history containing
+ * update_task calls from task-agent, Claude might try to call update_task directly,
+ * causing a ParseError.
+ *
+ * @param messages - Conversation history to filter
+ * @param availableToolNames - Set of tool names available to current agent
+ * @returns Filtered messages with only relevant tool calls
+ */
+export const filterHistoryForAgent = (
+  messages: PromptMessage[],
+  availableToolNames: Set<string>
+): PromptMessage[] => {
+  return messages.map((msg) => {
+    // Filter assistant messages to remove tool-call parts for unavailable tools
+    if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+      const filteredContent = msg.content.filter((part) => {
+        if (isPromptPart(part) && part.type === 'tool-call') {
+          // Only keep tool calls that are in the available toolkit
+          return availableToolNames.has((part as any).name);
+        }
+        // Keep all non-tool-call parts (text, etc.)
+        return true;
+      });
+
+      // If we filtered out all content, skip this message entirely
+      if (filteredContent.length === 0) {
+        return null;
+      }
+
+      return { ...msg, content: filteredContent };
+    }
+
+    // Filter tool result messages to remove results for unavailable tools
+    if (msg.role === 'tool' && Array.isArray(msg.content)) {
+      const filteredContent = msg.content.filter((part) => {
+        if (isPromptPart(part) && part.type === 'tool-result') {
+          // Only keep tool results for tools in the available toolkit
+          return availableToolNames.has((part as any).name);
+        }
+        return true;
+      });
+
+      // If we filtered out all content, skip this message entirely
+      if (filteredContent.length === 0) {
+        return null;
+      }
+
+      return { ...msg, content: filteredContent };
+    }
+
+    // Keep all other messages unchanged (user, system)
+    return msg;
+  }).filter((msg): msg is PromptMessage => msg !== null);
+};
