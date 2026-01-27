@@ -88,7 +88,7 @@ const executeToolEffect = (
               Effect.succeed({ error: err, result: `Error: ${err.message}` })
             ),
             Effect.map((res) =>
-              'error' in res ? res : { error: undefined, result: res }
+              typeof res === 'object' && res !== null && 'error' in res ? res : { error: undefined, result: res }
             )
           )
         : Effect.succeed({
