@@ -489,9 +489,48 @@ export class AgentFactory {
         const modelWithClient = Layer.provide(model, providerWithHttp);
         const fullLayer = Layer.mergeAll(modelWithClient, toolLayer, BunContext.layer);
 
-        // Manual multi-step tool execution loop
-        // @effect/ai doesn't automatically execute tools in the loop, so we do it manually
         const maxSteps = config.maxSteps ?? 20;
+
+        // CRITICAL FIX: When toolkit is provided, @effect/ai will execute tools automatically
+        // via the toolLayer. We should NOT do manual execution on top of that.
+        // Instead, let @effect/ai handle the entire multi-step flow.
+
+        if (toolkit) {
+          // Use @effect/ai's built-in multi-step execution
+          const prompt = Prompt.make(promptMessages);
+          const program = LanguageModel.generateText({
+            prompt,
+            toolkit,
+            maxSteps, // Let @effect/ai handle multi-step
+            toolChoice: config.toolChoice,
+            temperature: config.temperature,
+          });
+
+          const result = await Effect.runPromise(
+            program.pipe(Effect.provide(fullLayer))
+          );
+
+          // Extract tool calls from result (though we don't have full details)
+          const allToolCalls = (result.toolCalls ?? []).map(tc => ({
+            toolId: tc.name,
+            args: tc.params as Record<string, any>,
+            result: undefined, // @effect/ai doesn't expose results
+          }));
+
+          const usage = {
+            inputTokens: result.usage?.inputTokens ?? 0,
+            outputTokens: result.usage?.outputTokens ?? 0,
+            totalTokens: result.usage?.totalTokens ?? 0,
+          };
+
+          return {
+            content: result.text,
+            toolCalls: allToolCalls,
+            usage,
+          };
+        }
+
+        // Fallback: Manual multi-step execution (when no toolkit)
         let currentMessages = [...promptMessages];
         let finalText = '';
         let allToolCalls: Array<{ toolId: string; args: Record<string, any>; result?: unknown; metadata?: Record<string, unknown> }> = [];
@@ -501,8 +540,8 @@ export class AgentFactory {
           const prompt = Prompt.make(currentMessages);
           const program = LanguageModel.generateText({
             prompt,
-            toolkit,
-            toolChoice: step === 0 ? config.toolChoice : undefined, // Only apply toolChoice on first step
+            // No toolkit in manual mode
+            toolChoice: step === 0 ? config.toolChoice : undefined,
             temperature: config.temperature,
           });
 
@@ -521,12 +560,15 @@ export class AgentFactory {
           finalText = result.text;
 
           // Check if there are tool calls that need execution
-          const pendingToolCalls = (result.toolCalls ?? []).filter(tc => !tc.providerExecuted);
+          const allToolCallsInResult = result.toolCalls ?? [];
 
-          if (pendingToolCalls.length === 0) {
-            // No more tool calls - we're done
+          if (allToolCallsInResult.length === 0) {
+            // No tool calls at all - we're done
             break;
           }
+
+          // All tools need manual execution
+          const pendingToolCalls = allToolCallsInResult;
 
           // Execute tools and build messages for next iteration
           const assistantParts: Array<Prompt.AssistantMessagePartEncoded> = [];
