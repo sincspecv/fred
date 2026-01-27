@@ -257,8 +257,8 @@ const processStreamPart = (
 /**
  * Stream multi-step agent responses with real-time event emission.
  *
- * Uses Effect's Stream.asyncPush for true real-time streaming with
- * proper functional composition and error handling throughout.
+ * Uses Effect's Stream.async for real-time streaming with proper
+ * functional composition and error handling throughout.
  */
 export const streamMultiStep = (
   initialMessages: Array<Prompt.MessageEncoded | any>,
@@ -272,16 +272,22 @@ export const streamMultiStep = (
   const { runId, threadId, messageId } = options;
   const messages = normalizeMessages(initialMessages);
 
-  // Use Stream.asyncPush for true real-time event emission with Effect
-  return Stream.asyncPush<StreamEvent, Error>((emit) =>
-    Effect.gen(function* () {
-      let currentMessages = [...messages];
-      let sequenceCounter = 0;
+  // Use Stream.async for real-time event emission
+  return Stream.async<StreamEvent, Error>((emit) => {
+    let sequenceCounter = 0;
 
-      // Multi-step loop using Effect
+    // Helper to emit an event
+    const emitEvent = (event: StreamEvent) => {
+      emit.single(event);
+    };
+
+    // Run the multi-step process using Effect
+    const runMultiStep = Effect.gen(function* () {
+      let currentMessages = [...messages];
+
       for (let stepIndex = 0; stepIndex < config.maxSteps; stepIndex++) {
         // Emit step-start immediately
-        yield* emit.single(makeStepStartEvent({
+        emitEvent(makeStepStartEvent({
           runId,
           threadId,
           stepIndex,
@@ -311,7 +317,7 @@ export const streamMultiStep = (
 
         // Process model stream, emitting events in real-time
         yield* Stream.runForEach(modelStream, (part) =>
-          Effect.gen(function* () {
+          Effect.sync(() => {
             const { event, newState } = processStreamPart(
               part,
               state,
@@ -323,14 +329,14 @@ export const streamMultiStep = (
             sequenceCounter = state.sequence;
 
             if (event) {
-              yield* emit.single(event);
+              emitEvent(event);
             }
           })
         );
 
         // Emit message-end if we had a finish
         if (state.finishReason) {
-          yield* emit.single({
+          emitEvent({
             type: 'message-end',
             sequence: sequenceCounter++,
             emittedAt: Date.now(),
@@ -344,7 +350,7 @@ export const streamMultiStep = (
         }
 
         // Emit step-end
-        yield* emit.single(makeStepEndEvent({
+        emitEvent(makeStepEndEvent({
           runId,
           threadId,
           stepIndex,
@@ -387,7 +393,7 @@ export const streamMultiStep = (
           );
 
           // Emit tool result/error immediately
-          yield* emit.single(event);
+          emitEvent(event);
 
           toolResultMessages.push({
             role: 'tool',
@@ -404,7 +410,7 @@ export const streamMultiStep = (
         }
 
         // Emit step-complete
-        yield* emit.single(makeStepCompleteEvent({
+        emitEvent(makeStepCompleteEvent({
           runId,
           threadId,
           stepIndex,
@@ -419,16 +425,11 @@ export const streamMultiStep = (
           ...toolResultMessages,
         ];
       }
+    });
 
-      // Signal stream completion
-      yield* emit.end();
-    }).pipe(
-      Effect.catchAllCause((cause) =>
-        Effect.gen(function* () {
-          const error = cause.failures[0] ?? new Error('Unknown streaming error');
-          yield* emit.fail(error instanceof Error ? error : new Error(String(error)));
-        })
-      )
-    )
-  );
+    // Run the effect and handle completion/errors
+    Effect.runPromise(runMultiStep)
+      .then(() => emit.end())
+      .catch((error) => emit.fail(error instanceof Error ? error : new Error(String(error))));
+  });
 };
