@@ -1,4 +1,4 @@
-import { Effect, Stream, Queue, Deferred } from 'effect';
+import { Effect, Stream, Ref, pipe, Queue, Deferred } from 'effect';
 import { LanguageModel, Prompt, Toolkit } from '@effect/ai';
 import type {
   StreamEvent,
@@ -8,7 +8,6 @@ import type {
   ToolErrorEvent,
   UsageEvent,
   MessageEndEvent,
-  StreamErrorEvent,
 } from '../stream/events';
 import {
   makeStepStartEvent,
@@ -20,7 +19,7 @@ import { normalizeMessages } from '../messages';
 
 export interface MultiStepConfig {
   /** The AiModel to use for streaming */
-  model: any; // AiModel type from @effect/ai
+  model: any;
   toolkit?: Toolkit.Service;
   toolHandlers?: Map<string, (args: Record<string, any>) => Promise<any> | any>;
   maxSteps: number;
@@ -57,11 +56,209 @@ interface StreamState {
   };
 }
 
+interface ToolCall {
+  id: string;
+  name: string;
+  params: Record<string, unknown>;
+}
+
+/**
+ * Execute a single tool and return the result event
+ */
+const executeToolEffect = (
+  toolCall: ToolCall,
+  toolHandlers: Map<string, (args: Record<string, any>) => Promise<any> | any> | undefined,
+  runId: string,
+  threadId: string | undefined,
+  messageId: string,
+  stepIndex: number,
+  sequence: number
+): Effect.Effect<{ event: ToolResultEvent | ToolErrorEvent; result: unknown; isError: boolean }, never> =>
+  Effect.gen(function* (_) {
+    const executor = toolHandlers?.get(toolCall.name);
+    const toolStartTime = Date.now();
+
+    const result = yield* _(
+      executor
+        ? Effect.tryPromise({
+            try: () => Promise.resolve(executor(toolCall.params as Record<string, any>)),
+            catch: (err) => err instanceof Error ? err : new Error(String(err)),
+          }).pipe(
+            Effect.catchAll((err) =>
+              Effect.succeed({ error: err, result: `Error: ${err.message}` })
+            ),
+            Effect.map((res) =>
+              'error' in res ? res : { error: undefined, result: res }
+            )
+          )
+        : Effect.succeed({
+            error: new Error(`Tool "${toolCall.name}" not found`),
+            result: `Error: Tool "${toolCall.name}" not found`,
+          })
+    );
+
+    const toolCompletedAt = Date.now();
+    const durationMs = toolCompletedAt - toolStartTime;
+
+    if (result.error) {
+      const event: ToolErrorEvent = {
+        type: 'tool-error',
+        sequence,
+        emittedAt: toolCompletedAt,
+        runId,
+        threadId,
+        messageId,
+        step: stepIndex,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        error: {
+          message: result.error.message,
+          name: result.error.name,
+          stack: result.error.stack,
+        },
+        completedAt: toolCompletedAt,
+        durationMs,
+      };
+      return { event, result: result.result, isError: true };
+    }
+
+    const event: ToolResultEvent = {
+      type: 'tool-result',
+      sequence,
+      emittedAt: toolCompletedAt,
+      runId,
+      threadId,
+      messageId,
+      step: stepIndex,
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      output: result.result,
+      completedAt: toolCompletedAt,
+      durationMs,
+    };
+    return { event, result: result.result, isError: false };
+  });
+
+/**
+ * Process a single model stream part and return corresponding event
+ */
+const processStreamPart = (
+  part: any,
+  state: StreamState,
+  runId: string,
+  threadId: string | undefined,
+  messageId: string
+): { event: StreamEvent | null; newState: StreamState } => {
+  const emittedAt = Date.now();
+
+  // Handle text delta
+  if (part.type === 'text' && typeof part.text === 'string') {
+    const newAccumulated = state.accumulatedText + part.text;
+    const event: TokenEvent = {
+      type: 'token',
+      sequence: state.sequence,
+      emittedAt,
+      runId,
+      threadId,
+      messageId,
+      step: state.stepIndex,
+      delta: part.text,
+      accumulated: newAccumulated,
+    };
+    return {
+      event,
+      newState: { ...state, accumulatedText: newAccumulated, sequence: state.sequence + 1 },
+    };
+  }
+
+  if (part.type === 'text-delta') {
+    const newAccumulated = state.accumulatedText + part.delta;
+    const event: TokenEvent = {
+      type: 'token',
+      sequence: state.sequence,
+      emittedAt,
+      runId,
+      threadId,
+      messageId,
+      step: state.stepIndex,
+      delta: part.delta,
+      accumulated: newAccumulated,
+    };
+    return {
+      event,
+      newState: { ...state, accumulatedText: newAccumulated, sequence: state.sequence + 1 },
+    };
+  }
+
+  // Handle tool call
+  if (part.type === 'tool-call') {
+    const startedAt = Date.now();
+    const event: ToolCallEvent = {
+      type: 'tool-call',
+      sequence: state.sequence,
+      emittedAt,
+      runId,
+      threadId,
+      messageId,
+      step: state.stepIndex,
+      toolCallId: part.id,
+      toolName: part.name,
+      input: part.params as Record<string, unknown>,
+      startedAt,
+    };
+    const newToolStarts = new Map(state.toolStarts);
+    newToolStarts.set(part.id, { toolName: part.name, startedAt });
+    return {
+      event,
+      newState: {
+        ...state,
+        sequence: state.sequence + 1,
+        toolStarts: newToolStarts,
+        pendingToolCalls: [...state.pendingToolCalls, {
+          id: part.id,
+          name: part.name,
+          params: part.params as Record<string, unknown>,
+        }],
+      },
+    };
+  }
+
+  // Handle finish
+  if (part.type === 'finish') {
+    const usage = {
+      inputTokens: part.usage.inputTokens,
+      outputTokens: part.usage.outputTokens,
+      totalTokens: part.usage.totalTokens,
+    };
+    const event: UsageEvent = {
+      type: 'usage',
+      sequence: state.sequence,
+      emittedAt,
+      runId,
+      threadId,
+      messageId,
+      step: state.stepIndex,
+      usage,
+    };
+    return {
+      event,
+      newState: {
+        ...state,
+        sequence: state.sequence + 1,
+        finishReason: part.reason,
+        usage,
+      },
+    };
+  }
+
+  return { event: null, newState: state };
+};
+
 /**
  * Stream multi-step agent responses with real-time event emission.
  *
- * This function properly streams events as they occur, rather than
- * collecting them all and returning at the end.
+ * Uses Effect's Stream.asyncPush for true real-time streaming with
+ * proper functional composition and error handling throughout.
  */
 export const streamMultiStep = (
   initialMessages: Array<Prompt.MessageEncoded | any>,
@@ -75,29 +272,25 @@ export const streamMultiStep = (
   const { runId, threadId, messageId } = options;
   const messages = normalizeMessages(initialMessages);
 
-  // Use Stream.async to emit events as they happen
-  return Stream.async<StreamEvent, Error>((emit) => {
-    let sequenceCounter = 0;
-
-    const emitEvent = (event: StreamEvent) => {
-      emit.single(event);
-    };
-
-    // Run the multi-step process
-    const process = async () => {
+  // Use Stream.asyncPush for true real-time event emission with Effect
+  return Stream.asyncPush<StreamEvent, Error>((emit) =>
+    Effect.gen(function* (_) {
       let currentMessages = [...messages];
+      let sequenceCounter = 0;
 
+      // Multi-step loop using Effect
       for (let stepIndex = 0; stepIndex < config.maxSteps; stepIndex++) {
         // Emit step-start immediately
-        emitEvent(makeStepStartEvent({
+        yield* _(emit.single(makeStepStartEvent({
           runId,
           threadId,
           stepIndex,
           sequence: sequenceCounter++,
           emittedAt: Date.now(),
-        }));
+        })));
 
-        const initialState: StreamState = {
+        // Initialize state for this step
+        let state: StreamState = {
           sequence: sequenceCounter,
           stepIndex,
           accumulatedText: '',
@@ -105,169 +298,78 @@ export const streamMultiStep = (
           pendingToolCalls: [],
         };
 
-        let finalState: StreamState = initialState;
+        // Create prompt and stream model response
+        const prompt = Prompt.make(currentMessages);
+        const modelStream = LanguageModel.streamText({
+          model: config.model,
+          prompt,
+          toolkit: config.toolkit,
+          maxSteps: 1,
+          toolChoice: stepIndex === 0 ? (config.toolChoice as any) : undefined,
+          temperature: config.temperature,
+        });
 
-        try {
-          // Create proper prompt structure
-          const prompt = Prompt.make(currentMessages);
+        // Process model stream, emitting events in real-time
+        yield* _(
+          Stream.runForEach(modelStream, (part) =>
+            Effect.gen(function* (_) {
+              const { event, newState } = processStreamPart(
+                part,
+                state,
+                runId,
+                threadId,
+                messageId
+              );
+              state = newState;
+              sequenceCounter = state.sequence;
 
-          // Stream the model response
-          const stream = LanguageModel.streamText({
-            model: config.model,
-            prompt,
-            toolkit: config.toolkit,
-            maxSteps: 1,
-            toolChoice: stepIndex === 0 ? (config.toolChoice as any) : undefined,
-            temperature: config.temperature,
-          });
+              if (event) {
+                yield* _(emit.single(event));
+              }
+            })
+          )
+        );
 
-          // Process stream and emit events in real-time
-          await Effect.runPromise(
-            Stream.runForEach(stream, (part) =>
-              Effect.sync(() => {
-                const emittedAt = Date.now();
-                const nextState: StreamState = {
-                  ...finalState,
-                  toolStarts: new Map(finalState.toolStarts),
-                  pendingToolCalls: [...finalState.pendingToolCalls],
-                };
-
-                // Handle text delta - emit immediately
-                const runtimeTextPart = part as { type?: string; text?: string; delta?: string };
-                if (runtimeTextPart.type === 'text' && typeof runtimeTextPart.text === 'string') {
-                  nextState.accumulatedText += runtimeTextPart.text;
-                  emitEvent({
-                    type: 'token',
-                    sequence: nextState.sequence++,
-                    emittedAt,
-                    runId,
-                    threadId,
-                    messageId,
-                    step: nextState.stepIndex,
-                    delta: runtimeTextPart.text,
-                    accumulated: nextState.accumulatedText,
-                  } as TokenEvent);
-                }
-
-                if (part.type === 'text-delta') {
-                  nextState.accumulatedText += part.delta;
-                  emitEvent({
-                    type: 'token',
-                    sequence: nextState.sequence++,
-                    emittedAt,
-                    runId,
-                    threadId,
-                    messageId,
-                    step: nextState.stepIndex,
-                    delta: part.delta,
-                    accumulated: nextState.accumulatedText,
-                  } as TokenEvent);
-                }
-
-                // Handle tool call - emit immediately
-                if (part.type === 'tool-call') {
-                  const startedAtPart = Date.now();
-                  nextState.toolStarts.set(part.id, { toolName: part.name, startedAt: startedAtPart });
-                  nextState.pendingToolCalls.push({
-                    id: part.id,
-                    name: part.name,
-                    params: part.params as Record<string, unknown>,
-                  });
-                  emitEvent({
-                    type: 'tool-call',
-                    sequence: nextState.sequence++,
-                    emittedAt,
-                    runId,
-                    threadId,
-                    messageId,
-                    step: nextState.stepIndex,
-                    toolCallId: part.id,
-                    toolName: part.name,
-                    input: part.params as Record<string, unknown>,
-                    startedAt: startedAtPart,
-                  } as ToolCallEvent);
-                }
-
-                // Handle finish
-                if (part.type === 'finish') {
-                  nextState.finishReason = part.reason;
-                  nextState.usage = {
-                    inputTokens: part.usage.inputTokens,
-                    outputTokens: part.usage.outputTokens,
-                    totalTokens: part.usage.totalTokens,
-                  };
-                  emitEvent({
-                    type: 'usage',
-                    sequence: nextState.sequence++,
-                    emittedAt,
-                    runId,
-                    threadId,
-                    messageId,
-                    step: nextState.stepIndex,
-                    usage: nextState.usage,
-                  } as UsageEvent);
-                  emitEvent({
-                    type: 'message-end',
-                    sequence: nextState.sequence++,
-                    emittedAt,
-                    runId,
-                    threadId,
-                    messageId,
-                    step: nextState.stepIndex,
-                    finishedAt: emittedAt,
-                    finishReason: part.reason,
-                  } as MessageEndEvent);
-                }
-
-                sequenceCounter = nextState.sequence;
-                finalState = nextState;
-              })
-            )
-          );
-        } catch (error) {
-          // Emit stream-error event
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          emitEvent(makeStreamErrorEvent({
-            runId,
-            threadId,
-            stepIndex,
-            messageId,
-            error: errorMessage,
-            partialText: finalState.accumulatedText,
+        // Emit message-end if we had a finish
+        if (state.finishReason) {
+          yield* _(emit.single({
+            type: 'message-end',
             sequence: sequenceCounter++,
             emittedAt: Date.now(),
-          }));
-          emit.end();
-          return;
+            runId,
+            threadId,
+            messageId,
+            step: stepIndex,
+            finishedAt: Date.now(),
+            finishReason: state.finishReason,
+          } as MessageEndEvent));
         }
 
-        // Emit step-end immediately
-        emitEvent(makeStepEndEvent({
+        // Emit step-end
+        yield* _(emit.single(makeStepEndEvent({
           runId,
           threadId,
           stepIndex,
           sequence: sequenceCounter++,
           emittedAt: Date.now(),
-        }));
+        })));
 
-        // Check if there are tool calls to execute
-        const pendingToolCalls = finalState.pendingToolCalls;
-
-        if (pendingToolCalls.length === 0) {
+        // Check for tool calls
+        if (state.pendingToolCalls.length === 0) {
           // No tool calls - we're done
           break;
         }
 
         // Execute tools and emit results in real-time
         const assistantParts: Array<Prompt.AssistantMessagePartEncoded> = [];
-        if (finalState.accumulatedText) {
-          assistantParts.push(Prompt.makePart('text', { text: finalState.accumulatedText }));
+        if (state.accumulatedText) {
+          assistantParts.push(Prompt.makePart('text', { text: state.accumulatedText }));
         }
 
         const toolResultMessages: Prompt.MessageEncoded[] = [];
 
-        for (const toolCall of pendingToolCalls) {
-          // Add tool call to assistant message
+        // Process each tool call using Effect
+        for (const toolCall of state.pendingToolCalls) {
           assistantParts.push(Prompt.makePart('tool-call', {
             id: toolCall.id,
             name: toolCall.name,
@@ -275,103 +377,62 @@ export const streamMultiStep = (
             providerExecuted: false,
           }));
 
-          // Execute the tool
-          const executor = config.toolHandlers?.get(toolCall.name);
-          let toolResult: unknown;
-          let toolError: Error | undefined;
-          const toolStartTime = Date.now();
-
-          if (executor) {
-            try {
-              toolResult = await Promise.resolve(executor(toolCall.params as Record<string, any>));
-            } catch (err) {
-              toolError = err instanceof Error ? err : new Error(String(err));
-              toolResult = `Error: ${toolError.message}`;
-            }
-          } else {
-            toolResult = `Error: Tool "${toolCall.name}" not found`;
-            toolError = new Error(`Tool "${toolCall.name}" not found`);
-          }
-
-          const toolCompletedAt = Date.now();
-          const durationMs = toolCompletedAt - toolStartTime;
-
-          // Emit tool-result or tool-error immediately
-          if (toolError) {
-            emitEvent({
-              type: 'tool-error',
-              sequence: sequenceCounter++,
-              emittedAt: toolCompletedAt,
+          // Execute tool using Effect
+          const { event, result, isError } = yield* _(
+            executeToolEffect(
+              toolCall,
+              config.toolHandlers,
               runId,
               threadId,
               messageId,
-              step: stepIndex,
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              error: {
-                message: toolError.message,
-                name: toolError.name,
-                stack: toolError.stack,
-              },
-              completedAt: toolCompletedAt,
-              durationMs,
-            } as ToolErrorEvent);
-          } else {
-            emitEvent({
-              type: 'tool-result',
-              sequence: sequenceCounter++,
-              emittedAt: toolCompletedAt,
-              runId,
-              threadId,
-              messageId,
-              step: stepIndex,
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              output: toolResult,
-              completedAt: toolCompletedAt,
-              durationMs,
-            } as ToolResultEvent);
-          }
+              stepIndex,
+              sequenceCounter++
+            )
+          );
 
-          // Add tool result message
+          // Emit tool result/error immediately
+          yield* _(emit.single(event));
+
           toolResultMessages.push({
             role: 'tool',
             content: [
               Prompt.makePart('tool-result', {
                 id: toolCall.id,
                 name: toolCall.name,
-                result: toolResult,
-                isFailure: !!toolError,
+                result,
+                isFailure: isError,
                 providerExecuted: false,
               }),
             ],
           });
         }
 
-        // Emit step-complete immediately
-        emitEvent(makeStepCompleteEvent({
+        // Emit step-complete
+        yield* _(emit.single(makeStepCompleteEvent({
           runId,
           threadId,
           stepIndex,
           sequence: sequenceCounter++,
           emittedAt: Date.now(),
-        }));
+        })));
 
-        // Add messages for next step
-        currentMessages.push({
-          role: 'assistant',
-          content: assistantParts,
-        });
-        currentMessages.push(...toolResultMessages);
+        // Build messages for next step
+        currentMessages = [
+          ...currentMessages,
+          { role: 'assistant' as const, content: assistantParts },
+          ...toolResultMessages,
+        ];
       }
 
       // Signal stream completion
-      emit.end();
-    };
-
-    // Start the process
-    process().catch((error) => {
-      emit.fail(error instanceof Error ? error : new Error(String(error)));
-    });
-  });
+      yield* _(emit.end());
+    }).pipe(
+      Effect.catchAllCause((cause) =>
+        Effect.gen(function* (_) {
+          const error = cause.failures[0] ?? new Error('Unknown streaming error');
+          yield* _(emit.fail(error instanceof Error ? error : new Error(String(error))));
+        })
+      )
+    )
+  );
 };
