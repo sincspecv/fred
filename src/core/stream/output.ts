@@ -81,6 +81,19 @@ const processEvent = (
     };
   }
 
+  // Reset state on message-start to handle multi-turn responses (e.g., after tool calls)
+  if (event.type === 'message-start') {
+    return {
+      newState: {
+        ...state,
+        currentStepHasToolCalls: false,
+        bufferedTextForCurrentStep: '',
+        currentStepStartedOutput: false,
+      },
+      textToOutput: null,
+    };
+  }
+
   // Track successful tool executions
   if (event.type === 'tool-result') {
     return {
