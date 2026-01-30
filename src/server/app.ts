@@ -73,10 +73,11 @@ export class ServerApp {
   /**
    * Stop the server
    */
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.server) {
       this.server.stop();
     }
+    console.log('HTTP server stopped');
   }
 
   /**
