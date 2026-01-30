@@ -29,7 +29,7 @@ async function loadProjectSetup(fred: Fred): Promise<void> {
         // Dynamically import the project's index file
         // Bun natively supports TypeScript imports, so we can import .ts files directly
         const projectModule = await import(pathToFileURL(indexPath).href);
-        
+
         // Check if setup function is exported
         if (typeof projectModule.setup === 'function') {
           // Call the setup function with the Fred instance
@@ -43,30 +43,21 @@ async function loadProjectSetup(fred: Fred): Promise<void> {
       }
     }
   }
-  
+
   // If no setup function found, that's okay - dev-chat will use auto-agent creation
 }
 
 /**
  * Handle dev command
+ * Uses BunRuntime.runMain internally via startDevChat for proper signal handling.
+ * This function never returns - it runs until interrupted.
  */
-export async function handleDevCommand(): Promise<number> {
-  try {
-    // Create a setup hook that will be called by dev-chat
-    const setupHook = async (fred: Fred) => {
-      await loadProjectSetup(fred);
-    };
+export function handleDevCommand(): void {
+  const setupHook = async (fred: Fred) => {
+    await loadProjectSetup(fred);
+  };
 
-    // Start the dev chat with the setup hook
-    await startDevChat(setupHook);
-    
-    // startDevChat runs indefinitely, so this should never be reached
-    return 0;
-  } catch (error) {
-    console.error('Error starting dev chat:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error && error.stack) {
-      console.error(error.stack);
-    }
-    return 1;
-  }
+  // startDevChat uses BunRuntime.runMain internally
+  // It will handle signals and cleanup, and never returns
+  startDevChat(setupHook);
 }

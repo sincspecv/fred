@@ -110,8 +110,11 @@ async function main(): Promise<void> {
 
     switch (command) {
       case 'dev':
-        exitCode = await handleDevCommand();
-        break;
+        // handleDevCommand uses BunRuntime.runMain internally and never returns
+        // It handles signals and cleanup, and exits the process
+        handleDevCommand();
+        // This line is never reached
+        return;
 
       case 'test':
         exitCode = await handleTestCommand(commandArgs, {
