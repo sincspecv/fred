@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 
+import { BunRuntime } from '@effect/platform-bun';
+import { Effect } from 'effect';
 import { Fred } from './index';
 import { WorkflowManager, WorkflowContext } from './core/workflow';
 import { resolve, join } from 'path';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
-import chokidar from 'chokidar';
+import chokidar, { type FSWatcher } from 'chokidar';
 import { getBuiltinPackIds } from './core/platform/packs';
 
 /**
@@ -341,7 +343,6 @@ class DevChatRunner {
   private isReloading = false;
   private reloadTimer: ReturnType<typeof setTimeout> | null = null;
   private isWaitingForInput = false;
-  private fileWatcher: chokidar.FSWatcher | null = null;
   private setupHook?: (fred: Fred) => Promise<void>;
   private workflowContext?: WorkflowContext;
   private options: { verbose: boolean; stream: boolean } = {
@@ -562,18 +563,9 @@ class DevChatRunner {
 
   /**
    * Watch for file changes and reload using chokidar
+   * Returns the watcher instance for cleanup via Effect finalizer
    */
-  public setupFileWatcher() {
-    // Prevent memory leak: close existing watcher if one exists
-    if (this.fileWatcher) {
-      try {
-        this.fileWatcher.close();
-      } catch {
-        // Ignore errors when closing existing watcher
-      }
-      this.fileWatcher = null;
-    }
-
+  public createFileWatcher(): FSWatcher | null {
   const projectRoot = process.cwd();
   const watchPaths = [
     resolve(projectRoot, 'src'),
@@ -593,16 +585,16 @@ class DevChatRunner {
     const normalizedRoot = resolve(projectRoot);
     return normalizedPath.startsWith(normalizedRoot + '/') || normalizedPath === normalizedRoot;
   });
-  
+
   if (existingPaths.length === 0) {
     console.warn('⚠️  No paths to watch found. File watching disabled.');
-    return;
+    return null;
   }
 
     console.log(`👀 Watching ${existingPaths.length} path(s) for changes...`);
 
     // Use chokidar to watch all paths
-    this.fileWatcher = chokidar.watch(existingPaths, {
+    const watcher = chokidar.watch(existingPaths, {
     ignored: [
       /node_modules/,
       /\.git/,
@@ -631,7 +623,7 @@ class DevChatRunner {
     },
   });
 
-    this.fileWatcher.on('change', (path) => {
+    watcher.on('change', (path) => {
       // Additional security: validate path is still within project root
       const normalizedPath = resolve(path);
       const normalizedRoot = resolve(projectRoot);
@@ -652,18 +644,11 @@ class DevChatRunner {
       }, 300);
     });
 
-    this.fileWatcher.on('error', (error) => {
+    watcher.on('error', (error) => {
       console.error('File watcher error:', error);
-      // On error, cleanup watcher to prevent resource leaks
-      if (this.fileWatcher) {
-        try {
-          this.fileWatcher.close();
-        } catch {
-          // Ignore cleanup errors
-        }
-        this.fileWatcher = null;
-      }
     });
+
+    return watcher;
   }
 
   /**
@@ -875,10 +860,11 @@ class DevChatRunner {
           resolve(input);
           return;
         } else if (char === '\u0003') {
-          // Ctrl+C
+          // Ctrl+C - let Effect's signal handler deal with this
+          // Clean up readline state and return without resolving
+          // Effect will interrupt the fiber and run finalizers
           cleanup();
-          console.log('\n\n👋 Goodbye!');
-          process.exit(0);
+          process.stdout.write('\n');
           return;
         } else if (char === '\u007f' || char === '\b') {
           // Backspace
@@ -1364,63 +1350,57 @@ class DevChatRunner {
     }
   }
 
-  /**
-   * Cleanup file watcher
-   */
-  private cleanupWatcher() {
-    if (this.fileWatcher) {
-      try {
-        this.fileWatcher.close();
-      } catch {
-        // Ignore errors during cleanup
-      }
-      this.fileWatcher = null;
-    }
-  }
-
-  /**
-   * Setup cleanup handlers
-   */
-  public setupCleanup() {
-    // Cleanup watcher on exit
-    process.on('SIGINT', () => {
-      this.cleanupWatcher();
-      process.exit(0);
-    });
-    
-    process.on('SIGTERM', () => {
-      this.cleanupWatcher();
-      process.exit(0);
-    });
-  }
 }
+
+/**
+ * Create a scoped file watcher with Effect finalizer for cleanup
+ */
+const createScopedFileWatcher = (runner: DevChatRunner) =>
+  Effect.acquireRelease(
+    Effect.sync(() => runner.createFileWatcher()),
+    (watcher) =>
+      watcher
+        ? Effect.promise(async () => {
+            await watcher.close();
+            console.log('File watcher closed');
+          })
+        : Effect.void
+  );
 
 /**
  * Start dev chat interface (exported for CLI use)
+ * Uses BunRuntime.runMain for proper signal handling and cleanup.
  * @param setupHook Optional function to call after Fred is initialized but before auto-agent creation
  */
-export async function startDevChat(setupHook?: (fred: Fred) => Promise<void>) {
+export function startDevChat(setupHook?: (fred: Fred) => Promise<void>): void {
   const runner = new DevChatRunner(setupHook);
-  runner.setupCleanup();
-  runner.setupFileWatcher();
-  await runner.start();
-}
 
-/**
- * Main function
- */
-async function main() {
-  const runner = new DevChatRunner();
-  runner.setupCleanup();
-  runner.setupFileWatcher();
-  await runner.start();
+  const program = Effect.gen(function* () {
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* createScopedFileWatcher(runner);
+        yield* Effect.promise(() => runner.start());
+      })
+    );
+  });
+
+  BunRuntime.runMain(program);
+  // Note: runMain never returns - it runs until interrupted
 }
 
 // Run if this is the main module
 // @ts-ignore - Bun global
 if (import.meta.main) {
-  main().catch((error) => {
-    console.error('Failed to start dev chat:', error);
-    process.exit(1);
+  const runner = new DevChatRunner();
+
+  const program = Effect.gen(function* () {
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* createScopedFileWatcher(runner);
+        yield* Effect.promise(() => runner.start());
+      })
+    );
   });
+
+  BunRuntime.runMain(program);
 }
