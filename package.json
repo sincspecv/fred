@@ -1,6 +1,6 @@
 {
   "name": "fred",
-  "version": "0.1.2",
+  "version": "0.2.5",
   "description": "Fred - A flexible framework for building AI agents with intent-based routing",
   "type": "module",
   "main": "./src/index.ts",
@@ -10,6 +10,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./effect": {
+      "types": "./src/effect/index.ts",
+      "import": "./src/effect/index.ts",
+      "default": "./src/effect/index.ts"
     }
   },
   "files": [
@@ -55,96 +60,12 @@
     "graphology": "^0.26.0",
     "graphology-dag": "^0.4.1",
     "js-yaml": "^4.1.0",
-    "pg": "^8.17.2",
-    "zod": "^4.0.0"
+    "pg": "^8.17.2"
   },
   "devDependencies": {
+    "@effect/language-service": "^0.72.0",
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
     "chokidar": "^5.0.0"
-  },
-  "peerDependencies": {
-    "@ai-sdk/openai": "^3.0.0",
-    "@ai-sdk/anthropic": "^3.0.0",
-    "@ai-sdk/google": "^3.0.0",
-    "@ai-sdk/groq": "^3.0.10",
-    "@ai-sdk/mistral": "^3.0.0",
-    "@ai-sdk/cohere": "^3.0.0",
-    "@ai-sdk/vercel": "^2.0.0",
-    "@ai-sdk/fireworks": "^2.0.0",
-    "@ai-sdk/xai": "^3.0.0",
-    "@ai-sdk/amazon-bedrock": "^4.0.0",
-    "@ai-sdk/elevenlabs": "^2.0.0",
-    "@ai-sdk/perplexity": "^3.0.0",
-    "@ai-sdk/replicate": "^2.0.0",
-    "@ai-sdk/azure": "^3.0.0",
-    "@ai-sdk/deepseek": "^2.0.0",
-    "@ai-sdk/cerebras": "^2.0.0",
-    "@ai-sdk/togetherai": "^2.0.0",
-    "@ai-sdk/deepinfra": "^2.0.0",
-    "@ai-sdk/baseten": "^1.0.0",
-    "ai-sdk-ollama": "^0.5.0"
-  },
-  "peerDependenciesMeta": {
-    "@ai-sdk/openai": {
-      "optional": true
-    },
-    "@ai-sdk/anthropic": {
-      "optional": true
-    },
-    "@ai-sdk/google": {
-      "optional": true
-    },
-    "@ai-sdk/groq": {
-      "optional": true
-    },
-    "@ai-sdk/mistral": {
-      "optional": true
-    },
-    "@ai-sdk/cohere": {
-      "optional": true
-    },
-    "@ai-sdk/vercel": {
-      "optional": true
-    },
-    "@ai-sdk/fireworks": {
-      "optional": true
-    },
-    "@ai-sdk/xai": {
-      "optional": true
-    },
-    "@ai-sdk/amazon-bedrock": {
-      "optional": true
-    },
-    "@ai-sdk/elevenlabs": {
-      "optional": true
-    },
-    "@ai-sdk/perplexity": {
-      "optional": true
-    },
-    "@ai-sdk/replicate": {
-      "optional": true
-    },
-    "@ai-sdk/azure": {
-      "optional": true
-    },
-    "@ai-sdk/deepseek": {
-      "optional": true
-    },
-    "@ai-sdk/cerebras": {
-      "optional": true
-    },
-    "@ai-sdk/togetherai": {
-      "optional": true
-    },
-    "@ai-sdk/deepinfra": {
-      "optional": true
-    },
-    "@ai-sdk/baseten": {
-      "optional": true
-    },
-    "ai-sdk-ollama": {
-      "optional": true
-    }
   }
 }
