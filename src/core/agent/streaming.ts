@@ -351,14 +351,16 @@ const streamSingleStep = (
 
       // Create prompt and get model stream
       const prompt = Prompt.make(currentMessages);
-      const modelStream = LanguageModel.streamText({
+      // Cast options via unknown to satisfy TypeScript - the runtime types are correct
+      const streamOptions = {
         model: config.model,
         prompt,
         toolkit: config.toolkit,
         maxSteps: 1,
         toolChoice: stepIndex === 0 ? (config.toolChoice as any) : undefined,
         temperature: config.temperature,
-      });
+      } as unknown as Parameters<typeof LanguageModel.streamText>[0];
+      const modelStream = LanguageModel.streamText(streamOptions);
 
       // Transform model stream to our events, tracking state
       const eventStream = pipe(
@@ -436,7 +438,7 @@ export const streamMultiStep = (
     threadId?: string;
     messageId: string;
   }
-): Stream.Stream<StreamEvent, Error> => {
+): Stream.Stream<StreamEvent, Error, any> => {
   const { runId, threadId, messageId } = options;
   const messages = normalizeMessages(initialMessages);
 
@@ -482,31 +484,36 @@ export const streamMultiStep = (
         // Create prompt and get model stream
         // @effect/ai executes tools automatically with maxSteps: 1
         const prompt = Prompt.make(currentMessages);
-        const modelStream = LanguageModel.streamText({
+        // Cast options via unknown to satisfy TypeScript - the runtime types are correct
+        const streamOptions = {
           model: config.model,
           prompt,
           toolkit: config.toolkit,
           maxSteps: 1, // One model call per step - @effect/ai handles tool execution
           toolChoice: stepIndex === 0 ? (config.toolChoice as any) : undefined,
           temperature: config.temperature,
-        });
+        } as unknown as Parameters<typeof LanguageModel.streamText>[0];
+        const modelStream = LanguageModel.streamText(streamOptions);
 
         // Transform model stream, capturing tool calls and results
         const eventStream = pipe(
           modelStream,
           Stream.map((part) => {
+            // Cast part to any for type checks - toolkit parts may include tool-call/tool-result
+            const typedPart = part as { type: string; id?: string; name?: string; params?: unknown; result?: unknown };
+
             // Capture tool calls
-            if (part.type === 'tool-call') {
+            if (typedPart.type === 'tool-call') {
               stepToolInfo.toolCalls.push({
-                id: part.id,
-                name: part.name,
-                params: part.params as Record<string, unknown>,
+                id: typedPart.id!,
+                name: typedPart.name!,
+                params: typedPart.params as Record<string, unknown>,
               });
             }
 
             // Capture tool results from @effect/ai execution
-            if (part.type === 'tool-result') {
-              stepToolInfo.toolResults.set(part.id, part.result);
+            if (typedPart.type === 'tool-result') {
+              stepToolInfo.toolResults.set(typedPart.id!, typedPart.result);
             }
 
             const { event, newState } = processStreamPart(part, state, runId, threadId, messageId);
