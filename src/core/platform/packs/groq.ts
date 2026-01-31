@@ -7,6 +7,7 @@ import { FetchHttpClient } from '@effect/platform';
 import * as AiError from '@effect/ai/AiError';
 import * as AiModel from '@effect/ai/Model';
 import * as LanguageModel from '@effect/ai/LanguageModel';
+import * as Prompt from '@effect/ai/Prompt';
 import * as Response from '@effect/ai/Response';
 import * as Tool from '@effect/ai/Tool';
 import { IdGenerator } from '@effect/ai/IdGenerator';
@@ -107,8 +108,9 @@ function createGroqLanguageModel(
       );
       const clientWithBaseUrlOk = HttpClient.filterStatusOk(clientWithBaseUrl);
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return yield* LanguageModel.make({
-        generateText: Effect.fnUntraced(function* (options) {
+        generateText: Effect.fnUntraced(function* (options: LanguageModel.ProviderOptions) {
           const messages = convertPromptToMessages(options.prompt);
           const tools = convertToolsToFunctions(options.tools);
           const toolChoice = resolveToolChoice(options.toolChoice, tools);
@@ -129,23 +131,26 @@ function createGroqLanguageModel(
           }).pipe(HttpClientRequest.setHeader('Accept', 'text/event-stream'));
 
           const response = yield* clientWithBaseUrlOk.execute(request).pipe(
-            Effect.catchTags({
-              RequestError: (error) =>
-                Effect.fail(AiError.HttpRequestError.fromRequestError({
-                  module: 'GroqProvider',
-                  method: 'generateText',
-                  error
-                })),
-              ResponseError: (error) =>
-                Effect.fail(AiError.HttpResponseError.fromResponseError({
-                  module: 'GroqProvider',
-                  method: 'generateText',
-                  error
-                }))
-            })
+            Effect.catchAll((error) =>
+              Effect.fail(new AiError.UnknownError({
+                module: 'GroqProvider',
+                method: 'generateText',
+                description: 'HTTP request failed',
+                cause: error
+              }))
+            )
           );
 
-          const json = (yield* response.json) as ChatCompletionResponse;
+          const json = (yield* (response.json as Effect.Effect<unknown, unknown>).pipe(
+            Effect.catchAll((error) =>
+              Effect.fail(new AiError.MalformedOutput({
+                module: 'GroqProvider',
+                method: 'generateText',
+                description: 'Failed to parse response JSON',
+                cause: error
+              }))
+            )
+          )) as ChatCompletionResponse;
           const choice = json.choices[0];
 
           if (!choice) {
@@ -181,9 +186,9 @@ function createGroqLanguageModel(
           });
 
           return parts;
-        }),
+        }) as any,
 
-        streamText: (options) => Stream.unwrapScoped(Effect.gen(function* () {
+        streamText: ((options: LanguageModel.ProviderOptions) => Stream.unwrapScoped(Effect.gen(function* () {
           const idGenerator = yield* IdGenerator;
           const messages = convertPromptToMessages(options.prompt);
           const tools = convertToolsToFunctions(options.tools);
@@ -214,20 +219,14 @@ function createGroqLanguageModel(
                 description: 'Groq request timed out'
               })
             }),
-            Effect.catchTags({
-              RequestError: (error) =>
-                Effect.fail(AiError.HttpRequestError.fromRequestError({
-                  module: 'GroqProvider',
-                  method: 'streamText',
-                  error
-                })),
-              ResponseError: (error) =>
-                Effect.fail(AiError.HttpResponseError.fromResponseError({
-                  module: 'GroqProvider',
-                  method: 'streamText',
-                  error
-                }))
-            })
+            Effect.catchAll((error) =>
+              Effect.fail(new AiError.UnknownError({
+                module: 'GroqProvider',
+                method: 'streamText',
+                description: 'HTTP request failed',
+                cause: error
+              }))
+            )
           );
 
           const textId = yield* idGenerator.generateId();
@@ -315,9 +314,18 @@ function createGroqLanguageModel(
 
               return [nextState, parts] as const;
             }),
-            Stream.flatMap((parts: readonly Response.StreamPartEncoded[]) => Stream.fromIterable(parts))
+            Stream.flatMap((parts: readonly Response.StreamPartEncoded[]) => Stream.fromIterable(parts)),
+            // Map any stream errors to AiError
+            Stream.catchAll((error) =>
+              Stream.fail(new AiError.UnknownError({
+                module: 'GroqProvider',
+                method: 'streamText',
+                description: 'Stream processing error',
+                cause: error
+              }))
+            )
           );
-        }))
+        }))) as any
       });
     })
   ));
@@ -343,7 +351,7 @@ interface GroqMessage {
 /**
  * Convert @effect/ai Prompt to Groq Chat Completions messages format
  */
-function convertPromptToMessages(prompt: LanguageModel.Prompt): GroqMessage[] {
+function convertPromptToMessages(prompt: Prompt.Prompt): GroqMessage[] {
   const messages: GroqMessage[] = [];
 
   for (const message of prompt.content) {
@@ -428,6 +436,7 @@ function convertPromptToMessages(prompt: LanguageModel.Prompt): GroqMessage[] {
 /**
  * Convert @effect/ai tools to Groq function call format
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function convertToolsToFunctions(tools: ReadonlyArray<Tool.Any> | undefined): Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }> | undefined {
   if (!tools || tools.length === 0) {
     return undefined;
@@ -436,8 +445,9 @@ function convertToolsToFunctions(tools: ReadonlyArray<Tool.Any> | undefined): Ar
     type: 'function' as const,
     function: {
       name: tool.name,
-      description: Tool.getDescription(tool) ?? '',
-      parameters: Tool.getJsonSchema(tool),
+      // Cast to any to access tool methods - Tool.Any is structurally compatible
+      description: Tool.getDescription(tool as any) ?? '',
+      parameters: Tool.getJsonSchema(tool as any),
     },
   }));
 }
@@ -471,7 +481,7 @@ function resolveResponseFormat(responseFormat: LanguageModel.ProviderOptions['re
   return undefined;
 }
 
-function mapFinishReason(reason: string | null): Response.FinishReason.Encoded {
+function mapFinishReason(reason: string | null): typeof Response.FinishReason.Encoded {
   if (!reason) {
     return 'unknown';
   }
@@ -491,7 +501,7 @@ function mapFinishReason(reason: string | null): Response.FinishReason.Encoded {
   }
 }
 
-function mapUsage(usage: ChatCompletionResponse['usage'] | ChatCompletionStreamChunk['usage'] | undefined): Response.Usage.Encoded {
+function mapUsage(usage: ChatCompletionResponse['usage'] | ChatCompletionStreamChunk['usage'] | undefined): typeof Response.Usage.Encoded {
   return {
     inputTokens: usage?.prompt_tokens,
     outputTokens: usage?.completion_tokens,

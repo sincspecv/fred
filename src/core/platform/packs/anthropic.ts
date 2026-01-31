@@ -26,8 +26,7 @@ export const AnthropicProviderFactory: EffectProviderFactory = {
     // Use AnthropicClient.layer for client initialization
     const layer = module.AnthropicClient?.layer?.({
       apiKey,
-      baseUrl: config.baseUrl,
-      headers: config.headers,
+      apiUrl: config.baseUrl,
     });
 
     if (!layer) {
@@ -43,7 +42,7 @@ export const AnthropicProviderFactory: EffectProviderFactory = {
         return Effect.succeed(
           module.AnthropicLanguageModel.model(modelId, {
             temperature: overrides?.temperature,
-            maxTokens: overrides?.maxTokens,
+            max_tokens: overrides?.maxTokens,
           })
         );
       },

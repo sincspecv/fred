@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Effect, Redacted } from 'effect';
 import * as HttpClient from '@effect/platform/HttpClient';
 import * as HttpClientRequest from '@effect/platform/HttpClientRequest';
 import type { EffectProviderFactory } from '../base';
@@ -22,7 +22,8 @@ export const GoogleProviderFactory: EffectProviderFactory = {
     const module = await dynamicImport('@effect/ai-google');
 
     const apiKeyEnvVar = config.apiKeyEnvVar ?? 'GOOGLE_GENERATIVE_AI_API_KEY';
-    const apiKey = process.env[apiKeyEnvVar];
+    const apiKeyString = process.env[apiKeyEnvVar];
+    const apiKey = apiKeyString ? Redacted.make(apiKeyString) : undefined;
 
     const transformClient = config.headers
       ? (client: HttpClient.HttpClient) =>
@@ -53,11 +54,14 @@ export const GoogleProviderFactory: EffectProviderFactory = {
         if (!module.GoogleLanguageModel?.model) {
           return Effect.fail(new Error('Google LanguageModel not available in provider pack'));
         }
+        // Config structure follows GenerateContentRequest schema with generationConfig nested
         return Effect.succeed(
           module.GoogleLanguageModel.model(modelId, {
-            temperature: overrides?.temperature,
-            maxTokens: overrides?.maxTokens,
-          })
+            generationConfig: {
+              temperature: overrides?.temperature,
+              maxOutputTokens: overrides?.maxTokens,
+            },
+          } as any)
         );
       },
     };

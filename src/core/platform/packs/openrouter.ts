@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Effect, Redacted } from 'effect';
 import type { EffectProviderFactory } from '../base';
 import type { ProviderConfig, ProviderModelDefaults } from '../provider';
 
@@ -21,22 +21,15 @@ export const OpenRouterProviderFactory: EffectProviderFactory = {
     const module = await dynamicImport('@effect/ai-openai');
 
     const apiKeyEnvVar = config.apiKeyEnvVar ?? 'OPENROUTER_API_KEY';
-    const apiKey = process.env[apiKeyEnvVar];
+    const apiKeyString = process.env[apiKeyEnvVar];
+    const apiKey = apiKeyString ? Redacted.make(apiKeyString) : undefined;
     const apiUrl = config.baseUrl ?? 'https://openrouter.ai/api/v1';
 
-    // Use OpenAiClient.layer or OpenAiLayer.layer based on package version
-    // Note: @effect/ai-openai uses 'apiUrl' not 'baseUrl'
-    const layer =
-      module.OpenAiClient?.layer?.({
-        apiKey,
-        apiUrl,
-        headers: config.headers,
-      }) ??
-      module.OpenAiLayer?.layer?.({
-        apiKey,
-        apiUrl,
-        headers: config.headers,
-      });
+    // Use OpenAiClient.layer for client initialization
+    const layer = module.OpenAiClient?.layer?.({
+      apiKey,
+      apiUrl,
+    });
 
     if (!layer) {
       throw new Error('OpenRouter provider pack did not expose a client layer');
@@ -51,7 +44,7 @@ export const OpenRouterProviderFactory: EffectProviderFactory = {
         return Effect.succeed(
           module.OpenAiLanguageModel.model(modelId, {
             temperature: overrides?.temperature,
-            maxTokens: overrides?.maxTokens,
+            max_output_tokens: overrides?.maxTokens,
           })
         );
       },
