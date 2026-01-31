@@ -38,7 +38,7 @@ export function createCalculatorTool(): Tool {
       const { expression } = args;
 
       if (!expression || typeof expression !== 'string') {
-        return 'Invalid input: expression must be a non-empty string.';
+        throw new Error('Invalid input: expression must be a non-empty string.');
       }
 
       // Sanitize: Remove whitespace and validate characters
@@ -48,14 +48,7 @@ export function createCalculatorTool(): Tool {
       // This regex allows: 0-9, ., +, -, *, /, (, )
       const allowedPattern = /^[0-9+\-*/().\s]+$/;
       if (!allowedPattern.test(sanitized)) {
-        // Detect common unsupported operators for better error messages
-        if (sanitized.includes('%')) {
-          return 'Unsupported operator: %. Only +, -, *, / are supported.';
-        }
-        if (sanitized.includes('^')) {
-          return 'Unsupported operator: ^. Only +, -, *, / are supported.';
-        }
-        return 'Invalid expression. Only numbers and operators (+, -, *, /) are supported.';
+        throw new Error('Invalid expression: invalid characters');
       }
 
       // Additional safety: Check for balanced parentheses
@@ -64,18 +57,18 @@ export function createCalculatorTool(): Tool {
         if (char === '(') parenCount++;
         if (char === ')') parenCount--;
         if (parenCount < 0) {
-          return 'Unbalanced parentheses in expression.';
+          throw new Error('Unbalanced parentheses in expression.');
         }
       }
       if (parenCount !== 0) {
-        return 'Unbalanced parentheses in expression.';
+        throw new Error('Unbalanced parentheses in expression.');
       }
 
       // Additional safety: Prevent multiple consecutive operators (except negative sign at start)
       // This helps prevent malformed expressions like "2++3" or "2**3"
       const operatorPattern = /[+\-*/]{2,}/;
       if (operatorPattern.test(sanitized.replace(/^\-/, ''))) {
-        return 'Invalid expression: consecutive operators are not allowed.';
+        throw new Error('Invalid expression: consecutive operators are not allowed.');
       }
 
       try {
@@ -84,14 +77,9 @@ export function createCalculatorTool(): Tool {
         // We only allow basic arithmetic operations
         const result = new Function('return ' + sanitized)();
 
-        // Validate result is a number
+        // Validate result is a number and check for division by zero (result is Infinity or -Infinity)
         if (typeof result !== 'number' || !isFinite(result)) {
-          return 'Could not evaluate expression to a valid number.';
-        }
-
-        // Handle division by zero
-        if (!isFinite(result)) {
-          return 'Division by zero.';
+          throw new Error('Division by zero or invalid result.');
         }
 
         // Return result as string, handling very large/small numbers
@@ -109,9 +97,9 @@ export function createCalculatorTool(): Tool {
         }
       } catch (error) {
         if (error instanceof Error) {
-          return `Could not evaluate "${expression}": ${error.message}`;
+          throw new Error(`Could not evaluate "${expression}": ${error.message}`);
         }
-        return `Could not evaluate "${expression}".`;
+        throw new Error(`Could not evaluate "${expression}".`);
       }
     },
     strict: false, // Permissive mode - allows flexibility in expression format
