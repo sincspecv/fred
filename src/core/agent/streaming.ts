@@ -59,7 +59,7 @@ import { normalizeMessages } from '../messages';
 export interface MultiStepConfig {
   /** The AiModel to use for streaming */
   model: any;
-  toolkit?: Toolkit.Service;
+  toolkit?: any;
   toolHandlers?: Map<string, (args: Record<string, any>) => Promise<any> | any>;
   maxSteps: number;
   toolChoice?: 'auto' | 'required' | { name: string };

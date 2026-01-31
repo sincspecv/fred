@@ -1,4 +1,4 @@
-import { Span, SpanOptions, SpanContext } from './types';
+import { SpanOptions, SpanContext } from './types';
 
 /**
  * Core tracer interface

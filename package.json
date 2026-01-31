@@ -66,6 +66,7 @@
     "@effect/language-service": "^0.72.0",
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
+    "@types/pg": "^8.16.0",
     "chokidar": "^5.0.0"
   }
 }
