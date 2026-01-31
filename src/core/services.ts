@@ -16,6 +16,10 @@ import { AgentService, AgentServiceLive } from './agent/service';
 import { CheckpointService } from './pipeline/checkpoint/service';
 import { PauseService, PauseServiceLive } from './pipeline/pause/service';
 import { PipelineService, PipelineServiceLive } from './pipeline/service';
+import { MessageProcessorService, MessageProcessorServiceLive } from './message-processor/service';
+import { IntentMatcherService, IntentMatcherServiceLive } from './intent/service';
+import { IntentRouterService, IntentRouterServiceLive } from './intent/service';
+import { MessageRouterService, MessageRouterServiceFromInstance } from './routing/service';
 import type { CheckpointStorage, Checkpoint, CheckpointStatus } from './pipeline/checkpoint/types';
 
 /**
@@ -29,7 +33,11 @@ export type FredServices =
   | AgentService
   | CheckpointService
   | PauseService
-  | PipelineService;
+  | PipelineService
+  | MessageProcessorService
+  | IntentMatcherService
+  | IntentRouterService
+  | MessageRouterService;
 
 /**
  * Fred runtime type with all services
@@ -233,6 +241,20 @@ const pipelineLayer = PipelineServiceLive.pipe(
 );
 
 /**
+ * MessageProcessor layer depends on Agent, Pipeline, Context
+ * Wave 5: MessageProcessorService
+ *
+ * Note: Optional services (IntentMatcherService, IntentRouterService, MessageRouterService)
+ * can be provided separately when needed. These wrap non-Effect classes and are typically
+ * configured by the Fred orchestrator class.
+ */
+const messageProcessorLayer = MessageProcessorServiceLive.pipe(
+  Layer.provide(agentLayer),
+  Layer.provide(pipelineLayer),
+  Layer.provide(ContextStorageServiceLive)
+);
+
+/**
  * Complete Fred layers - all services composed
  *
  * Dependency graph:
@@ -253,6 +275,9 @@ const pipelineLayer = PipelineServiceLive.pipe(
  *       |
  *       v
  * PipelineService (Wave 4 - depends on Agent, Hook, Checkpoint, Pause)
+ *       |
+ *       v
+ * MessageProcessorService (Wave 5 - depends on Agent, Pipeline, Context)
  * ```
  */
 export const FredLayers = Layer.mergeAll(
@@ -260,7 +285,8 @@ export const FredLayers = Layer.mergeAll(
   coreLayer,
   pauseLayer,
   agentLayer,
-  pipelineLayer
+  pipelineLayer,
+  messageProcessorLayer
 );
 
 /**
@@ -317,4 +343,12 @@ export {
   PauseServiceLive,
   PipelineService,
   PipelineServiceLive,
+  MessageProcessorService,
+  MessageProcessorServiceLive,
+  IntentMatcherService,
+  IntentMatcherServiceLive,
+  IntentRouterService,
+  IntentRouterServiceLive,
+  MessageRouterService,
+  MessageRouterServiceFromInstance,
 };

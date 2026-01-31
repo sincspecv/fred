@@ -421,7 +421,7 @@ export class Fred implements FredLike {
 
   async testRoute(message: string, metadata?: Record<string, unknown>): Promise<RoutingDecision | null> {
     if (!this.messageRouter) return null;
-    return this.messageRouter.testRoute(message, metadata ?? {});
+    return Effect.runPromise(this.messageRouter.testRoute(message, metadata ?? {}));
   }
 
   // --- Workflow Configuration ---
@@ -580,4 +580,18 @@ export {
   ContextStorageService,
   ProviderRegistryService,
   HookManagerService,
+  MessageProcessorService,
+  MessageProcessorServiceLive,
 } from './core/services';
+
+// Re-export MessageProcessor error types
+export type {
+  MessageProcessorError,
+  MessageValidationError,
+  NoRouteFoundError,
+  RouteExecutionError,
+  HandoffError,
+  ConversationIdRequiredError,
+  AgentNotFoundError,
+  MaxHandoffDepthError,
+} from './core/message-processor/errors';

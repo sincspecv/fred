@@ -424,7 +424,9 @@ export class MessageRouter {
               }
               return null;
             }
-          });
+          }).pipe(
+            Effect.catchAll(() => Effect.succeed(null)) // Convert failures to null success
+          );
 
           if (patternMatch) {
             return patternMatch;
