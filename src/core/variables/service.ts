@@ -108,8 +108,9 @@ class GlobalVariablesServiceImpl implements GlobalVariablesService {
     factory: VariableFactory,
     options?: { mutable?: boolean; description?: string }
   ): Effect.Effect<void> {
+    const self = this;
     return Effect.gen(function* () {
-      const vars = yield* Ref.get(this.variables);
+      const vars = yield* Ref.get(self.variables);
       const newVars = new Map(vars);
       newVars.set(name, {
         name,
@@ -117,31 +118,33 @@ class GlobalVariablesServiceImpl implements GlobalVariablesService {
         mutable: options?.mutable ?? true,
         description: options?.description,
       });
-      yield* Ref.set(this.variables, newVars);
-    }.bind(this));
+      yield* Ref.set(self.variables, newVars);
+    });
   }
 
   registerAll(
     variables: Record<string, VariableFactory>,
     options?: { mutable?: boolean }
   ): Effect.Effect<void> {
+    const self = this;
     return Effect.gen(function* () {
       for (const [name, factory] of Object.entries(variables)) {
-        yield* this.register(name, factory, options);
+        yield* self.register(name, factory, options);
       }
-    }.bind(this));
+    });
   }
 
   get(name: string): Effect.Effect<VariableValue> {
+    const self = this;
     return Effect.gen(function* () {
-      const overrides = yield* Ref.get(this.overrides);
+      const overrides = yield* Ref.get(self.overrides);
       const override = overrides.get(name);
 
       if (override) {
         return override.value;
       }
 
-      const vars = yield* Ref.get(this.variables);
+      const vars = yield* Ref.get(self.variables);
       const variable = vars.get(name);
 
       if (!variable) {
@@ -149,25 +152,27 @@ class GlobalVariablesServiceImpl implements GlobalVariablesService {
       }
 
       return yield* variable.factory();
-    }.bind(this));
+    }).pipe(Effect.orDie);
   }
 
   getAll(): Effect.Effect<Record<string, VariableValue>> {
+    const self = this;
     return Effect.gen(function* () {
-      const vars = yield* Ref.get(this.variables);
+      const vars = yield* Ref.get(self.variables);
       const result: Record<string, VariableValue> = {};
 
       for (const [name] of vars) {
-        result[name] = yield* this.get(name);
+        result[name] = yield* self.get(name);
       }
 
       return result;
-    }.bind(this));
+    });
   }
 
   set(name: string, value: VariableValue): Effect.Effect<void> {
+    const self = this;
     return Effect.gen(function* () {
-      const vars = yield* Ref.get(this.variables);
+      const vars = yield* Ref.get(self.variables);
       const variable = vars.get(name);
 
       if (!variable) {
@@ -178,44 +183,48 @@ class GlobalVariablesServiceImpl implements GlobalVariablesService {
         return yield* Effect.fail(new Error(`Variable "${name}" is not mutable`));
       }
 
-      const overrides = yield* Ref.get(this.overrides);
+      const overrides = yield* Ref.get(self.overrides);
       const newOverrides = new Map(overrides);
       newOverrides.set(name, {
         value,
         overridden: true,
         lastUpdated: new Date(),
       });
-      yield* Ref.set(this.overrides, newOverrides);
-    }.bind(this));
+      yield* Ref.set(self.overrides, newOverrides);
+    }).pipe(Effect.orDie);
   }
 
   reset(name: string): Effect.Effect<void> {
+    const self = this;
     return Effect.gen(function* () {
-      const overrides = yield* Ref.get(this.overrides);
+      const overrides = yield* Ref.get(self.overrides);
       const newOverrides = new Map(overrides);
       newOverrides.delete(name);
-      yield* Ref.set(this.overrides, newOverrides);
-    }.bind(this));
+      yield* Ref.set(self.overrides, newOverrides);
+    });
   }
 
   resetAll(): Effect.Effect<void> {
+    const self = this;
     return Effect.gen(function* () {
-      yield* Ref.set(this.overrides, new Map());
-    }.bind(this));
+      yield* Ref.set(self.overrides, new Map());
+    });
   }
 
   has(name: string): Effect.Effect<boolean> {
+    const self = this;
     return Effect.gen(function* () {
-      const vars = yield* Ref.get(this.variables);
+      const vars = yield* Ref.get(self.variables);
       return vars.has(name);
-    }.bind(this));
+    });
   }
 
   list(): Effect.Effect<string[]> {
+    const self = this;
     return Effect.gen(function* () {
-      const vars = yield* Ref.get(this.variables);
+      const vars = yield* Ref.get(self.variables);
       return Array.from(vars.keys());
-    }.bind(this));
+    });
   }
 
   getMetadata(name: string): Effect.Effect<{
@@ -224,15 +233,16 @@ class GlobalVariablesServiceImpl implements GlobalVariablesService {
     description?: string;
     overridden: boolean;
   }> {
+    const self = this;
     return Effect.gen(function* () {
-      const vars = yield* Ref.get(this.variables);
+      const vars = yield* Ref.get(self.variables);
       const variable = vars.get(name);
 
       if (!variable) {
         return yield* Effect.fail(new Error(`Variable "${name}" not found`));
       }
 
-      const overrides = yield* Ref.get(this.overrides);
+      const overrides = yield* Ref.get(self.overrides);
       const overridden = overrides.has(name);
 
       return {
@@ -241,7 +251,7 @@ class GlobalVariablesServiceImpl implements GlobalVariablesService {
         description: variable.description,
         overridden,
       };
-    }.bind(this));
+    }).pipe(Effect.orDie);
   }
 }
 
