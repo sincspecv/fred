@@ -203,7 +203,12 @@ class ContextStorageServiceImpl implements ContextStorageService {
       self.applyCaps(context);
       context.metadata.updatedAt = new Date();
       yield* self.storage.set(conversationId, context);
-    });
+    }).pipe(
+      Effect.mapError((e) => new ContextStorageError({
+        operation: 'addMessage',
+        cause: e,
+      }))
+    );
   }
 
   addMessages(
@@ -220,7 +225,12 @@ class ContextStorageServiceImpl implements ContextStorageService {
       self.applyCaps(context);
       context.metadata.updatedAt = new Date();
       yield* self.storage.set(conversationId, context);
-    });
+    }).pipe(
+      Effect.mapError((e) => new ContextStorageError({
+        operation: 'addMessages',
+        cause: e,
+      }))
+    );
   }
 
   getHistory(conversationId: string): Effect.Effect<Prompt.MessageEncoded[]> {
@@ -228,7 +238,7 @@ class ContextStorageServiceImpl implements ContextStorageService {
     return Effect.gen(function* () {
       const context = yield* self.getContext(conversationId);
       return normalizeMessages(context.messages);
-    });
+    }).pipe(Effect.orDie);
   }
 
   updateMetadata(
@@ -244,7 +254,12 @@ class ContextStorageServiceImpl implements ContextStorageService {
         updatedAt: new Date(),
       };
       yield* self.storage.set(conversationId, context);
-    });
+    }).pipe(
+      Effect.mapError((e) => new ContextStorageError({
+        operation: 'updateMetadata',
+        cause: e,
+      }))
+    );
   }
 
   clearContext(conversationId: string): Effect.Effect<void> {
@@ -285,7 +300,12 @@ class ContextStorageServiceImpl implements ContextStorageService {
       context.metadata.updatedAt = new Date();
       self.applyCaps(context);
       yield* self.storage.set(conversationId, context);
-    });
+    }).pipe(
+      Effect.mapError((e) => new ContextStorageError({
+        operation: 'setContextPolicy',
+        cause: e,
+      }))
+    );
   }
 
   private applyCaps(context: ConversationContext): void {
