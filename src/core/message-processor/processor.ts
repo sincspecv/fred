@@ -80,7 +80,7 @@ export class MessageProcessor {
     try {
       // If MessageRouter is configured, use rule-based routing
       if (messageRouter) {
-        const decision = await messageRouter.route(message, {});
+        const decision = await Effect.runPromise(messageRouter.route(message, {}));
 
         if (routingSpan) {
           routingSpan.setAttributes({
@@ -215,7 +215,11 @@ export class MessageProcessor {
           }
         } else {
           // No pipeline match, try intent matching
-          const match = await intentMatcher.matchIntent(message, semanticMatcher);
+          const match = await Effect.runPromise(
+            intentMatcher.matchIntent(message, semanticMatcher).pipe(
+              Effect.catchTag('IntentMatchError', () => Effect.succeed(null))
+            )
+          );
 
           if (match) {
             if (routingSpan) {
@@ -1063,10 +1067,10 @@ export class MessageProcessor {
       throw new Error('Conversation ID is required for this request');
     }
 
-    const modelMessages: Prompt.MessageEncoded[] = messages.map((message) => ({
-      role: message.role as Prompt.MessageEncoded['role'],
+    const modelMessages = messages.map((message) => ({
+      role: message.role,
       content: message.content,
-    }));
+    })) as Prompt.MessageEncoded[];
 
     // Extract the last user message
     const lastUserMessage = modelMessages[modelMessages.length - 1];
