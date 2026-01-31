@@ -127,9 +127,10 @@ class ProviderRegistryServiceImpl implements ProviderRegistryService {
     return Effect.gen(function* () {
       const providers = yield* Ref.get(self.providers);
       const newProviders = new Map(providers);
-      newProviders.set(definition.id, definition);
+      // Store with lowercase keys for case-insensitive lookup
+      newProviders.set(definition.id.toLowerCase(), definition);
       for (const alias of definition.aliases) {
-        newProviders.set(alias, definition);
+        newProviders.set(alias.toLowerCase(), definition);
       }
       yield* Ref.set(self.providers, newProviders);
     });
