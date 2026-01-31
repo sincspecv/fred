@@ -331,17 +331,16 @@ class AgentServiceImpl implements AgentService {
         }
       }
 
-      // Try regex match using Effect.try for proper error handling
+      // Try regex match using Effect.try with catchAll for proper error handling
       for (const agent of agentsWithUtterances) {
         const utterances = agent.config.utterances!;
         for (const utterance of utterances) {
-          const regexResult = yield* Effect.try({
-            try: () => {
-              const regex = new RegExp(utterance, 'i');
-              return regex.test(message);
-            },
-            catch: () => false // Invalid regex, treat as no match
-          });
+          const regexResult = yield* Effect.try(() => {
+            const regex = new RegExp(utterance, 'i');
+            return regex.test(message);
+          }).pipe(
+            Effect.catchAll(() => Effect.succeed(false)) // Invalid regex, treat as no match
+          );
           if (regexResult) {
             return {
               agentId: agent.id,

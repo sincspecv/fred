@@ -62,7 +62,8 @@ export interface MultiStepConfig {
   toolkit?: any;
   toolHandlers?: Map<string, (args: Record<string, any>) => Promise<any> | any>;
   maxSteps: number;
-  toolChoice?: 'auto' | 'required' | { name: string };
+  // Accept any tool choice format - internal handling casts appropriately
+  toolChoice?: 'auto' | 'required' | 'none' | { name: string } | { type: 'tool'; toolName: string };
   temperature?: number;
 }
 

@@ -62,11 +62,12 @@ export interface AgentInstance {
   id: string;
   config: AgentConfig;
   processMessage: (message: string, messages?: AgentMessage[]) => Promise<AgentResponse>;
+  // Stream has error and requirements channels - actual types vary by implementation
   streamMessage?: (
     message: string,
     messages?: AgentMessage[],
     options?: { threadId?: string }
-  ) => Stream.Stream<StreamEvent>;
+  ) => Stream.Stream<StreamEvent, unknown, any>;
 }
 
 /**

@@ -186,7 +186,7 @@ export class AgentFactory {
       message: string,
       messages?: AgentMessage[],
       options?: { threadId?: string }
-    ) => Stream.Stream<StreamEvent>;
+    ) => Stream.Stream<StreamEvent, unknown, any>;
   }> {
     const resolvedSystemMessage = config.systemMessage ?? this.defaultSystemMessage ?? '';
 
@@ -273,7 +273,10 @@ export class AgentFactory {
 
         const toolDefinition = toolDefinitions.get(toolId);
         const executor = execute ?? toolDefinition?.execute;
-        const validatedExecute = toolDefinition && executor ? wrapToolExecution(toolDefinition, executor) : executor;
+        // Cast toolDefinition to satisfy wrapToolExecution type requirements
+        const validatedExecute = toolDefinition && executor
+          ? wrapToolExecution(toolDefinition as any, executor)
+          : executor;
 
         return Effect.tryPromise({
           try: async () => {
@@ -502,20 +505,25 @@ export class AgentFactory {
         const maxSteps = Math.min(config.maxSteps ?? 3, 3);
 
         const prompt = Prompt.make(promptMessages);
-        const program = LanguageModel.generateText({
+        // Cast options via unknown to satisfy TypeScript - the runtime types are correct
+        const generateOptions = {
           prompt,
           toolkit,
           maxSteps,
           toolChoice: config.toolChoice,
           temperature: config.temperature,
-        });
+        } as unknown as Parameters<typeof LanguageModel.generateText>[0];
+        const program = LanguageModel.generateText(generateOptions);
 
-        const result = await Effect.runPromise(
-          program.pipe(Effect.provide(fullLayer))
-        );
+        // Provide layer and cast to never requirements for runPromise compatibility
+        const providedProgram = Effect.provide(
+          program as Effect.Effect<any, any, any>,
+          fullLayer as any
+        ) as Effect.Effect<any, any, never>;
+        const result = await Effect.runPromise(providedProgram);
 
         // Extract tool calls from result
-        const allToolCalls = (result.toolCalls ?? []).map(tc => ({
+        const allToolCalls = (result.toolCalls ?? []).map((tc: any) => ({
           toolId: tc.name,
           args: tc.params as Record<string, any>,
           result: undefined, // @effect/ai doesn't expose results in the response
@@ -528,7 +536,7 @@ export class AgentFactory {
         };
 
         // Check for handoff
-        const handoffCall = allToolCalls.find((call) => call.toolId === 'handoff_to_agent');
+        const handoffCall = allToolCalls.find((call: any) => call.toolId === 'handoff_to_agent');
         if (handoffCall && handoffCall.result && typeof handoffCall.result === 'object' && 'type' in handoffCall.result) {
           return {
             content: result.text,
@@ -568,7 +576,7 @@ export class AgentFactory {
       message: string,
       previousMessages: AgentMessage[] = [],
       options?: { threadId?: string }
-    ): Stream.Stream<StreamEvent> => {
+    ): Stream.Stream<StreamEvent, unknown, any> => {
       const startedAt = Date.now();
       const runId = `run_${startedAt}_${Math.random().toString(36).slice(2, 8)}`;
       const messageId = `msg_${startedAt}_${Math.random().toString(36).slice(2, 6)}`;
