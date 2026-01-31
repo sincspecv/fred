@@ -104,7 +104,7 @@ export function resolveTemplateAsync(
           }
           return { name, value: undefined, found: false };
         }
-      })
+      }).pipe(Effect.orDie)
     );
 
     const results = yield* Effect.all(variableEffects, { concurrency: 'unbounded' });
