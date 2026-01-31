@@ -22,6 +22,7 @@ import { Tracer } from './core/tracing';
 import { NoOpTracer } from './core/tracing/noop-tracer';
 import { Effect, Runtime, Layer, Exit } from 'effect';
 import type { StreamEvent } from './core/stream/events';
+import type { StreamResult } from './core/stream/result';
 import { MessageRouter } from './core/routing/router';
 import { RoutingConfig, RoutingDecision } from './core/routing/types';
 import { WorkflowManager } from './core/workflow/manager';
@@ -447,7 +448,7 @@ export class Fred implements FredLike {
     return this.messageProcessor.processMessage(message, options);
   }
 
-  streamMessage(message: string, options?: ProcessingOptions): AsyncIterable<StreamEvent> {
+  streamMessage(message: string, options?: ProcessingOptions): StreamResult {
     return this.messageProcessor.streamMessage(message, options);
   }
 
@@ -568,6 +569,9 @@ export class Fred implements FredLike {
 
 // Re-export all types and classes
 export * from './exports';
+
+// Re-export StreamResult types
+export type { StreamResult, TokenUsage, StreamStatus, ToolCallInfo } from './core/stream/result';
 
 // Re-export Effect services for advanced users
 export {
