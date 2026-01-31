@@ -1,9 +1,11 @@
-export {
+export type {
   ProviderConfig,
   ProviderConfigInput,
   ProviderDefinition,
   ProviderModelDefaults,
   ProviderRegistration,
+} from './provider';
+export {
   ProviderService,
   ProviderService as ProviderServiceTag,
 } from './provider';

@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect';
-import type { LanguageModel } from '@effect/ai';
+import type * as AiModel from '@effect/ai/Model';
 import { ProviderDefinition, ProviderConfig, ProviderModelDefaults } from './provider';
 import { EffectProviderFactory, createProviderDefinition } from './base';
 import { loadProviderPack } from './loader';
@@ -44,7 +44,8 @@ export class ProviderRegistry {
     providerId: string,
     modelId?: string,
     overrides?: ProviderModelDefaults
-  ): Effect.Effect<LanguageModel, Error> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Effect.Effect<AiModel.Model<any, any, any>, Error> {
     const definition = this.providers.get(providerId.toLowerCase());
 
     if (!definition) {
@@ -98,11 +99,13 @@ export class ProviderRegistry {
   /**
    * Get merged Effect Layer for all providers.
    */
-  getLayer(): Layer.Layer<never, Error> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getLayer(): Layer.Layer<any, any, any> {
     const definitions = Array.from(new Set(this.providers.values()));
     return definitions.reduce(
       (acc, definition) => Layer.merge(acc, definition.layer),
-      Layer.empty
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Layer.empty as unknown as Layer.Layer<any, any, any>
     );
   }
 

@@ -1,8 +1,8 @@
 import { Context, Effect, Layer, Ref } from 'effect';
-import type { LanguageModel } from '@effect/ai';
+import type * as AiModel from '@effect/ai/Model';
 import type { ProviderDefinition, ProviderConfig, ProviderModelDefaults } from './provider';
 import type { EffectProviderFactory } from './base';
-import { ProviderNotFoundError, ProviderRegistrationError, ProviderModelError, ProviderPackLoadError } from './errors';
+import { ProviderNotFoundError, ProviderRegistrationError, ProviderModelError } from './errors';
 import { loadProviderPackEffect } from './loader';
 import { createProviderDefinitionEffect } from './base';
 
@@ -33,7 +33,8 @@ export interface ProviderRegistryService {
     providerId: string,
     modelId?: string,
     overrides?: ProviderModelDefaults
-  ): Effect.Effect<LanguageModel, ProviderNotFoundError | ProviderModelError>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Effect.Effect<AiModel.Model<any, any, any>, ProviderNotFoundError | ProviderModelError>;
 
   /**
    * List unique provider IDs (not aliases)
@@ -58,7 +59,8 @@ export interface ProviderRegistryService {
   /**
    * Get merged Effect Layer for all providers
    */
-  getLayer(): Effect.Effect<Layer.Layer<never, Error>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getLayer(): Effect.Effect<Layer.Layer<any, any, any>>;
 
   /**
    * Mark registry as initialized (after startup loading)
@@ -130,7 +132,8 @@ class ProviderRegistryServiceImpl implements ProviderRegistryService {
     providerId: string,
     modelId?: string,
     overrides?: ProviderModelDefaults
-  ): Effect.Effect<LanguageModel, ProviderNotFoundError | ProviderModelError> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Effect.Effect<AiModel.Model<any, any, any>, ProviderNotFoundError | ProviderModelError> {
     const self = this;
     return Effect.gen(function* () {
       const providers = yield* Ref.get(self.providers);
@@ -209,13 +212,15 @@ class ProviderRegistryServiceImpl implements ProviderRegistryService {
     });
   }
 
-  getLayer(): Effect.Effect<Layer.Layer<never, Error>> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getLayer(): Effect.Effect<Layer.Layer<any, any, any>> {
     const self = this;
     return Effect.gen(function* () {
       const definitions = yield* self.getDefinitions();
       return definitions.reduce(
         (acc, definition) => Layer.merge(acc, definition.layer),
-        Layer.empty as Layer.Layer<never, Error>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        Layer.empty as unknown as Layer.Layer<any, any, any>
       );
     });
   }

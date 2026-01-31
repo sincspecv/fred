@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from 'effect';
-import type { LanguageModel } from '@effect/ai';
+import type * as AiModel from '@effect/ai/Model';
 
 export type ProviderAlias = string;
 
@@ -29,8 +29,10 @@ export interface ProviderDefinition {
   id: string;
   aliases: ProviderAlias[];
   config: ProviderConfig;
-  getModel: (modelId: string, options?: ProviderModelDefaults) => Effect.Effect<LanguageModel, Error>;
-  layer: Layer.Layer<never, Error>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getModel: (modelId: string, options?: ProviderModelDefaults) => Effect.Effect<AiModel.Model<any, any, any>, Error>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  layer: Layer.Layer<any, any, any>;
 }
 
 export interface ProviderConfigInput {
@@ -43,6 +45,7 @@ export interface ProviderConfigInput {
 export const ProviderService = Context.GenericTag<ProviderService>('Fred.ProviderService');
 
 export interface ProviderService {
-  getModel: (providerId: string, modelId?: string, overrides?: ProviderModelDefaults) => Effect.Effect<LanguageModel, Error>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getModel: (providerId: string, modelId?: string, overrides?: ProviderModelDefaults) => Effect.Effect<AiModel.Model<any, any, any>, Error>;
   listProviders: () => string[];
 }

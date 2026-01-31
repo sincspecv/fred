@@ -89,11 +89,13 @@ function findClosestMatch(input: string, candidates: string[]): string | undefin
  * @returns Object with layer, getModel, and listProviders
  */
 export function buildProviderService(definitions: ProviderDefinition[]): {
-  layer: Layer.Layer<never, Error>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  layer: Layer.Layer<any, any, any>;
   getModel: (
     providerId: string,
     modelId?: string,
     overrides?: ProviderModelDefaults
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ) => Effect.Effect<any, Error | ProviderNotFoundError>;
   listProviders: () => string[];
 } {
@@ -105,9 +107,11 @@ export function buildProviderService(definitions: ProviderDefinition[]): {
     }
   }
 
-  const layer = definitions.reduce(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const layer = definitions.reduce<Layer.Layer<any, any, any>>(
     (acc, definition) => Layer.merge(acc, definition.layer),
-    Layer.empty
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Layer.empty as unknown as Layer.Layer<any, any, any>
   );
 
   const listProviders = () =>

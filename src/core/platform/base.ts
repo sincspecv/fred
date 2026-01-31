@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect';
-import type { LanguageModel } from '@effect/ai';
+import type * as AiModel from '@effect/ai/Model';
 import { ProviderConfig, ProviderDefinition, ProviderModelDefaults } from './provider';
 import { validatePackExports, isProviderFactory } from './pack-schema';
 import { ProviderPackLoadError, ProviderRegistrationError } from './errors';
@@ -12,8 +12,10 @@ export interface EffectProviderFactory {
   id: string;
   aliases?: string[];
   load: (config: ProviderConfig) => Promise<{
-    layer: Layer.Layer<never, Error>;
-    getModel: (modelId: string, options?: ProviderModelDefaults) => Effect.Effect<LanguageModel, Error>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    layer: Layer.Layer<any, any, any>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    getModel: (modelId: string, options?: ProviderModelDefaults) => Effect.Effect<AiModel.Model<any, any, any>, Error>;
   }>;
 }
 
@@ -63,7 +65,8 @@ export async function createProviderDefinition(
     : markValidated(validatePackExports(factory, factory.id ?? 'unknown'));
 
   // Wrap load() call in try/catch to provide helpful error context
-  let loadResult: { layer: Layer.Layer<never, Error>; getModel: EffectProviderFactory['load'] extends (config: ProviderConfig) => Promise<infer R> ? R extends { getModel: infer G } ? G : never : never };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let loadResult: { layer: Layer.Layer<any, any, any>; getModel: EffectProviderFactory['load'] extends (config: ProviderConfig) => Promise<infer R> ? R extends { getModel: infer G } ? G : never : never };
 
   try {
     loadResult = await validatedFactory.load(config);
