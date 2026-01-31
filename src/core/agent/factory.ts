@@ -224,33 +224,26 @@ export class AgentFactory {
     );
 
     for (const tool of tools) {
+      // Ensure tool has a schema with all required properties
+      // Use type assertion since we're assigning compatible schema types
       if (!tool.schema) {
-        tool.schema = {
-          input: Schema.Struct({}),
-          success: Schema.Unknown,
-          failure: Schema.Never,
+        (tool as any).schema = {
+          input: Schema.Struct({}) as any,
+          success: Schema.Unknown as any,
+          failure: Schema.Never as any,
         };
-      }
-
-      if (!tool.schema.input) {
-        tool.schema = {
-          ...tool.schema,
-          input: Schema.Struct({}),
-        };
-      }
-
-      if (!tool.schema.success) {
-        tool.schema = {
-          ...tool.schema,
-          success: Schema.Unknown,
-        };
-      }
-
-      if (!tool.schema.failure) {
-        tool.schema = {
-          ...tool.schema,
-          failure: Schema.Never,
-        };
+      } else {
+        // Fill in missing schema properties with defaults
+        const schema = tool.schema as any;
+        if (!schema.input) {
+          schema.input = Schema.Struct({}) as any;
+        }
+        if (!schema.success) {
+          schema.success = Schema.Unknown as any;
+        }
+        if (!schema.failure) {
+          schema.failure = Schema.Never as any;
+        }
       }
     }
 
@@ -353,12 +346,19 @@ export class AgentFactory {
     };
 
     for (const toolDef of tools) {
+      // Type-assert input as Struct (Fred convention: all tool inputs are Structs)
+      // Use any cast since Schema types don't overlap sufficiently for direct assertion
+      const inputSchema = toolDef.schema?.input as any;
+      const inputFields = inputSchema && 'fields' in inputSchema
+        ? inputSchema.fields
+        : {};
+
       effectTools.push(
         Tool.make(toolDef.id, {
           description: toolDef.description,
-          parameters: toolDef.schema?.input ? toolDef.schema.input.fields : {},
-          success: toolDef.schema?.success,
-          failure: toolDef.schema?.failure,
+          parameters: inputFields,
+          success: (toolDef.schema?.success ?? Schema.Unknown) as Schema.Schema.Any,
+          failure: (toolDef.schema?.failure ?? Schema.Never) as Schema.Schema.All,
         })
       );
     }
@@ -390,12 +390,19 @@ export class AgentFactory {
             }
             toolExecutors.set(fredTool.id, fredTool.execute);
             toolDefinitions.set(fredTool.id, fredTool);
+            // Type-assert input as Struct (Fred convention: all tool inputs are Structs)
+            // Use any cast since Schema types don't overlap sufficiently for direct assertion
+            const mcpInputSchema = fredTool.schema?.input as any;
+            const mcpInputFields = mcpInputSchema && 'fields' in mcpInputSchema
+              ? mcpInputSchema.fields
+              : {};
+
             effectTools.push(
               Tool.make(fredTool.id, {
                 description: fredTool.description,
-                parameters: fredTool.schema?.input ? fredTool.schema.input.fields : {},
-                success: fredTool.schema?.success,
-                failure: fredTool.schema?.failure,
+                parameters: mcpInputFields,
+                success: (fredTool.schema?.success ?? Schema.Unknown) as Schema.Schema.Any,
+                failure: (fredTool.schema?.failure ?? Schema.Never) as Schema.Schema.All,
               })
             );
           }
@@ -412,7 +419,7 @@ export class AgentFactory {
     );
 
     const toolLayer = toolkit
-      ? toolkit.toLayer(toolHandlers)
+      ? toolkit.toLayer(toolHandlers as any)
       : Layer.empty;
 
     // Create set of available tool names for history filtering
@@ -726,6 +733,13 @@ export class AgentFactory {
       const runEndEvent = Stream.fromEffect(
         Effect.sync(() => {
           const finishedAt = Date.now();
+
+          // Check for handoff tool result
+          const handoffCall = streamState.toolCalls.find(
+            (call) => call.toolId === 'handoff_to_agent' && call.result && typeof call.result === 'object'
+          );
+          const handoff = handoffCall?.result as { type: 'handoff'; agentId: string; message: string; context?: Record<string, unknown> } | undefined;
+
           return {
             type: 'run-end' as const,
             sequence: streamState.sequence,
@@ -737,6 +751,7 @@ export class AgentFactory {
             result: {
               content: streamState.text,
               toolCalls: streamState.toolCalls,
+              handoff: handoff?.type === 'handoff' ? handoff : undefined,
               usage: streamState.usage,
             },
           };
