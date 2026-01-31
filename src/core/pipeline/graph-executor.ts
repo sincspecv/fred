@@ -28,7 +28,7 @@ import type { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
 import type { HookEvent, StepHookEventData, PipelineHookEventData } from '../hooks/types';
 import type { AgentManager } from '../agent/manager';
-import { isHandoffRequest, type HandoffRequest } from './handoff-tool';
+import { isHandoffSignal, type HandoffSignal } from './handoff-tool';
 import { prepareHandoffContext } from './handoff';
 import type { AgentResponse } from '../agent/agent';
 import { Effect } from 'effect';
@@ -600,7 +600,7 @@ async function executeNode(
       const agentResult = await agent.processMessage(context.input, context.history);
 
       // Check if agent returned a handoff request
-      if (isHandoffRequest(agentResult)) {
+      if (isHandoffSignal(agentResult)) {
         result = await handleHandoff(
           agentResult,
           node.agentId,
@@ -688,7 +688,7 @@ async function executeNode(
  * @returns Result from target agent (or handoff chain)
  */
 async function handleHandoff(
-  handoffRequest: HandoffRequest,
+  handoffRequest: HandoffSignal,
   sourceAgentId: string,
   context: PipelineContext,
   config: GraphWorkflowConfig,
@@ -790,7 +790,7 @@ async function handleHandoff(
     );
 
     // Check if target agent also requested a handoff (chaining)
-    if (isHandoffRequest(targetResult)) {
+    if (isHandoffSignal(targetResult)) {
       handoffSpan?.setAttributes({
         'handoff.chained': true,
         'handoff.nextTarget': targetResult.targetAgent,

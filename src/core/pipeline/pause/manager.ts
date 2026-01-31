@@ -11,6 +11,14 @@ import type { PendingPause } from './types';
 import { withFredSpan } from '../../observability/otel';
 
 /**
+ * Fire-and-forget tracing helper.
+ * Casts Effect to remove requirements channel for fire-and-forget observability.
+ */
+function trace(effect: Effect.Effect<void, unknown, unknown>): void {
+  Effect.runFork(effect as Effect.Effect<void, never, never>);
+}
+
+/**
  * Options for creating a PauseManager.
  */
 export interface PauseManagerOptions {
@@ -48,13 +56,11 @@ export class PauseManager {
    */
   async getPendingPause(runId: string): Promise<PendingPause | null> {
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('pause.get_pending', {
         runId,
       })(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     try {
       const checkpoint = await this.checkpointManager.getLatestCheckpoint(runId);
@@ -87,27 +93,23 @@ export class PauseManager {
       };
 
       // Annotate with pause details
-      Effect.runPromise(
+      trace(
         withFredSpan('pause.get_pending.found', {
           runId,
           workflowId: checkpoint.pipelineId,
           stepName: checkpoint.stepName,
           pauseId: runId, // pauseId is the runId for pending pauses
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
 
       return pendingPause;
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('pause.get_pending.error', {
           runId,
           'error.message': error instanceof Error ? error.message : String(error),
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }
@@ -121,11 +123,9 @@ export class PauseManager {
    */
   async listPendingPauses(): Promise<PendingPause[]> {
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('pause.list_pending', {})(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     try {
       // Use the storage's listByStatus method
@@ -163,23 +163,19 @@ export class PauseManager {
       pendingPauses.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
       // Annotate with count
-      Effect.runPromise(
+      trace(
         withFredSpan('pause.list_pending.complete', {
           'pause.count': pendingPauses.length,
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
 
       return pendingPauses;
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('pause.list_pending.error', {
           'error.message': error instanceof Error ? error.message : String(error),
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }
@@ -192,38 +188,32 @@ export class PauseManager {
    */
   async hasPendingPause(runId: string): Promise<boolean> {
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('pause.has_pending', {
         runId,
       })(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     try {
       const pause = await this.getPendingPause(runId);
       const hasPause = pause !== null;
 
       // Annotate result
-      Effect.runPromise(
+      trace(
         withFredSpan('pause.has_pending.result', {
           runId,
           'pause.has_pending': hasPause,
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
 
       return hasPause;
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('pause.has_pending.error', {
           runId,
           'error.message': error instanceof Error ? error.message : String(error),
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }

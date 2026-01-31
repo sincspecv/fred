@@ -7,6 +7,7 @@
 
 import { Context, Effect, Layer } from 'effect';
 import { CheckpointService } from '../checkpoint/service';
+import type { CheckpointStorage } from '../checkpoint/types';
 import type { PendingPause } from './types';
 import {
   PauseNotFoundError,
@@ -157,11 +158,11 @@ class PauseServiceImpl implements PauseService {
    * Effect-wrapped storage listByStatus operation
    */
   private listByStatusEffect(
-    storage: { listByStatus: (status: string) => Promise<any[]> },
+    storage: CheckpointStorage,
     status: string
   ): Effect.Effect<any[]> {
     return Effect.async<any[]>((resume) => {
-      storage.listByStatus(status)
+      storage.listByStatus(status as any)
         .then((checkpoints) => resume(Effect.succeed(checkpoints)))
         .catch((error) => resume(Effect.die(error)));
     });

@@ -455,13 +455,10 @@ class PipelineServiceImpl implements PipelineService {
       // Regex match using Effect.try for proper error handling
       for (const pipeline of pipelinesWithUtterances) {
         for (const utterance of pipeline.config.utterances!) {
-          const matched = yield* Effect.try({
-            try: () => {
-              const regex = new RegExp(utterance, 'i');
-              return regex.test(message);
-            },
-            catch: () => false // Invalid regex, treat as no match
-          });
+          const matched = yield* Effect.try(() => {
+            const regex = new RegExp(utterance, 'i');
+            return regex.test(message);
+          }).pipe(Effect.catchAll(() => Effect.succeed(false))); // Invalid regex, treat as no match
           if (matched) {
             return { pipelineId: pipeline.id, confidence: 0.8, matchType: 'regex' as const };
           }

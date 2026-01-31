@@ -27,7 +27,7 @@ export interface HandoffToolConfig {
 /**
  * Handoff request signal returned by the tool
  */
-export interface HandoffRequest {
+export interface HandoffSignal {
   type: 'handoff_request';
   targetAgent: string;
   reason?: string;
@@ -43,9 +43,9 @@ export interface HandoffError {
 }
 
 /**
- * Type guard to check if a value is a HandoffRequest
+ * Type guard to check if a value is a HandoffSignal
  */
-export function isHandoffRequest(value: unknown): value is HandoffRequest {
+export function isHandoffSignal(value: unknown): value is HandoffSignal {
   if (!value || typeof value !== 'object') {
     return false;
   }
@@ -87,8 +87,8 @@ export function createHandoffTool(config: HandoffToolConfig): Tool {
     id: 'handoff',
     name: 'handoff',
     description: 'Hand off this conversation to another agent. Use when the user request is better handled by a different specialist.',
-    execute: async (args: { targetAgent: string; reason?: string }): Promise<HandoffRequest | HandoffError> => {
-      const { targetAgent, reason } = args;
+    execute: async (args: unknown): Promise<unknown> => {
+      const { targetAgent, reason } = args as { targetAgent: string; reason?: string };
 
       // Validate target against allowed targets
       const validation = validateHandoffTarget(
