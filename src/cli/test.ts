@@ -196,7 +196,7 @@ export async function handleTestCommand(
     // Handle record command
     if (options.record) {
       // Load Fred instance
-      let fred: Fred;
+      let fred!: Fred;
       if (options.configFile) {
         fred = new Fred();
         await fred.initializeFromConfig(options.configFile);
@@ -227,7 +227,7 @@ export async function handleTestCommand(
     // Handle update command
     if (options.update) {
       // Load Fred instance
-      let fred: Fred;
+      let fred!: Fred;
       if (options.configFile) {
         fred = new Fred();
         await fred.initializeFromConfig(options.configFile);
