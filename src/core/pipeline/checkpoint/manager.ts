@@ -14,6 +14,14 @@ import type { PauseMetadata } from '../pause/types';
 import { withFredSpan } from '../../observability/otel';
 
 /**
+ * Fire-and-forget tracing helper.
+ * Casts Effect to remove requirements channel for fire-and-forget observability.
+ */
+function trace(effect: Effect.Effect<void, unknown, unknown>): void {
+  Effect.runFork(effect as Effect.Effect<void, never, never>);
+}
+
+/**
  * Options for creating a CheckpointManager.
  */
 export interface CheckpointManagerOptions {
@@ -89,7 +97,7 @@ export class CheckpointManager {
     const expiresAt = options.expiresAt ?? new Date(now.getTime() + this.defaultTtlMs);
 
     // Fire-and-forget span annotation to avoid blocking
-    Effect.runPromise(
+    trace(
       withFredSpan('checkpoint.save', {
         runId: options.runId,
         workflowId: options.pipelineId,
@@ -97,9 +105,7 @@ export class CheckpointManager {
         'checkpoint.step': options.step,
         'checkpoint.status': options.status,
       })(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     try {
       await this.storage.save({
@@ -116,16 +122,14 @@ export class CheckpointManager {
       });
     } catch (error) {
       // Annotate span with error status
-      Effect.runPromise(
+      trace(
         withFredSpan('checkpoint.save.error', {
           runId: options.runId,
           workflowId: options.pipelineId,
           stepName: options.stepName,
           'error.message': error instanceof Error ? error.message : String(error),
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }
@@ -138,25 +142,21 @@ export class CheckpointManager {
    */
   async getLatestCheckpoint(runId: string): Promise<Checkpoint | null> {
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('checkpoint.get_latest', {
         runId,
       })(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     try {
       return await this.storage.getLatest(runId);
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('checkpoint.get_latest.error', {
           runId,
           'error.message': error instanceof Error ? error.message : String(error),
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }
@@ -181,28 +181,24 @@ export class CheckpointManager {
    */
   async updateStatus(runId: string, step: number, status: CheckpointStatus): Promise<void> {
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('checkpoint.update_status', {
         runId,
         'checkpoint.step': step,
         'checkpoint.status': status,
       })(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     try {
       await this.storage.updateStatus(runId, step, status);
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('checkpoint.update_status.error', {
           runId,
           'checkpoint.step': step,
           'error.message': error instanceof Error ? error.message : String(error),
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }
@@ -237,25 +233,21 @@ export class CheckpointManager {
    */
   async deleteRun(runId: string): Promise<void> {
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('checkpoint.delete_run', {
         runId,
       })(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     try {
       await this.storage.deleteRun(runId);
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('checkpoint.delete_run.error', {
           runId,
           'error.message': error instanceof Error ? error.message : String(error),
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }
@@ -268,33 +260,27 @@ export class CheckpointManager {
    */
   async deleteExpired(): Promise<number> {
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('checkpoint.delete_expired', {})(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     try {
       const count = await this.storage.deleteExpired();
 
       // Log cleanup count
-      Effect.runPromise(
+      trace(
         withFredSpan('checkpoint.delete_expired.complete', {
           'checkpoint.deleted_count': count,
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
 
       return count;
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('checkpoint.delete_expired.error', {
           'error.message': error instanceof Error ? error.message : String(error),
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }

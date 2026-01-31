@@ -14,6 +14,14 @@ import { SQLITE_CHECKPOINTS_DDL } from './schema';
 import { withFredSpan } from '../../observability/otel';
 
 /**
+ * Fire-and-forget tracing helper.
+ * Casts Effect to remove requirements channel for fire-and-forget observability.
+ */
+function trace(effect: Effect.Effect<void, unknown, unknown>): void {
+  Effect.runFork(effect as Effect.Effect<void, never, never>);
+}
+
+/**
  * Configuration options for SqliteCheckpointStorage.
  */
 export interface SqliteCheckpointStorageOptions {
@@ -119,7 +127,7 @@ export class SqliteCheckpointStorage implements CheckpointStorage {
     this.ensureInitialized();
 
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('checkpoint.storage.sqlite.save', {
         runId: checkpoint.runId,
         workflowId: checkpoint.pipelineId,
@@ -128,9 +136,7 @@ export class SqliteCheckpointStorage implements CheckpointStorage {
         'checkpoint.status': checkpoint.status,
         'storage.type': 'sqlite',
       })(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     const stmt = this.db.prepare(`
       INSERT INTO checkpoints (run_id, pipeline_id, step, status, context, created_at, updated_at, expires_at, step_name, pause_metadata)
@@ -158,16 +164,14 @@ export class SqliteCheckpointStorage implements CheckpointStorage {
         checkpoint.pauseMetadata ? serializePauseMetadata(checkpoint.pauseMetadata) : null
       );
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('checkpoint.storage.sqlite.save.error', {
           runId: checkpoint.runId,
           workflowId: checkpoint.pipelineId,
           'error.message': error instanceof Error ? error.message : String(error),
           'storage.type': 'sqlite',
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }
@@ -180,14 +184,12 @@ export class SqliteCheckpointStorage implements CheckpointStorage {
     this.ensureInitialized();
 
     // Fire-and-forget span annotation
-    Effect.runPromise(
+    trace(
       withFredSpan('checkpoint.storage.sqlite.get_latest', {
         runId,
         'storage.type': 'sqlite',
       })(Effect.void)
-    ).catch(() => {
-      // Ignore tracing errors
-    });
+    );
 
     const stmt = this.db.prepare(`
       SELECT run_id, pipeline_id, step, status, context, created_at, updated_at, expires_at, step_name, pause_metadata
@@ -212,29 +214,25 @@ export class SqliteCheckpointStorage implements CheckpointStorage {
           err instanceof Error ? err.message : String(err)
         );
 
-        Effect.runPromise(
+        trace(
           withFredSpan('checkpoint.storage.sqlite.get_latest.deserialize_error', {
             runId,
             'checkpoint.step': row.step,
             'error.message': err instanceof Error ? err.message : String(err),
             'storage.type': 'sqlite',
           })(Effect.void)
-        ).catch(() => {
-          // Ignore tracing errors
-        });
+        );
 
         return null;
       }
     } catch (error) {
-      Effect.runPromise(
+      trace(
         withFredSpan('checkpoint.storage.sqlite.get_latest.error', {
           runId,
           'error.message': error instanceof Error ? error.message : String(error),
           'storage.type': 'sqlite',
         })(Effect.void)
-      ).catch(() => {
-        // Ignore tracing errors
-      });
+      );
       throw error;
     }
   }
