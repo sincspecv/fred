@@ -1,5 +1,5 @@
 import type { Prompt } from '@effect/ai';
-import type { Prompt } from '@effect/ai';
+
 /**
  * Conversation context metadata
  */
