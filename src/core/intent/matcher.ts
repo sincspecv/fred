@@ -64,7 +64,9 @@ export class IntentMatcher {
               return regex.test(message) ? { intent, utterance } : null;
             },
             catch: () => null // Invalid regex, skip silently
-          });
+          }).pipe(
+            Effect.catchAll(() => Effect.succeed(null)) // Convert failures to null success
+          );
 
           if (regexResult) {
             return {
