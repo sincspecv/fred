@@ -906,9 +906,8 @@ export class PipelineManager {
           // Store response (will be overwritten by next agent, final one is what we return)
           finalResponse = response;
 
-          // If agent requests a handoff, we should handle it
-          // For now, we'll continue through the pipeline
-          // TODO: Consider if handoffs should break the pipeline or be handled differently
+          // Note: Sequential pipelines ignore handoff requests since execution order is predetermined.
+          // For dynamic agent delegation, use graph workflows with the handoff tool.
         } catch (error) {
           if (agentSpan && error instanceof Error) {
             agentSpan.recordException(error);

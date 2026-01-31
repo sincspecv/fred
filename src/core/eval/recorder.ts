@@ -1,9 +1,9 @@
 import { Tracer, Span } from '../tracing';
 import { NoOpTracer } from '../tracing/noop-tracer';
-import { 
-  GoldenTrace, 
-  GoldenTraceSpan, 
-  GoldenTraceToolCall, 
+import {
+  GoldenTrace,
+  GoldenTraceSpan,
+  GoldenTraceToolCall,
   GoldenTraceHandoff,
   GOLDEN_TRACE_VERSION,
   generateGoldenTraceFilename,
@@ -12,6 +12,7 @@ import { AgentResponse } from '../agent/agent';
 import { writeFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
+import packageJson from '../../../package.json';
 
 /**
  * Recorder for capturing traces into golden trace format
@@ -233,7 +234,7 @@ export class GoldenTraceRecorder {
       version: GOLDEN_TRACE_VERSION,
       metadata: {
         timestamp: this.startTime,
-        fredVersion: '0.1.2', // TODO: Get from package.json
+        fredVersion: packageJson.version,
         config: {},
         environment: {
           nodeVersion: typeof process !== 'undefined' ? process.version : undefined,
