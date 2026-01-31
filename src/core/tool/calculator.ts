@@ -1,39 +1,41 @@
 import { Schema } from 'effect';
-import { Tool } from './tool';
+import type { Tool, ToolSchemaDefinition } from './tool';
 
 /**
  * Built-in calculator tool for performing basic arithmetic operations
- * 
+ *
  * This tool safely evaluates mathematical expressions with support for:
  * - Basic arithmetic: addition (+), subtraction (-), multiplication (*), division (/)
  * - Parentheses for grouping
  * - Decimal numbers
  * - Negative numbers
- * 
+ *
  * Security: Uses a safe evaluation approach that only allows mathematical operations
  * and prevents code injection by restricting to numeric operations only.
  */
-export function createCalculatorTool(): Tool {
+export function createCalculatorTool(): Tool<{ expression: string }, string, never> {
+  const schema: ToolSchemaDefinition<{ expression: string }, string, never> = {
+    input: Schema.Struct({
+      expression: Schema.String,
+    }),
+    success: Schema.String,
+    metadata: {
+      type: 'object',
+      properties: {
+        expression: {
+          type: 'string',
+          description: 'The mathematical expression to evaluate. Can include numbers, operators (+, -, *, /), parentheses, and decimal points. Example: "2 + 3 * 4" or "(10 - 5) / 2.5"',
+        },
+      },
+      required: ['expression'],
+    },
+  };
+
   return {
     id: 'calculator',
     name: 'calculator',
     description: 'Perform basic arithmetic operations. Use this tool to calculate mathematical expressions. Supports addition (+), subtraction (-), multiplication (*), division (/), parentheses for grouping, and decimal numbers. Example: "2 + 3 * 4" or "(10 - 5) / 2".',
-    schema: {
-      input: Schema.Struct({
-        expression: Schema.String,
-      }),
-      success: Schema.String,
-      metadata: {
-        type: 'object',
-        properties: {
-          expression: {
-            type: 'string',
-            description: 'The mathematical expression to evaluate. Can include numbers, operators (+, -, *, /), parentheses, and decimal points. Example: "2 + 3 * 4" or "(10 - 5) / 2.5"',
-          },
-        },
-        required: ['expression'],
-      },
-    },
+    schema,
     execute: async (args): Promise<string> => {
       const { expression } = args;
 

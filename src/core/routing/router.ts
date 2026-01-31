@@ -64,7 +64,7 @@ export class MessageRouter {
   route(
     message: string,
     metadata: Record<string, unknown> = {}
-  ): Effect.Effect<RoutingDecision> {
+  ): Effect.Effect<RoutingDecision, NoAgentsAvailableError> {
     const self = this;
     return Effect.gen(function* () {
       const startTime = Date.now();
@@ -74,7 +74,6 @@ export class MessageRouter {
         yield* Effect.tryPromise({
           try: () => self.hookManager!.executeHooks('beforeRouting', {
             type: 'beforeRouting',
-            timestamp: startTime,
             data: { message, metadata },
           }),
           catch: (error) => {
@@ -125,7 +124,6 @@ export class MessageRouter {
         yield* Effect.tryPromise({
           try: () => self.hookManager!.executeHooks('afterRouting', {
             type: 'afterRouting',
-            timestamp: Date.now(),
             data: { message, metadata, decision, durationMs },
           }),
           catch: (error) => {
@@ -151,7 +149,7 @@ export class MessageRouter {
   testRoute(
     message: string,
     metadata: Record<string, unknown> = {}
-  ): Effect.Effect<RoutingDecision> {
+  ): Effect.Effect<RoutingDecision, NoAgentsAvailableError> {
     const self = this;
     return Effect.gen(function* () {
       const match = yield* self.findBestMatch(message, metadata);

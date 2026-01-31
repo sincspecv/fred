@@ -8,7 +8,7 @@
  */
 
 import { Effect, LogLevel } from 'effect';
-import type { Span } from '../tracing/types';
+import type { Span } from '../tracing/tracer';
 
 /**
  * Error classification categories for Fred errors.
@@ -211,7 +211,8 @@ export function attachErrorToSpan(
 
   // Add custom metadata if provided
   if (options?.metadata) {
-    span.setAttributes(options.metadata);
+    // Cast to span-compatible attribute type
+    span.setAttributes(options.metadata as Record<string, string | number | boolean | string[] | number[] | boolean[]>);
   }
 
   // Record exception event (includes stack trace)

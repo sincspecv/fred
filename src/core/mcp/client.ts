@@ -72,7 +72,7 @@ export class MCPClientImpl implements MCPClient {
       }
     }
     
-    this.transport.onServerRequest('roots/list', async () => {
+    this.transport.onServerRequest?.('roots/list', async () => {
       // Return root directories for filesystem server
       return { roots: this.rootDirectories.map(path => ({ uri: `file://${path}` })) };
     });

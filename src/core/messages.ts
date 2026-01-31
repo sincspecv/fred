@@ -51,7 +51,6 @@ export const normalizeMessage = (message: PromptMessage | LegacyMessage): Prompt
 
   const role = message.role as PromptMessage['role'];
   const content = message.content as unknown;
-  const options = isRecord(message.options) ? message.options : undefined;
 
   if (role === 'assistant') {
     const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : undefined;
@@ -76,8 +75,7 @@ export const normalizeMessage = (message: PromptMessage | LegacyMessage): Prompt
       return {
         role: 'assistant',
         content: parts,
-        ...(options ? { options } : {}),
-      };
+      } as PromptMessage;
     }
   }
 
@@ -86,8 +84,7 @@ export const normalizeMessage = (message: PromptMessage | LegacyMessage): Prompt
       return {
         role: 'tool',
         content: content as Prompt.ToolMessagePartEncoded[],
-        ...(options ? { options } : {}),
-      };
+      } as PromptMessage;
     }
     const toolCallId = typeof message.toolCallId === 'string'
       ? message.toolCallId
@@ -105,23 +102,20 @@ export const normalizeMessage = (message: PromptMessage | LegacyMessage): Prompt
           providerExecuted: false,
         }),
       ],
-      ...(options ? { options } : {}),
-    };
+    } as PromptMessage;
   }
 
   if (Array.isArray(content) && content.every(isPromptPart)) {
     return {
       role,
-      content: content as Prompt.MessageEncoded['content'],
-      ...(options ? { options } : {}),
-    };
+      content: content as unknown as PromptMessage['content'],
+    } as PromptMessage;
   }
 
   return {
     role,
     content: toTextContent(content),
-    ...(options ? { options } : {}),
-  };
+  } as PromptMessage;
 };
 
 export const normalizeMessages = (messages: Array<PromptMessage | LegacyMessage>): PromptMessage[] =>

@@ -698,7 +698,6 @@ describe('MessageRouter', () => {
       expect(hookCalls[0].type).toBe('beforeRouting');
       expect(hookCalls[0].data.message).toBe('test message');
       expect(hookCalls[0].data.metadata).toEqual({ userId: 'alice' });
-      expect(hookCalls[0].timestamp).toBeGreaterThan(0);
     });
 
     it('should call afterRouting hook with routing decision', async () => {

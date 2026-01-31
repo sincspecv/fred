@@ -9,7 +9,7 @@
  */
 
 import { Effect, Layer, Logger, LogLevel } from 'effect';
-import { NodeSdk, OtlpTracer } from '@effect/opentelemetry';
+import * as NodeSdk from '@effect/opentelemetry/NodeSdk';
 import { BatchSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
@@ -132,6 +132,13 @@ export function buildObservabilityLayers(config: ObservabilityConfig = {}): Obse
   // Build tracer layer
   let tracerLayer: Layer.Layer<never>;
 
+  // Build properly-typed resource object
+  const resourceConfig = {
+    serviceName: resource.serviceName,
+    serviceVersion: resource.serviceVersion,
+    attributes: cleanResource as Record<string, string | number | boolean | string[]>,
+  };
+
   if (config.otlp?.endpoint) {
     // OTLP exporter configured - use OTLP HTTP exporter
     const otlpExporter = new OTLPTraceExporter({
@@ -140,19 +147,19 @@ export function buildObservabilityLayers(config: ObservabilityConfig = {}): Obse
     });
 
     tracerLayer = NodeSdk.layer(() => ({
-      resource: cleanResource,
+      resource: resourceConfig,
       spanProcessor: new BatchSpanProcessor(otlpExporter),
-    }));
+    })) as Layer.Layer<never>;
   } else if (config.enableConsoleFallback ?? isDevelopment) {
     // No OTLP, but console fallback enabled (default in dev)
     tracerLayer = NodeSdk.layer(() => ({
-      resource: cleanResource,
+      resource: resourceConfig,
       spanProcessor: new BatchSpanProcessor(new ConsoleSpanExporter()),
-    }));
+    })) as Layer.Layer<never>;
   } else {
-    // No OTLP, no console fallback - use minimal layer that doesn't export
+    // No OTLP, no console fallback - use empty layer
     // Spans are still created but not exported (low overhead)
-    tracerLayer = Layer.succeed(NodeSdk.NodeSdk, {} as any);
+    tracerLayer = NodeSdk.layerEmpty as Layer.Layer<never>;
   }
 
   // Build logger layer with minimum log level

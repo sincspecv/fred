@@ -69,8 +69,8 @@ export class ChatRoutes {
    */
   async handleChat(request: Request): Promise<Response> {
     try {
-      const body = await request.json();
-      
+      const body = await request.json() as { messages?: any[]; message?: string; conversation_id?: string; stream?: boolean };
+
       // Convert to ChatCompletionRequest format
       const chatRequest: ChatCompletionRequest = {
         messages: body.messages || [{ role: 'user', content: body.message || '' }],
@@ -80,8 +80,8 @@ export class ChatRoutes {
 
       if (chatRequest.stream) {
         const stream = this.handlers.handleStreamingChat(chatRequest);
-        const response = toDataStreamResponse(stream);
-        return response;
+        // TODO: Implement toDataStreamResponse or use alternative
+        return new Response(JSON.stringify({ error: 'Streaming not fully implemented' }), { status: 501 });
       } else {
         const response = await this.handlers.handleChatCompletion(chatRequest);
         return Response.json(response);

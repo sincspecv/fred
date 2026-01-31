@@ -47,7 +47,7 @@ const defaultMetadata: ToolValidationMetadata = {
 function stripUnknownFields<Input>(input: Input, schema: Schema.Schema<Input>): Input {
   const decoded = Schema.decodeUnknownSync(schema, { errors: 'all' })(input);
   const encoded = Schema.encodeSync(schema)(decoded);
-  return Schema.decodeUnknownSync(schema, { errors: 'all', excessProperty: 'ignore' })(encoded);
+  return Schema.decodeUnknownSync(schema, { errors: 'all', onExcessProperty: 'ignore' })(encoded);
 }
 
 function detectCoercions<Input>(input: Input, decoded: Input): ToolValidationMetadata {
@@ -164,12 +164,12 @@ export function validateToolSchema(tool: Tool): void {
 }
 
 export function wrapToolExecution<Input, Output>(
-  tool: Tool<Input, Output>,
+  tool: Tool<Input, Output, unknown>,
   execute: (args: Input) => Promise<Output> | Output
 ): (args: unknown) => Promise<Output> {
   return async (args: unknown) => {
-    const decoded = getDecodedToolInputs(tool, args);
-    const result = await execute(decoded.output);
+    const decoded = getDecodedToolInputs(tool as Tool<Input, unknown, unknown>, args);
+    const result = await execute(decoded.output as Input);
     // Return just the result - @effect/ai expects the raw output matching the tool's success schema
     return result;
   };

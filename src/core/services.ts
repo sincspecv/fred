@@ -14,6 +14,7 @@ import { ProviderRegistryService, ProviderRegistryServiceLive } from './platform
 import { ContextStorageService, ContextStorageServiceLive } from './context/service';
 import { AgentService, AgentServiceLive } from './agent/service';
 import { CheckpointService } from './pipeline/checkpoint/service';
+import { CheckpointNotFoundError } from './pipeline/errors';
 import { PauseService, PauseServiceLive } from './pipeline/pause/service';
 import { PipelineService, PipelineServiceLive } from './pipeline/service';
 import { MessageProcessorService, MessageProcessorServiceLive } from './message-processor/service';
@@ -23,7 +24,11 @@ import { MessageRouterService, MessageRouterServiceFromInstance } from './routin
 import type { CheckpointStorage, Checkpoint, CheckpointStatus } from './pipeline/checkpoint/types';
 
 /**
- * All Fred service types combined
+ * Core Fred service types included in FredLayers.
+ *
+ * Note: IntentMatcherService, IntentRouterService, and MessageRouterService
+ * are optional services that wrap non-Effect classes. They can be added
+ * separately when needed using FromInstance factories.
  */
 export type FredServices =
   | ToolRegistryService
@@ -34,10 +39,7 @@ export type FredServices =
   | CheckpointService
   | PauseService
   | PipelineService
-  | MessageProcessorService
-  | IntentMatcherService
-  | IntentRouterService
-  | MessageRouterService;
+  | MessageProcessorService;
 
 /**
  * Fred runtime type with all services
@@ -134,7 +136,7 @@ const CheckpointServiceLive = Layer.effect(
   CheckpointService,
   Effect.gen(function* () {
     const defaultTtlMs = yield* Ref.make(DEFAULT_TTL_MS);
-    return {
+    const service: CheckpointService = {
       generateRunId: () => Effect.sync(() => crypto.randomUUID()),
 
       saveCheckpoint: (options) =>
@@ -162,7 +164,7 @@ const CheckpointServiceLive = Layer.effect(
         Effect.gen(function* () {
           const checkpoint = yield* Effect.promise(() => inMemoryStorage.getLatest(runId));
           if (!checkpoint) {
-            return yield* Effect.fail({ _tag: 'CheckpointNotFoundError' as const, runId });
+            return yield* Effect.fail(new CheckpointNotFoundError({ runId }));
           }
           return checkpoint;
         }),
@@ -171,7 +173,7 @@ const CheckpointServiceLive = Layer.effect(
         Effect.gen(function* () {
           const checkpoint = yield* Effect.promise(() => inMemoryStorage.get(runId, step));
           if (!checkpoint) {
-            return yield* Effect.fail({ _tag: 'CheckpointNotFoundError' as const, runId, step });
+            return yield* Effect.fail(new CheckpointNotFoundError({ runId, step }));
           }
           return checkpoint;
         }),
@@ -190,7 +192,8 @@ const CheckpointServiceLive = Layer.effect(
       deleteExpired: () => Effect.promise(() => inMemoryStorage.deleteExpired()),
 
       getStorage: () => Effect.succeed(inMemoryStorage),
-    } as CheckpointService;
+    };
+    return service;
   })
 );
 

@@ -106,10 +106,17 @@ export class IntentMatcher {
   }
 
   /**
-   * Get all registered intents
+   * Get all registered intents (Effect-based)
    */
-  getIntents(): Effect.Effect<Intent[]> {
+  getIntentsEffect(): Effect.Effect<Intent[]> {
     return Ref.get(this.intents);
+  }
+
+  /**
+   * Get all registered intents (synchronous for backward compatibility)
+   */
+  getIntents(): Intent[] {
+    return Effect.runSync(Ref.get(this.intents));
   }
 
   /**
@@ -119,6 +126,15 @@ export class IntentMatcher {
     return Ref.set(this.intents, []);
   }
 }
+
+/**
+ * Create a new IntentMatcher instance with synchronous initialization.
+ * For use in constructor contexts where Effect cannot be awaited.
+ */
+export const createIntentMatcherSync = (): IntentMatcher => {
+  const intentsRef = Ref.unsafeMake<Intent[]>([]);
+  return new IntentMatcher(intentsRef);
+};
 
 /**
  * Create a new IntentMatcher instance with Effect-managed state.

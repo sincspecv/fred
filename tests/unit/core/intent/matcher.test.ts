@@ -27,7 +27,7 @@ describe('IntentMatcher', () => {
 
       await Effect.runPromise(matcher.registerIntents(intents));
 
-      const registered = await Effect.runPromise(matcher.getIntents());
+      const registered = await Effect.runPromise(matcher.getIntentsEffect());
       expect(registered).toHaveLength(2);
       expect(registered).toContain(intents[0]);
       expect(registered).toContain(intents[1]);
@@ -39,11 +39,11 @@ describe('IntentMatcher', () => {
       const intents2 = [createIntent('intent-2', ['goodbye'])];
 
       await Effect.runPromise(matcher.registerIntents(intents1));
-      let registered = await Effect.runPromise(matcher.getIntents());
+      let registered = await Effect.runPromise(matcher.getIntentsEffect());
       expect(registered).toHaveLength(1);
 
       await Effect.runPromise(matcher.registerIntents(intents2));
-      registered = await Effect.runPromise(matcher.getIntents());
+      registered = await Effect.runPromise(matcher.getIntentsEffect());
       expect(registered).toHaveLength(1);
       expect(registered[0].id).toBe('intent-2');
     });
@@ -58,7 +58,7 @@ describe('IntentMatcher', () => {
       ];
 
       await Effect.runPromise(matcher.registerIntents(intents));
-      const retrieved = await Effect.runPromise(matcher.getIntents());
+      const retrieved = await Effect.runPromise(matcher.getIntentsEffect());
 
       expect(retrieved).toHaveLength(2);
       expect(retrieved).toEqual(intents);
@@ -66,7 +66,7 @@ describe('IntentMatcher', () => {
 
     test('should return empty array when no intents registered', async () => {
       const matcher = await createTestMatcher();
-      const intents = await Effect.runPromise(matcher.getIntents());
+      const intents = await Effect.runPromise(matcher.getIntentsEffect());
       expect(intents).toHaveLength(0);
     });
   });
@@ -80,11 +80,11 @@ describe('IntentMatcher', () => {
       ];
 
       await Effect.runPromise(matcher.registerIntents(intents));
-      let registered = await Effect.runPromise(matcher.getIntents());
+      let registered = await Effect.runPromise(matcher.getIntentsEffect());
       expect(registered).toHaveLength(2);
 
       await Effect.runPromise(matcher.clear());
-      registered = await Effect.runPromise(matcher.getIntents());
+      registered = await Effect.runPromise(matcher.getIntentsEffect());
       expect(registered).toHaveLength(0);
     });
   });

@@ -951,9 +951,9 @@ export class MessageProcessor {
             })
           );
 
-          return streamWithHandoffContinuation;
+          return streamWithHandoffContinuation as Stream.Stream<StreamEvent, Error, never>;
         })
-      );
+      ) as Stream.Stream<StreamEvent, Error>;
     };
 
     const initEffect = Effect.gen(function* () {

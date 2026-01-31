@@ -51,22 +51,22 @@ export async function runAssertions(
 
       switch (assertion.type) {
         case 'toolCalled':
-          result = assertToolCalled(trace, ...assertion.args);
+          result = assertToolCalled(trace, assertion.args[0] as string, assertion.args[1] as Record<string, any> | undefined);
           break;
         case 'agentSelected':
-          result = assertAgentSelected(trace, ...assertion.args);
+          result = assertAgentSelected(trace, assertion.args[0] as string);
           break;
         case 'handoff':
-          result = assertHandoff(trace, ...assertion.args);
+          result = assertHandoff(trace, assertion.args[0] as string | undefined, assertion.args[1] as string | undefined);
           break;
         case 'responseContains':
-          result = assertResponseContains(trace, ...assertion.args);
+          result = assertResponseContains(trace, assertion.args[0] as string, assertion.args[1] as boolean | undefined);
           break;
         case 'span':
-          result = assertSpan(trace, ...assertion.args);
+          result = assertSpan(trace, assertion.args[0] as string, assertion.args[1] as Record<string, any> | undefined);
           break;
         case 'timing':
-          result = assertTiming(trace, ...assertion.args);
+          result = assertTiming(trace, assertion.args[0] as string, assertion.args[1] as number);
           break;
         case 'schema':
           result = assertSchema(trace);

@@ -166,6 +166,35 @@ export class IntentRouter {
 }
 
 /**
+ * Create an IntentRouter synchronously for backward compatibility.
+ * Uses AgentManager adapter instead of AgentService.
+ */
+export const createIntentRouterSync = (
+  agentManager: { getAgent: (id: string) => any }
+): IntentRouter => {
+  const handlersRef = Ref.unsafeMake(new Map<string, ActionHandler>());
+  const defaultAgentIdRef = Ref.unsafeMake<string | undefined>(undefined);
+
+  // Create a minimal AgentService adapter from AgentManager
+  const agentServiceAdapter = {
+    getAgentOptional: (id: string) => Effect.sync(() => agentManager.getAgent(id)),
+    // Add other methods as needed
+  } as unknown as typeof AgentService.Service;
+
+  const router = new IntentRouter(handlersRef, defaultAgentIdRef, agentServiceAdapter);
+
+  // Register default action handlers synchronously
+  Effect.runSync(router.registerActionHandler('agent', (action, payload) =>
+    router['handleAgentAction'](action, payload)
+  ));
+  Effect.runSync(router.registerActionHandler('function', (action, payload) =>
+    router['handleFunctionAction'](action, payload)
+  ));
+
+  return router;
+};
+
+/**
  * Create an IntentRouter with default action handlers registered
  */
 export const createIntentRouter = (

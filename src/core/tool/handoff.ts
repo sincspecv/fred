@@ -1,8 +1,16 @@
 import { Schema } from 'effect';
-import { Tool } from './tool';
+import type { Tool, ToolSchemaDefinition } from './tool';
 import { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
-import { getActiveSpan } from '../tracing/context';
+
+/**
+ * Handoff input type
+ */
+interface HandoffInput {
+  agentId: string;
+  message?: string;
+  context?: Record<string, unknown>;
+}
 
 /**
  * Handoff result indicating a message should be transferred to another agent
@@ -24,43 +32,45 @@ export function createHandoffTool(
   getAgent: (id: string) => any,
   getAvailableAgents: () => string[],
   tracer?: Tracer
-): Tool {
+): Tool<HandoffInput, HandoffResult, never> {
+  const schema: ToolSchemaDefinition<HandoffInput, HandoffResult, never> = {
+    input: Schema.Struct({
+      agentId: Schema.String,
+      message: Schema.optional(Schema.String),
+      context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+    }) as Schema.Schema<HandoffInput>,
+    success: Schema.Struct({
+      type: Schema.Literal('handoff'),
+      agentId: Schema.String,
+      message: Schema.String,
+      context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+    }) as Schema.Schema<HandoffResult>,
+    metadata: {
+      type: 'object',
+      properties: {
+        agentId: {
+          type: 'string',
+          description: 'The ID of the agent to transfer the conversation to',
+        },
+        message: {
+          type: 'string',
+          description: 'The message to send to the target agent. If not provided, the original user message will be used.',
+        },
+        context: {
+          type: 'object',
+          description: 'Optional context to pass to the target agent',
+        },
+      },
+      required: ['agentId'],
+    },
+  };
+
   return {
     id: 'handoff_to_agent',
     name: 'handoff_to_agent',
     description: 'Transfer the conversation to another agent. Use this when the current agent cannot handle the request and another agent would be better suited.',
-    schema: {
-      input: Schema.Struct({
-        agentId: Schema.String,
-        message: Schema.optional(Schema.String),
-        context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-      }),
-      success: Schema.Struct({
-        type: Schema.Literal('handoff'),
-        agentId: Schema.String,
-        message: Schema.String,
-        context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-      }),
-      metadata: {
-        type: 'object',
-        properties: {
-          agentId: {
-            type: 'string',
-            description: 'The ID of the agent to transfer the conversation to',
-          },
-          message: {
-            type: 'string',
-            description: 'The message to send to the target agent. If not provided, the original user message will be used.',
-          },
-          context: {
-            type: 'object',
-            description: 'Optional context to pass to the target agent',
-          },
-        },
-        required: ['agentId'],
-      },
-    },
-    execute: async (args) => {
+    schema,
+    execute: async (args: HandoffInput): Promise<HandoffResult> => {
       const { agentId, message, context } = args;
 
       // Create span for handoff tool execution

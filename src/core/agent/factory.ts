@@ -1,12 +1,13 @@
 import { Effect, Layer, Stream } from 'effect';
 import * as Schema from 'effect/Schema';
-import { Tool, Toolkit, LanguageModel, Prompt } from '@effect/ai';
+import { Tool as EffectTool, Toolkit, LanguageModel, Prompt } from '@effect/ai';
 import { BunContext } from '@effect/platform-bun';
 import { FetchHttpClient } from '@effect/platform';
 import type { StreamEvent } from '../stream/events';
 import { AgentConfig, AgentMessage, AgentResponse } from './agent';
 import { ProviderDefinition } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
+import type { Tool as FredTool } from '../tool/tool';
 import { createHandoffTool, HandoffResult } from '../tool/handoff';
 import { loadPromptFile } from '../../utils/prompt-loader';
 import { MCPClientImpl, convertMCPToolsToFredTools } from '../mcp';
@@ -215,7 +216,8 @@ export class AgentFactory {
         this.handoffHandler.getAvailableAgents,
         this.tracer
       );
-      tools.push(handoffTool);
+      // Cast to FredTool for array compatibility
+      tools.push(handoffTool as unknown as FredTool);
     }
 
     const toolDefinitions = new Map<string, (typeof tools)[number]>(tools.map((tool) => [tool.id, tool]));
@@ -247,7 +249,7 @@ export class AgentFactory {
       }
     }
 
-    const effectTools: Tool.Any[] = [];
+    const effectTools: EffectTool.Any[] = [];
     const buildToolHandler = (toolId: string, execute?: (args: Record<string, any>) => Promise<any> | any) => {
       return (input: unknown) => {
         const startTime = Date.now();
@@ -357,7 +359,7 @@ export class AgentFactory {
         : {};
 
       effectTools.push(
-        Tool.make(toolDef.id, {
+        EffectTool.make(toolDef.id, {
           description: toolDef.description,
           parameters: inputFields,
           success: (toolDef.schema?.success ?? Schema.Unknown) as Schema.Schema.Any,
@@ -401,7 +403,7 @@ export class AgentFactory {
               : {};
 
             effectTools.push(
-              Tool.make(fredTool.id, {
+              EffectTool.make(fredTool.id, {
                 description: fredTool.description,
                 parameters: mcpInputFields,
                 success: (fredTool.schema?.success ?? Schema.Unknown) as Schema.Schema.Any,

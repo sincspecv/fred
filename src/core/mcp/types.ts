@@ -192,29 +192,34 @@ export interface MCPTransportInterface {
    * Send a request and wait for response
    */
   sendRequest(request: MCPRequest): Promise<MCPResponse>;
-  
+
   /**
    * Send a notification (no response expected)
    */
   sendNotification(notification: MCPNotification): Promise<void>;
-  
+
   /**
    * Connect to the transport
    */
   connect(): Promise<void>;
-  
+
   /**
    * Disconnect from the transport
    */
   disconnect(): Promise<void>;
-  
+
   /**
    * Check if transport is connected
    */
   isConnected(): boolean;
-  
+
   /**
    * Set up notification handler
    */
   onNotification(handler: (notification: MCPNotification) => void): void;
+
+  /**
+   * Set up server request handler (for handling server-initiated requests like roots/list)
+   */
+  onServerRequest?(method: string, handler: (params?: Record<string, any>) => Promise<unknown>): void;
 }

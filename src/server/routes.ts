@@ -1,4 +1,4 @@
-import { ServerHandlers } from './handlers';
+import { ServerHandlers, MessageRequest } from './handlers';
 import { ChatRoutes } from './chat/routes';
 
 /**
@@ -26,7 +26,7 @@ export class Router {
   private setupRoutes(): void {
     // POST /message
     this.routes.set('POST /message', async (req) => {
-      const body = await req.json();
+      const body = await req.json() as MessageRequest;
       const response = await this.handlers.handleMessage(body);
       return Response.json(response);
     });

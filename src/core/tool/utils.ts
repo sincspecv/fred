@@ -1,14 +1,14 @@
-import { Tool } from './tool';
+import type { Tool } from './tool';
 import { wrapToolExecution } from './validation';
 
-export function normalizeToolDefinition(
-  toolDef: Tool,
-  executeFn: (args: Record<string, any>) => Promise<any> | any
-): Tool {
+export function normalizeToolDefinition<Input = unknown, Output = unknown>(
+  toolDef: Tool<Input, Output, unknown>,
+  executeFn: (args: Input) => Promise<Output> | Output
+): Tool<Input, Output, unknown> {
   const validatedExecute = wrapToolExecution(toolDef, executeFn);
 
   return {
     ...toolDef,
-    execute: validatedExecute,
+    execute: validatedExecute as (args: Input) => Promise<Output> | Output,
   };
 }

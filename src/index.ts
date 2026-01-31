@@ -1,6 +1,6 @@
 import { Intent } from './core/intent/intent';
-import { IntentMatcher } from './core/intent/matcher';
-import { IntentRouter } from './core/intent/router';
+import { IntentMatcher, createIntentMatcherSync } from './core/intent/matcher';
+import { IntentRouter, createIntentRouterSync } from './core/intent/router';
 import { AgentConfig, AgentInstance, AgentResponse, AgentMessage } from './core/agent/agent';
 import { AgentManager } from './core/agent/manager';
 import { PipelineConfig, PipelineInstance } from './core/pipeline';
@@ -118,8 +118,8 @@ export class Fred implements FredLike {
     this.tracer = tracer;
     this.providerRegistry = new ProviderRegistry();
     this.agentManager = new AgentManager(this.toolRegistry, tracer);
-    this.intentMatcher = new IntentMatcher();
-    this.intentRouter = new IntentRouter(this.agentManager);
+    this.intentMatcher = createIntentMatcherSync();
+    this.intentRouter = createIntentRouterSync(this.agentManager);
     this.contextManager = new ContextManager();
     this.pipelineManager = new PipelineManager(this.agentManager, tracer, this.contextManager);
     this.hookManager = new HookManager();
@@ -243,7 +243,8 @@ export class Fred implements FredLike {
    */
   private registerBuiltInTools(): void {
     const calculatorTool = createCalculatorTool();
-    this.toolRegistry.registerTool(calculatorTool);
+    // Cast to Tool for registry compatibility (registry uses Tool<unknown, unknown, unknown>)
+    this.toolRegistry.registerTool(calculatorTool as unknown as Tool);
   }
 
   /**

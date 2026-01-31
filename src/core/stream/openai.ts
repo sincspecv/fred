@@ -77,7 +77,7 @@ const mapUsage = (usage?: { inputTokens?: number; outputTokens?: number; totalTo
 export const toOpenAIStream = (
   events: Stream.Stream<StreamEvent>,
   options: OpenAIStreamOptions
-): Stream.Stream<OpenAIChunk> => {
+): Stream.Stream<OpenAIChunk, Error> => {
   const now = options.now ?? (() => Date.now());
   const created = Math.floor(now() / 1000);
   let chunkId = '';
@@ -86,7 +86,7 @@ export const toOpenAIStream = (
   let usage: OpenAIChatFinal['usage'];
 
   const withTimeout = options.timeoutMs
-    ? events.pipe(Stream.timeoutFail({ duration: options.timeoutMs, onTimeout: () => new Error('Stream timeout') }))
+    ? events.pipe(Stream.timeoutFail(() => new Error('Stream timeout'), options.timeoutMs))
     : events;
 
   const withCancellation = options.signal
@@ -112,7 +112,7 @@ export const toOpenAIStream = (
     : withTimeout;
 
   return withCancellation.pipe(
-    Stream.concatMap((event) => {
+    Stream.flatMap((event) => {
       if (!chunkId && event.runId) {
         chunkId = `chatcmpl-${event.runId}`;
       }
@@ -204,6 +204,6 @@ export const toOpenAIStream = (
           return Stream.empty;
       }
     }),
-    Stream.onInterrupt(() => Effect.sync(() => {}))
+    Stream.ensuring(Effect.sync(() => {}))
   );
 };

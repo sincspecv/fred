@@ -26,10 +26,10 @@ export class ChatHandlers {
   ): Promise<ChatCompletionResponse> {
     const conversationId = request.conversation_id || this.contextManager.generateConversationId();
     
-    const modelMessages: Prompt.MessageEncoded[] = request.messages.map((msg) => ({
+    const modelMessages = request.messages.map((msg) => ({
       role: msg.role as Prompt.MessageEncoded['role'],
       content: msg.content || '',
-    }));
+    })) as Prompt.MessageEncoded[];
     
     // Get conversation history
     const history = await this.contextManager.getHistory(conversationId);
@@ -96,10 +96,10 @@ export class ChatHandlers {
   ): AsyncGenerator<ChatCompletionChunk, void, unknown> {
     const conversationId = request.conversation_id || this.contextManager.generateConversationId();
     
-    const modelMessages: Prompt.MessageEncoded[] = request.messages.map((msg) => ({
+    const modelMessages = request.messages.map((msg) => ({
       role: msg.role as Prompt.MessageEncoded['role'],
       content: msg.content || '',
-    }));
+    })) as Prompt.MessageEncoded[];
     
     // Extract the last user message
     const lastUserMessage = modelMessages[modelMessages.length - 1];

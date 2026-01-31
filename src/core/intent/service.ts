@@ -59,7 +59,7 @@ class IntentMatcherServiceImpl implements IntentMatcherService {
   }
 
   getIntents(): Effect.Effect<Intent[]> {
-    return this.matcher.getIntents();
+    return this.matcher.getIntentsEffect();
   }
 
   clear(): Effect.Effect<void> {
