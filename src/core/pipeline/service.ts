@@ -35,7 +35,7 @@ export interface PipelineService {
   /**
    * Create a pipeline from configuration
    */
-  createPipeline(config: PipelineConfig): Effect.Effect<PipelineInstance, PipelineAlreadyExistsError>;
+  createPipeline(config: PipelineConfig): Effect.Effect<PipelineInstance, PipelineAlreadyExistsError | PipelineExecutionError>;
 
   /**
    * Get a pipeline by ID
@@ -104,7 +104,7 @@ export interface PipelineService {
   /**
    * Create a V2 pipeline from configuration
    */
-  createPipelineV2(config: PipelineConfigV2): Effect.Effect<void, PipelineAlreadyExistsError>;
+  createPipelineV2(config: PipelineConfigV2): Effect.Effect<void, PipelineAlreadyExistsError | PipelineExecutionError>;
 
   /**
    * Get a V2 pipeline by ID
@@ -219,17 +219,33 @@ class PipelineServiceImpl implements PipelineService {
   // V1 Pipeline Methods
   // ==========================================
 
-  createPipeline(config: PipelineConfig): Effect.Effect<PipelineInstance, PipelineAlreadyExistsError> {
+  createPipeline(config: PipelineConfig): Effect.Effect<PipelineInstance, PipelineAlreadyExistsError | PipelineExecutionError> {
     const self = this;
     return Effect.gen(function* () {
-      validateId(config.id, 'Pipeline ID');
+      // Validate ID using Effect.try
+      yield* Effect.try({
+        try: () => validateId(config.id, 'Pipeline ID'),
+        catch: (error) => new PipelineExecutionError({
+          pipelineId: config.id,
+          step: 0,
+          cause: error
+        })
+      });
 
       const pipelines = yield* Ref.get(self.pipelines);
       if (pipelines.has(config.id)) {
         return yield* Effect.fail(new PipelineAlreadyExistsError({ id: config.id }));
       }
 
-      validatePipelineAgentCount(config.agents.length);
+      // Validate agent count using Effect.try
+      yield* Effect.try({
+        try: () => validatePipelineAgentCount(config.agents.length),
+        catch: (error) => new PipelineExecutionError({
+          pipelineId: config.id,
+          step: 0,
+          cause: error
+        })
+      });
 
       // Validate agent references
       for (const agentRef of config.agents) {
@@ -356,17 +372,14 @@ class PipelineServiceImpl implements PipelineService {
           }))
         );
 
-        const response = yield* Effect.tryPromise({
-          try: () => agent.processMessage(
-            currentMessage,
-            options?.sequentialVisibility !== false ? currentHistory : []
-          ),
-          catch: (error) => new PipelineExecutionError({
-            pipelineId,
-            step: i,
-            cause: error
-          })
-        });
+        // Process message with proper Effect wrapping
+        const response = yield* self.processAgentMessage(
+          agent,
+          currentMessage,
+          options?.sequentialVisibility !== false ? currentHistory : [],
+          pipelineId,
+          i
+        );
 
         currentHistory.push({ role: 'user', content: currentMessage });
         if (response.content) {
@@ -385,6 +398,27 @@ class PipelineServiceImpl implements PipelineService {
       }
 
       return finalResponse;
+    });
+  }
+
+  /**
+   * Effect-wrapped agent message processing
+   */
+  private processAgentMessage(
+    agent: { processMessage: (message: string, history?: AgentMessage[]) => Promise<AgentResponse> },
+    message: string,
+    history: AgentMessage[],
+    pipelineId: string,
+    step: number
+  ): Effect.Effect<AgentResponse, PipelineExecutionError> {
+    return Effect.async<AgentResponse, PipelineExecutionError>((resume) => {
+      agent.processMessage(message, history)
+        .then((response) => resume(Effect.succeed(response)))
+        .catch((error) => resume(Effect.fail(new PipelineExecutionError({
+          pipelineId,
+          step,
+          cause: error
+        }))));
     });
   }
 
@@ -418,23 +452,29 @@ class PipelineServiceImpl implements PipelineService {
         }
       }
 
-      // Regex match
+      // Regex match using Effect.try for proper error handling
       for (const pipeline of pipelinesWithUtterances) {
         for (const utterance of pipeline.config.utterances!) {
-          try {
-            const regex = new RegExp(utterance, 'i');
-            if (regex.test(message)) {
-              return { pipelineId: pipeline.id, confidence: 0.8, matchType: 'regex' as const };
-            }
-          } catch { continue; }
+          const matched = yield* Effect.try({
+            try: () => {
+              const regex = new RegExp(utterance, 'i');
+              return regex.test(message);
+            },
+            catch: () => false // Invalid regex, treat as no match
+          });
+          if (matched) {
+            return { pipelineId: pipeline.id, confidence: 0.8, matchType: 'regex' as const };
+          }
         }
       }
 
       // Semantic match
       if (semanticMatcher) {
         for (const pipeline of pipelinesWithUtterances) {
-          const result = yield* Effect.promise(() =>
-            semanticMatcher(message, pipeline.config.utterances!)
+          const result = yield* self.runPipelineSemanticMatcher(
+            semanticMatcher,
+            message,
+            pipeline.config.utterances!
           );
           if (result.matched) {
             return { pipelineId: pipeline.id, confidence: result.confidence, matchType: 'semantic' as const };
@@ -446,14 +486,38 @@ class PipelineServiceImpl implements PipelineService {
     });
   }
 
+  /**
+   * Effect-wrapped semantic matcher for pipelines
+   */
+  private runPipelineSemanticMatcher(
+    matcher: (message: string, utterances: string[]) => Promise<{ matched: boolean; confidence: number; utterance?: string }>,
+    message: string,
+    utterances: string[]
+  ): Effect.Effect<{ matched: boolean; confidence: number; utterance?: string }> {
+    return Effect.async((resume) => {
+      matcher(message, utterances)
+        .then((result) => resume(Effect.succeed(result)))
+        .catch(() => resume(Effect.succeed({ matched: false, confidence: 0 }))); // Treat errors as no match
+    });
+  }
+
   // ==========================================
   // V2 Pipeline Methods (simplified implementation)
   // ==========================================
 
-  createPipelineV2(config: PipelineConfigV2): Effect.Effect<void, PipelineAlreadyExistsError> {
+  createPipelineV2(config: PipelineConfigV2): Effect.Effect<void, PipelineAlreadyExistsError | PipelineExecutionError> {
     const self = this;
     return Effect.gen(function* () {
-      validateId(config.id, 'Pipeline ID');
+      // Validate ID using Effect.try
+      yield* Effect.try({
+        try: () => validateId(config.id, 'Pipeline ID'),
+        catch: (error) => new PipelineExecutionError({
+          pipelineId: config.id,
+          step: 0,
+          cause: error
+        })
+      });
+
       const pipelines = yield* Ref.get(self.pipelinesV2);
       if (pipelines.has(config.id)) {
         return yield* Effect.fail(new PipelineAlreadyExistsError({ id: config.id }));
@@ -527,7 +591,14 @@ class PipelineServiceImpl implements PipelineService {
   registerGraphWorkflow(config: GraphWorkflowConfig): Effect.Effect<void, GraphValidationError> {
     const self = this;
     return Effect.gen(function* () {
-      validateId(config.id, 'Graph workflow ID');
+      // Validate ID using Effect.try
+      yield* Effect.try({
+        try: () => validateId(config.id, 'Graph workflow ID'),
+        catch: (error) => new GraphValidationError({
+          workflowId: config.id,
+          message: error instanceof Error ? error.message : String(error)
+        })
+      });
 
       const workflows = yield* Ref.get(self.graphWorkflows);
       if (workflows.has(config.id)) {
@@ -537,15 +608,14 @@ class PipelineServiceImpl implements PipelineService {
         }));
       }
 
-      // Validate graph structure
-      try {
-        validateGraphWorkflow(config);
-      } catch (error) {
-        return yield* Effect.fail(new GraphValidationError({
+      // Validate graph structure using Effect.try
+      yield* Effect.try({
+        try: () => validateGraphWorkflow(config),
+        catch: (error) => new GraphValidationError({
           workflowId: config.id,
           message: error instanceof Error ? error.message : String(error)
-        }));
-      }
+        })
+      });
 
       const newWorkflows = new Map(workflows);
       newWorkflows.set(config.id, config);

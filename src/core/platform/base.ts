@@ -2,7 +2,7 @@ import { Effect, Layer } from 'effect';
 import type { LanguageModel } from '@effect/ai';
 import { ProviderConfig, ProviderDefinition, ProviderModelDefaults } from './provider';
 import { validatePackExports, isProviderFactory } from './pack-schema';
-import { ProviderPackLoadError } from './errors';
+import { ProviderPackLoadError, ProviderRegistrationError } from './errors';
 
 // Re-export validation utilities for external use
 export { validatePackExports, isProviderFactory } from './pack-schema';
@@ -96,3 +96,57 @@ export async function createProviderDefinition(
     layer: loadResult.layer,
   };
 }
+
+/**
+ * Effect-based version of createProviderDefinition.
+ *
+ * Returns an Effect with proper error channel instead of throwing.
+ */
+export const createProviderDefinitionEffect = (
+  factory: EffectProviderFactory,
+  config: ProviderConfig
+): Effect.Effect<ProviderDefinition, ProviderRegistrationError> => {
+  // Validate factory structure
+  const validateFactory = Effect.try({
+    try: () => {
+      if (isAlreadyValidated(factory)) {
+        return factory;
+      }
+      return markValidated(validatePackExports(factory, factory.id ?? 'unknown'));
+    },
+    catch: (error) => new ProviderRegistrationError({
+      providerId: factory.id ?? 'unknown',
+      cause: error
+    })
+  });
+
+  return Effect.gen(function* () {
+    const validatedFactory = yield* validateFactory;
+
+    // Load the provider
+    const loadResult = yield* Effect.tryPromise({
+      try: () => validatedFactory.load(config),
+      catch: (error) => {
+        if (error instanceof ProviderPackLoadError) {
+          return new ProviderRegistrationError({
+            providerId: validatedFactory.id,
+            cause: error
+          });
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return new ProviderRegistrationError({
+          providerId: validatedFactory.id,
+          cause: new Error(`Provider load() failed: ${message}`)
+        });
+      }
+    });
+
+    return {
+      id: validatedFactory.id,
+      aliases: validatedFactory.aliases ?? [],
+      config,
+      getModel: loadResult.getModel,
+      layer: loadResult.layer,
+    };
+  });
+};

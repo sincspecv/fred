@@ -5,6 +5,18 @@ import { validateToolSchema } from './validation';
 import { normalizeToolDefinition } from './utils';
 
 /**
+ * Effect-wrapped tool schema validation
+ */
+const validateToolSchemaEffect = (tool: Tool): Effect.Effect<void, ToolValidationError> =>
+  Effect.try({
+    try: () => validateToolSchema(tool),
+    catch: (error) => new ToolValidationError({
+      id: tool.id,
+      message: error instanceof Error ? error.message : String(error)
+    })
+  });
+
+/**
  * ToolRegistryService interface for Effect-based tool management
  */
 export interface ToolRegistryService {
@@ -80,84 +92,81 @@ class ToolRegistryServiceImpl implements ToolRegistryService {
   constructor(private tools: Ref.Ref<Map<string, Tool>>) {}
 
   registerTool(tool: Tool): Effect.Effect<void, ToolAlreadyExistsError | ToolValidationError> {
+    const self = this;
     return Effect.gen(function* () {
-      const tools = yield* Ref.get(this.tools);
+      const tools = yield* Ref.get(self.tools);
 
       if (tools.has(tool.id)) {
         return yield* Effect.fail(new ToolAlreadyExistsError({ id: tool.id }));
       }
 
-      // Validate tool schema
-      try {
-        validateToolSchema(tool);
-      } catch (error) {
-        return yield* Effect.fail(new ToolValidationError({
-          id: tool.id,
-          message: error instanceof Error ? error.message : String(error)
-        }));
-      }
+      // Validate tool schema using Effect
+      yield* validateToolSchemaEffect(tool);
 
       const newTools = new Map(tools);
       newTools.set(tool.id, tool);
-      yield* Ref.set(this.tools, newTools);
-    }.bind(this));
+      yield* Ref.set(self.tools, newTools);
+    });
   }
 
   registerTools(tools: Tool[]): Effect.Effect<void, ToolAlreadyExistsError | ToolValidationError> {
+    const self = this;
     return Effect.gen(function* () {
       for (const tool of tools) {
-        yield* this.registerTool(tool);
+        yield* self.registerTool(tool);
       }
-    }.bind(this));
+    });
   }
 
   getTool(id: string): Effect.Effect<Tool, ToolNotFoundError> {
+    const self = this;
     return Effect.gen(function* () {
-      const tools = yield* Ref.get(this.tools);
+      const tools = yield* Ref.get(self.tools);
       const tool = tools.get(id);
       if (!tool) {
         return yield* Effect.fail(new ToolNotFoundError({ id }));
       }
       return tool;
-    }.bind(this));
+    });
   }
 
   getTools(ids: string[]): Effect.Effect<Tool[]> {
-    return Effect.gen(function* () {
-      const tools = yield* Ref.get(this.tools);
-      return ids.filter(id => tools.has(id)).map(id => tools.get(id)!);
-    }.bind(this));
+    const self = this;
+    return Ref.get(self.tools).pipe(
+      Effect.map((tools) => ids.filter(id => tools.has(id)).map(id => tools.get(id)!))
+    );
   }
 
   getMissingToolIds(ids: string[]): Effect.Effect<string[]> {
-    return Effect.gen(function* () {
-      const tools = yield* Ref.get(this.tools);
-      return ids.filter(id => !tools.has(id));
-    }.bind(this));
+    const self = this;
+    return Ref.get(self.tools).pipe(
+      Effect.map((tools) => ids.filter(id => !tools.has(id)))
+    );
   }
 
   getAllTools(): Effect.Effect<Tool[]> {
-    return Effect.gen(function* () {
-      const tools = yield* Ref.get(this.tools);
-      return Array.from(tools.values());
-    }.bind(this));
+    const self = this;
+    return Ref.get(self.tools).pipe(
+      Effect.map((tools) => Array.from(tools.values()))
+    );
   }
 
   hasTool(id: string): Effect.Effect<boolean> {
-    return Effect.gen(function* () {
-      const tools = yield* Ref.get(this.tools);
-      return tools.has(id);
-    }.bind(this));
+    const self = this;
+    return Ref.get(self.tools).pipe(
+      Effect.map((tools) => tools.has(id))
+    );
   }
 
   removeTool(id: string): Effect.Effect<boolean> {
+    const self = this;
     return Effect.gen(function* () {
-      const tools = yield* Ref.get(this.tools);
+      const tools = yield* Ref.get(self.tools);
       const newTools = new Map(tools);
       const result = newTools.delete(id);
-      yield* Ref.set(this.tools, newTools);
+      yield* Ref.set(self.tools, newTools);
       return result;
-    }.bind(this));
+    });
   }
 
   clear(): Effect.Effect<void> {
@@ -165,24 +174,23 @@ class ToolRegistryServiceImpl implements ToolRegistryService {
   }
 
   size(): Effect.Effect<number> {
-    return Effect.gen(function* () {
-      const tools = yield* Ref.get(this.tools);
-      return tools.size;
-    }.bind(this));
+    return Ref.get(this.tools).pipe(
+      Effect.map((tools) => tools.size)
+    );
   }
 
   normalizeTools(ids: string[]): Effect.Effect<Tool[]> {
-    return Effect.gen(function* () {
-      const tools = yield* this.getTools(ids);
-      return tools.map(tool => normalizeToolDefinition(tool, tool.execute));
-    }.bind(this));
+    const self = this;
+    return self.getTools(ids).pipe(
+      Effect.map((tools) => tools.map(tool => normalizeToolDefinition(tool, tool.execute)))
+    );
   }
 
   toAISDKTools(ids: string[]): Effect.Effect<Record<string, Tool>> {
-    return Effect.gen(function* () {
-      const tools = yield* this.normalizeTools(ids);
-      return Object.fromEntries(tools.map(tool => [tool.id, tool]));
-    }.bind(this));
+    const self = this;
+    return self.normalizeTools(ids).pipe(
+      Effect.map((tools) => Object.fromEntries(tools.map(tool => [tool.id, tool])))
+    );
   }
 }
 

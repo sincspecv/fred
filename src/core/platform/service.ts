@@ -2,9 +2,9 @@ import { Context, Effect, Layer, Ref } from 'effect';
 import type { LanguageModel } from '@effect/ai';
 import type { ProviderDefinition, ProviderConfig, ProviderModelDefaults } from './provider';
 import type { EffectProviderFactory } from './base';
-import { ProviderNotFoundError, ProviderRegistrationError, ProviderModelError } from './errors';
-import { loadProviderPack } from './loader';
-import { createProviderDefinition } from './base';
+import { ProviderNotFoundError, ProviderRegistrationError, ProviderModelError, ProviderPackLoadError } from './errors';
+import { loadProviderPackEffect } from './loader';
+import { createProviderDefinitionEffect } from './base';
 
 /**
  * ProviderRegistryService interface for Effect-based provider management
@@ -87,21 +87,16 @@ class ProviderRegistryServiceImpl implements ProviderRegistryService {
   register(idOrPackage: string, config: ProviderConfig = {}): Effect.Effect<void, ProviderRegistrationError> {
     const self = this;
     return Effect.gen(function* () {
-      const factory = yield* Effect.tryPromise({
-        try: () => loadProviderPack(idOrPackage),
-        catch: (error) => new ProviderRegistrationError({
+      // Load factory with proper Effect error channel
+      const factory = yield* loadProviderPackEffect(idOrPackage).pipe(
+        Effect.mapError((error) => new ProviderRegistrationError({
           providerId: idOrPackage,
           cause: error
-        })
-      });
+        }))
+      );
 
-      const definition = yield* Effect.tryPromise({
-        try: () => createProviderDefinition(factory, config),
-        catch: (error) => new ProviderRegistrationError({
-          providerId: idOrPackage,
-          cause: error
-        })
-      });
+      // Create definition with proper Effect error channel
+      const definition = yield* createProviderDefinitionEffect(factory, config);
 
       yield* self.registerDefinition(definition);
     });
@@ -110,13 +105,8 @@ class ProviderRegistryServiceImpl implements ProviderRegistryService {
   registerFactory(factory: EffectProviderFactory, config: ProviderConfig = {}): Effect.Effect<void, ProviderRegistrationError> {
     const self = this;
     return Effect.gen(function* () {
-      const definition = yield* Effect.tryPromise({
-        try: () => createProviderDefinition(factory, config),
-        catch: (error) => new ProviderRegistrationError({
-          providerId: factory.id,
-          cause: error
-        })
-      });
+      // Create definition with proper Effect error channel
+      const definition = yield* createProviderDefinitionEffect(factory, config);
 
       yield* self.registerDefinition(definition);
     });

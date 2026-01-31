@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Ref } from 'effect';
 import type { AgentConfig, AgentInstance } from './agent';
 import type { ProviderDefinition } from '../platform/provider';
+import type { ProviderRegistryService as ProviderRegistryServiceType } from '../platform/service';
 import {
   AgentNotFoundError,
   AgentAlreadyExistsError,
@@ -157,14 +158,8 @@ class AgentServiceImpl implements AgentService {
         systemMessage: config.systemMessage ?? self.defaultSystemMessage,
       };
 
-      // Create agent using factory
-      const agentProcessor = yield* Effect.tryPromise({
-        try: () => self.factory.createAgent(resolvedConfig, providerDef),
-        catch: (error) => new AgentCreationError({
-          id: config.id,
-          cause: error
-        })
-      });
+      // Create agent using factory - wrapped in Effect.async for proper fiber semantics
+      const agentProcessor = yield* self.createAgentFromFactory(resolvedConfig, providerDef);
 
       const instance: AgentInstance = {
         id: config.id,
@@ -178,6 +173,27 @@ class AgentServiceImpl implements AgentService {
       yield* Ref.set(self.agents, newAgents);
 
       return instance;
+    });
+  }
+
+  /**
+   * Effect-wrapped agent creation from factory
+   */
+  private createAgentFromFactory(
+    config: AgentConfig,
+    providerDef: ProviderDefinition
+  ): Effect.Effect<{ processMessage: AgentInstance['processMessage']; streamMessage: AgentInstance['streamMessage'] }, AgentCreationError> {
+    const self = this;
+    return Effect.async<
+      { processMessage: AgentInstance['processMessage']; streamMessage: AgentInstance['streamMessage'] },
+      AgentCreationError
+    >((resume) => {
+      self.factory.createAgent(config, providerDef)
+        .then((result) => resume(Effect.succeed(result)))
+        .catch((error) => resume(Effect.fail(new AgentCreationError({
+          id: config.id,
+          cause: error
+        }))));
     });
   }
 
@@ -218,9 +234,21 @@ class AgentServiceImpl implements AgentService {
       yield* Ref.set(self.agents, newAgents);
 
       // Clean up MCP clients for this agent
-      yield* Effect.promise(() => self.factory.cleanupMCPClients(id));
+      yield* self.cleanupAgentMCPClients(id);
 
       return result;
+    });
+  }
+
+  /**
+   * Effect-wrapped MCP client cleanup for a single agent
+   */
+  private cleanupAgentMCPClients(agentId: string): Effect.Effect<void> {
+    const self = this;
+    return Effect.async<void>((resume) => {
+      self.factory.cleanupMCPClients(agentId)
+        .then(() => resume(Effect.succeed(void 0)))
+        .catch(() => resume(Effect.succeed(void 0))); // Best-effort cleanup
     });
   }
 
@@ -236,7 +264,19 @@ class AgentServiceImpl implements AgentService {
     const self = this;
     return Effect.gen(function* () {
       yield* Ref.set(self.agents, new Map());
-      yield* Effect.promise(() => self.factory.cleanupAllMCPClients());
+      yield* self.cleanupAllMCPClientsEffect();
+    });
+  }
+
+  /**
+   * Effect-wrapped cleanup for all MCP clients
+   */
+  private cleanupAllMCPClientsEffect(): Effect.Effect<void> {
+    const self = this;
+    return Effect.async<void>((resume) => {
+      self.factory.cleanupAllMCPClients()
+        .then(() => resume(Effect.succeed(void 0)))
+        .catch(() => resume(Effect.succeed(void 0))); // Best-effort cleanup
     });
   }
 
@@ -291,22 +331,23 @@ class AgentServiceImpl implements AgentService {
         }
       }
 
-      // Try regex match
+      // Try regex match using Effect.try for proper error handling
       for (const agent of agentsWithUtterances) {
         const utterances = agent.config.utterances!;
         for (const utterance of utterances) {
-          try {
-            const regex = new RegExp(utterance, 'i');
-            if (regex.test(message)) {
-              return {
-                agentId: agent.id,
-                confidence: 0.8,
-                matchType: 'regex' as const,
-              };
-            }
-          } catch {
-            // Invalid regex, skip
-            continue;
+          const regexResult = yield* Effect.try({
+            try: () => {
+              const regex = new RegExp(utterance, 'i');
+              return regex.test(message);
+            },
+            catch: () => false // Invalid regex, treat as no match
+          });
+          if (regexResult) {
+            return {
+              agentId: agent.id,
+              confidence: 0.8,
+              matchType: 'regex' as const,
+            };
           }
         }
       }
@@ -315,7 +356,7 @@ class AgentServiceImpl implements AgentService {
       if (semanticMatcher) {
         for (const agent of agentsWithUtterances) {
           const utterances = agent.config.utterances!;
-          const result = yield* Effect.promise(() => semanticMatcher(message, utterances));
+          const result = yield* self.runSemanticMatcher(semanticMatcher, message, utterances);
           if (result.matched) {
             return {
               agentId: agent.id,
@@ -327,6 +368,21 @@ class AgentServiceImpl implements AgentService {
       }
 
       return null;
+    });
+  }
+
+  /**
+   * Effect-wrapped semantic matcher invocation
+   */
+  private runSemanticMatcher(
+    matcher: (message: string, utterances: string[]) => Promise<{ matched: boolean; confidence: number; utterance?: string }>,
+    message: string,
+    utterances: string[]
+  ): Effect.Effect<{ matched: boolean; confidence: number; utterance?: string }> {
+    return Effect.async((resume) => {
+      matcher(message, utterances)
+        .then((result) => resume(Effect.succeed(result)))
+        .catch(() => resume(Effect.succeed({ matched: false, confidence: 0 }))); // Treat errors as no match
     });
   }
 

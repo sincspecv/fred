@@ -8,6 +8,7 @@
  * All packs go through the same validation and error handling path.
  */
 
+import { Effect } from 'effect';
 import { loadBuiltinPack, isBuiltinPack } from './packs';
 import { validatePackExports } from './pack-schema';
 import { ProviderPackLoadError } from './errors';
@@ -123,3 +124,48 @@ export async function tryLoadProviderPack(
     };
   }
 }
+
+/**
+ * Effect-based version of loadProviderPack.
+ *
+ * Returns an Effect with proper error channel instead of throwing.
+ */
+export const loadProviderPackEffect = (
+  idOrPackage: string
+): Effect.Effect<EffectProviderFactory, ProviderPackLoadError> => {
+  // Check built-in packs first (synchronous)
+  if (isBuiltinPack(idOrPackage)) {
+    const factory = loadBuiltinPack(idOrPackage);
+    if (factory) {
+      return Effect.succeed(factory);
+    }
+  }
+
+  // Try external package (async)
+  return Effect.tryPromise({
+    try: async () => {
+      const module = await import(idOrPackage);
+      const rawFactory = module.default ?? module;
+      return validatePackExports(rawFactory, idOrPackage);
+    },
+    catch: (error) => {
+      if (error instanceof Error && error.message.includes('Cannot find module')) {
+        return new ProviderPackLoadError({
+          packageName: idOrPackage,
+          reason: 'Package not installed',
+          remediation: `Install the provider pack:\n  bun add ${idOrPackage}`,
+          cause: error,
+        });
+      }
+      if (error instanceof ProviderPackLoadError) {
+        return error;
+      }
+      return new ProviderPackLoadError({
+        packageName: idOrPackage,
+        reason: 'Failed to load package',
+        remediation: `Check that ${idOrPackage} exports a valid provider factory`,
+        cause: error,
+      });
+    }
+  });
+};
