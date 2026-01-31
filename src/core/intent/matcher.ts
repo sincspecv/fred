@@ -1,94 +1,130 @@
+import { Effect, Ref } from 'effect';
 import { Intent, IntentMatch } from './intent';
+import { IntentMatchError } from './errors';
+
+/**
+ * Function type for semantic matching.
+ * Returns matched status, confidence score, and matched utterance.
+ */
+export type SemanticMatcherFn = (
+  message: string,
+  utterances: string[]
+) => Promise<{ matched: boolean; confidence: number; utterance?: string }>;
 
 /**
  * Intent matcher with hybrid matching strategy
  */
 export class IntentMatcher {
-  private intents: Intent[] = [];
+  private intents: Ref.Ref<Intent[]>;
+
+  constructor(intentsRef: Ref.Ref<Intent[]>) {
+    this.intents = intentsRef;
+  }
 
   /**
    * Register intents for matching
    */
-  registerIntents(intents: Intent[]): void {
-    this.intents = intents;
+  registerIntents(intents: Intent[]): Effect.Effect<void> {
+    return Ref.set(this.intents, intents);
   }
 
   /**
    * Match a user message against registered intents
    * Uses hybrid strategy: exact → regex → semantic
    */
-  async matchIntent(
+  matchIntent(
     message: string,
-    semanticMatcher?: (message: string, utterances: string[]) => Promise<{ matched: boolean; confidence: number; utterance?: string }>
-  ): Promise<IntentMatch | null> {
-    const normalizedMessage = message.toLowerCase().trim();
+    semanticMatcher?: SemanticMatcherFn
+  ): Effect.Effect<IntentMatch | null, IntentMatchError> {
+    const self = this;
+    return Effect.gen(function* () {
+      const intents = yield* Ref.get(self.intents);
+      const normalizedMessage = message.toLowerCase().trim();
 
-    // Try exact match first
-    for (const intent of this.intents) {
-      for (const utterance of intent.utterances) {
-        if (normalizedMessage === utterance.toLowerCase().trim()) {
-          return {
-            intent,
-            confidence: 1.0,
-            matchedUtterance: utterance,
-            matchType: 'exact',
-          };
-        }
-      }
-    }
-
-    // Try regex match
-    for (const intent of this.intents) {
-      for (const utterance of intent.utterances) {
-        try {
-          // Treat utterance as regex pattern
-          const regex = new RegExp(utterance, 'i');
-          if (regex.test(message)) {
+      // Try exact match first
+      for (const intent of intents) {
+        for (const utterance of intent.utterances) {
+          if (normalizedMessage === utterance.toLowerCase().trim()) {
             return {
               intent,
-              confidence: 0.8,
+              confidence: 1.0,
               matchedUtterance: utterance,
-              matchType: 'regex',
+              matchType: 'exact' as const,
             };
           }
-        } catch {
-          // Invalid regex, skip
-          continue;
         }
       }
-    }
 
-    // Try semantic matching if provided
-    if (semanticMatcher) {
-      for (const intent of this.intents) {
-        const result = await semanticMatcher(message, intent.utterances);
-        if (result.matched) {
-          return {
-            intent,
-            confidence: result.confidence,
-            matchedUtterance: result.utterance,
-            matchType: 'semantic',
-          };
+      // Try regex match - wrap in Effect.try for error handling
+      for (const intent of intents) {
+        for (const utterance of intent.utterances) {
+          const regexResult = yield* Effect.try({
+            try: () => {
+              const regex = new RegExp(utterance, 'i');
+              return regex.test(message) ? { intent, utterance } : null;
+            },
+            catch: () => null // Invalid regex, skip silently
+          });
+
+          if (regexResult) {
+            return {
+              intent: regexResult.intent,
+              confidence: 0.8,
+              matchedUtterance: regexResult.utterance,
+              matchType: 'regex' as const,
+            };
+          }
         }
       }
-    }
 
-    return null;
+      // Try semantic matching if provided
+      if (semanticMatcher) {
+        for (const intent of intents) {
+          const result = yield* Effect.tryPromise({
+            try: () => semanticMatcher(message, intent.utterances),
+            catch: (error) => new IntentMatchError({
+              message: 'Semantic matching failed',
+              cause: error instanceof Error ? error : new Error(String(error))
+            })
+          });
+
+          if (result.matched) {
+            return {
+              intent,
+              confidence: result.confidence,
+              matchedUtterance: result.utterance,
+              matchType: 'semantic' as const,
+            };
+          }
+        }
+      }
+
+      return null;
+    });
   }
 
   /**
    * Get all registered intents
    */
-  getIntents(): Intent[] {
-    return this.intents;
+  getIntents(): Effect.Effect<Intent[]> {
+    return Ref.get(this.intents);
   }
 
   /**
    * Clear all intents
    */
-  clear(): void {
-    this.intents = [];
+  clear(): Effect.Effect<void> {
+    return Ref.set(this.intents, []);
   }
 }
+
+/**
+ * Create a new IntentMatcher instance with Effect-managed state.
+ */
+export const createIntentMatcher = (): Effect.Effect<IntentMatcher> =>
+  Effect.gen(function* () {
+    const intentsRef = yield* Ref.make<Intent[]>([]);
+    return new IntentMatcher(intentsRef);
+  });
 
 
