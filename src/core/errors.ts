@@ -28,6 +28,9 @@ export * from './hooks/errors';
 // Intent errors
 export * from './intent/errors';
 
+// Routing errors
+export * from './routing/errors';
+
 // Combined FredError union for top-level catching
 import type { AgentError } from './agent/errors';
 import type { PipelineError } from './pipeline/errors';
@@ -36,6 +39,7 @@ import type { ToolError } from './tool/errors';
 import type { ProviderError } from './platform/errors';
 import type { HookError } from './hooks/errors';
 import type { IntentError } from './intent/errors';
+import type { RoutingError } from './routing/errors';
 
 /**
  * Union of all Fred service errors, enabling exhaustive error handling.
@@ -55,4 +59,5 @@ export type FredError =
   | ToolError
   | ProviderError
   | HookError
-  | IntentError;
+  | IntentError
+  | RoutingError;
