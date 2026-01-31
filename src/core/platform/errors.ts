@@ -96,3 +96,30 @@ export class ProviderRuntimeError extends Data.TaggedError('ProviderRuntimeError
     ].join('\n');
   }
 }
+
+/**
+ * Error thrown when provider registration fails.
+ */
+export class ProviderRegistrationError extends Data.TaggedError('ProviderRegistrationError')<{
+  readonly providerId: string;
+  readonly cause: unknown;
+}> {}
+
+/**
+ * Error thrown when a provider model operation fails.
+ */
+export class ProviderModelError extends Data.TaggedError('ProviderModelError')<{
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly cause: unknown;
+}> {}
+
+/**
+ * Union type for all provider errors, enabling exhaustive catchTag handling.
+ */
+export type ProviderError =
+  | ProviderPackLoadError
+  | ProviderNotFoundError
+  | ProviderRuntimeError
+  | ProviderRegistrationError
+  | ProviderModelError;
