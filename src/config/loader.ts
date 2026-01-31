@@ -9,7 +9,7 @@ import { loadPromptFile } from '../utils/prompt-loader';
 import { validateId, validatePipelineAgentCount } from '../utils/validation';
 import { Workflow } from '../core/workflow/types';
 import { ProviderConfig } from '../core/platform/provider';
-import { z } from 'zod';
+import { Schema, ParseResult } from 'effect';
 
 // =============================================================================
 // Pipeline V2 Function Registry
@@ -249,16 +249,30 @@ export function extractAgents(config: FrameworkConfig, basePath?: string): Agent
 
 /**
  * Extract tools from config (without execute functions)
+ *
+ * Config-loaded tools only have metadata (JSON Schema) - no Effect Schema.
+ * They become fully typed tools when execute functions are registered at runtime.
  */
 export function extractTools(config: FrameworkConfig): Omit<Tool, 'execute'>[] {
-  return (config.tools || []).map(tool => ({
-    ...tool,
-    schema: tool.schema?.metadata
-      ? {
-          metadata: tool.schema.metadata,
-        }
-      : undefined,
-  }));
+  return (config.tools || []).map(tool => {
+    // Build the tool definition, handling optional schema
+    const toolDef: Omit<Tool, 'execute'> = {
+      id: tool.id,
+      name: tool.name,
+      description: tool.description,
+      strict: tool.strict,
+    };
+
+    // Only include schema if metadata exists
+    // Config tools only have metadata, not Effect Schema types
+    if (tool.schema?.metadata) {
+      (toolDef as any).schema = {
+        metadata: tool.schema.metadata,
+      };
+    }
+
+    return toolDef;
+  }) as Omit<Tool, 'execute'>[];
 }
 
 /**
@@ -328,33 +342,33 @@ export function extractWorkflows(config: FrameworkConfig): Workflow[] {
 // =============================================================================
 
 /**
- * Zod schema for provider pack configuration validation.
+ * Effect Schema for provider pack configuration validation.
  */
-const ProviderPackConfigSchema = z.object({
-  id: z.string().min(1, 'Provider id is required'),
-  package: z.string().optional(),
-  apiKeyEnvVar: z.string().optional(),
-  baseUrl: z.string().url().optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  modelDefaults: z.object({
-    model: z.string().optional(),
-    temperature: z.number().min(0).max(2).optional(),
-    maxTokens: z.number().positive().optional(),
-  }).optional(),
+const ProviderPackConfigSchema = Schema.Struct({
+  id: Schema.String.pipe(Schema.minLength(1, { message: () => 'Provider id is required' })),
+  package: Schema.optional(Schema.String),
+  apiKeyEnvVar: Schema.optional(Schema.String),
+  baseUrl: Schema.optional(Schema.String),
+  headers: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
+  modelDefaults: Schema.optional(Schema.Struct({
+    model: Schema.optional(Schema.String),
+    temperature: Schema.optional(Schema.Number.pipe(Schema.between(0, 2))),
+    maxTokens: Schema.optional(Schema.Number.pipe(Schema.positive())),
+  })),
 });
 
-const ProvidersConfigSchema = z.array(ProviderPackConfigSchema);
+const ProvidersConfigSchema = Schema.Array(ProviderPackConfigSchema);
 
 /**
- * Validate providers configuration with Zod.
+ * Validate providers configuration with Effect Schema.
  * Returns empty array if providers is null/undefined.
- * Throws ZodError if validation fails.
+ * Throws ParseError if validation fails.
  */
 export function validateProvidersConfig(providers: unknown): ProviderPackConfig[] {
   if (providers === undefined || providers === null) {
     return [];
   }
-  return ProvidersConfigSchema.parse(providers);
+  return Schema.decodeUnknownSync(ProvidersConfigSchema)(providers) as ProviderPackConfig[];
 }
 
 /**
@@ -371,7 +385,7 @@ export interface ExtractedProvider {
 
 /**
  * Extract provider registrations from config.
- * Validates with Zod, then converts ProviderPackConfig[] to ExtractedProvider[] for runtime use.
+ * Validates with Effect Schema, then converts ProviderPackConfig[] to ExtractedProvider[] for runtime use.
  */
 export function extractProviders(config: FrameworkConfig): ExtractedProvider[] {
   const validated = validateProvidersConfig(config.providers);
