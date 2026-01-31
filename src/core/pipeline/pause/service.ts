@@ -56,10 +56,11 @@ class PauseServiceImpl implements PauseService {
   constructor(private checkpointService: CheckpointService) {}
 
   getPendingPause(runId: string): Effect.Effect<PendingPause, PauseNotFoundError | PauseExpiredError> {
+    const self = this;
     return Effect.gen(function* () {
       // Use CheckpointService to get latest checkpoint
       const checkpointOrError = yield* Effect.either(
-        this.checkpointService.getLatestCheckpoint(runId)
+        self.checkpointService.getLatestCheckpoint(runId)
       );
 
       if (checkpointOrError._tag === 'Left') {
@@ -101,19 +102,17 @@ class PauseServiceImpl implements PauseService {
       };
 
       return pendingPause;
-    }.bind(this));
+    });
   }
 
   listPendingPauses(): Effect.Effect<PendingPause[]> {
+    const self = this;
     return Effect.gen(function* () {
       // Access storage through checkpointService
-      const storage = yield* this.checkpointService.getStorage();
+      const storage = yield* self.checkpointService.getStorage();
 
-      // Get all paused checkpoints
-      const checkpoints = yield* Effect.tryPromise({
-        try: () => storage.listByStatus('paused'),
-        catch: (error) => error,
-      });
+      // Get all paused checkpoints using Effect.async
+      const checkpoints = yield* self.listByStatusEffect(storage, 'paused');
 
       const now = new Date();
 
@@ -143,14 +142,29 @@ class PauseServiceImpl implements PauseService {
       pendingPauses.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
       return pendingPauses;
-    }.bind(this));
+    });
   }
 
   hasPendingPause(runId: string): Effect.Effect<boolean> {
-    return Effect.gen(function* () {
-      const result = yield* Effect.either(this.getPendingPause(runId));
-      return result._tag === 'Right';
-    }.bind(this));
+    const self = this;
+    return self.getPendingPause(runId).pipe(
+      Effect.map(() => true),
+      Effect.catchAll(() => Effect.succeed(false))
+    );
+  }
+
+  /**
+   * Effect-wrapped storage listByStatus operation
+   */
+  private listByStatusEffect(
+    storage: { listByStatus: (status: string) => Promise<any[]> },
+    status: string
+  ): Effect.Effect<any[]> {
+    return Effect.async<any[]>((resume) => {
+      storage.listByStatus(status)
+        .then((checkpoints) => resume(Effect.succeed(checkpoints)))
+        .catch((error) => resume(Effect.die(error)));
+    });
   }
 }
 
