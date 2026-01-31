@@ -20,6 +20,8 @@ import {
 } from './types';
 import { AgentManager } from '../agent/manager';
 import { HookManager } from '../hooks/manager';
+import { Effect } from 'effect';
+import { RoutingMatcherError, NoAgentsAvailableError } from './errors';
 
 /**
  * Specificity base scores by match type.
@@ -59,59 +61,83 @@ export class MessageRouter {
    * @param metadata - Message metadata for filtering
    * @returns Routing decision with selected agent
    */
-  async route(
+  route(
     message: string,
     metadata: Record<string, unknown> = {}
-  ): Promise<RoutingDecision> {
-    const startTime = Date.now();
+  ): Effect.Effect<RoutingDecision> {
+    const self = this;
+    return Effect.gen(function* () {
+      const startTime = Date.now();
 
-    // Emit beforeRouting hook
-    await this.hookManager?.executeHooks('beforeRouting', {
-      type: 'beforeRouting',
-      timestamp: startTime,
-      data: { message, metadata },
+      // Emit beforeRouting hook (use Effect.tryPromise for async hook execution with error handling)
+      if (self.hookManager) {
+        yield* Effect.tryPromise({
+          try: () => self.hookManager!.executeHooks('beforeRouting', {
+            type: 'beforeRouting',
+            timestamp: startTime,
+            data: { message, metadata },
+          }),
+          catch: (error) => {
+            // Log hook error but don't fail routing - hooks are optional
+            console.warn('beforeRouting hook failed:', error);
+            return error;
+          }
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      }
+
+      const match = yield* self.findBestMatch(message, metadata);
+      let decision: RoutingDecision;
+
+      if (match) {
+        decision = {
+          agent: match.rule.agent,
+          rule: match.rule,
+          matchType: match.matchType,
+          fallback: false,
+          specificity: match.specificity,
+        };
+      } else {
+        const fallbackAgent = yield* self.getFallbackAgentEffect();
+        decision = {
+          agent: fallbackAgent,
+          fallback: true,
+        };
+      }
+
+      const durationMs = Date.now() - startTime;
+
+      // Debug logging using Effect.log
+      if (self.config.debug) {
+        yield* Effect.logDebug('Routing decision').pipe(
+          Effect.annotateLogs({
+            agent: decision.agent,
+            fallback: decision.fallback,
+            durationMs,
+            matchType: match?.matchType,
+            ruleId: match?.rule.id,
+            specificity: match?.specificity,
+          })
+        );
+      }
+
+      // Emit afterRouting hook (use Effect.tryPromise with error handling)
+      if (self.hookManager) {
+        yield* Effect.tryPromise({
+          try: () => self.hookManager!.executeHooks('afterRouting', {
+            type: 'afterRouting',
+            timestamp: Date.now(),
+            data: { message, metadata, decision, durationMs },
+          }),
+          catch: (error) => {
+            // Log hook error but don't fail routing - hooks are optional
+            console.warn('afterRouting hook failed:', error);
+            return error;
+          }
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      }
+
+      return decision;
     });
-
-    const match = await this.findBestMatch(message, metadata);
-    let decision: RoutingDecision;
-
-    if (match) {
-      decision = {
-        agent: match.rule.agent,
-        rule: match.rule,
-        matchType: match.matchType,
-        fallback: false,
-        specificity: match.specificity,
-      };
-    } else {
-      // No match - execute fallback cascade
-      const fallbackAgent = this.getFallbackAgent();
-      decision = {
-        agent: fallbackAgent,
-        fallback: true,
-      };
-    }
-
-    const durationMs = Date.now() - startTime;
-
-    // Debug logging
-    if (this.config.debug) {
-      this.logRoutingDecision(decision, match, durationMs);
-    }
-
-    // Emit afterRouting hook
-    await this.hookManager?.executeHooks('afterRouting', {
-      type: 'afterRouting',
-      timestamp: Date.now(),
-      data: {
-        message,
-        metadata,
-        decision,
-        durationMs,
-      },
-    });
-
-    return decision;
   }
 
   /**
@@ -122,32 +148,101 @@ export class MessageRouter {
    * @param metadata - Message metadata for filtering
    * @returns Routing decision (same as route())
    */
-  async testRoute(
+  testRoute(
     message: string,
     metadata: Record<string, unknown> = {}
-  ): Promise<RoutingDecision> {
-    const match = await this.findBestMatch(message, metadata);
+  ): Effect.Effect<RoutingDecision> {
+    const self = this;
+    return Effect.gen(function* () {
+      const match = yield* self.findBestMatch(message, metadata);
 
-    if (match) {
+      if (match) {
+        return {
+          agent: match.rule.agent,
+          rule: match.rule,
+          matchType: match.matchType,
+          fallback: false,
+          specificity: match.specificity,
+        };
+      }
+
+      const fallbackAgent = yield* self.getFallbackAgentSilentEffect();
       return {
-        agent: match.rule.agent,
-        rule: match.rule,
-        matchType: match.matchType,
-        fallback: false,
-        specificity: match.specificity,
+        agent: fallbackAgent,
+        fallback: true,
       };
-    }
-
-    // No match - execute fallback cascade (silently)
-    const fallbackAgent = this.getFallbackAgentSilent();
-    return {
-      agent: fallbackAgent,
-      fallback: true,
-    };
+    });
   }
 
   /**
-   * Get fallback agent using cascade logic.
+   * Get fallback agent using cascade logic (Effect-based).
+   * Logs warnings when falling back.
+   *
+   * Cascade:
+   * 1. Use config.defaultAgent if set and agent exists
+   * 2. Use first registered agent (with warning)
+   * 3. Fail with NoAgentsAvailableError if no agents exist
+   */
+  private getFallbackAgentEffect(): Effect.Effect<string, NoAgentsAvailableError> {
+    const self = this;
+    return Effect.gen(function* () {
+      // Try configured default agent
+      if (self.config.defaultAgent) {
+        if (self.agentManager.hasAgent(self.config.defaultAgent)) {
+          return self.config.defaultAgent;
+        }
+        yield* Effect.logWarning(
+          `Default agent "${self.config.defaultAgent}" not found, falling back to first registered agent`
+        );
+      }
+
+      // Try first registered agent
+      const allAgents = self.agentManager.getAllAgents();
+      if (allAgents.length > 0) {
+        const firstAgent = allAgents[0];
+        yield* Effect.logWarning(
+          `No default agent configured, using first registered agent: "${firstAgent.id}"`
+        );
+        return firstAgent.id;
+      }
+
+      // No agents available
+      return yield* Effect.fail(
+        new NoAgentsAvailableError({
+          message: 'No agents available for routing. Register at least one agent.'
+        })
+      );
+    });
+  }
+
+  /**
+   * Get fallback agent silently (for testRoute, Effect-based).
+   * Same cascade logic but without logging.
+   */
+  private getFallbackAgentSilentEffect(): Effect.Effect<string, NoAgentsAvailableError> {
+    const self = this;
+    return Effect.gen(function* () {
+      if (self.config.defaultAgent) {
+        if (self.agentManager.hasAgent(self.config.defaultAgent)) {
+          return self.config.defaultAgent;
+        }
+      }
+
+      const allAgents = self.agentManager.getAllAgents();
+      if (allAgents.length > 0) {
+        return allAgents[0].id;
+      }
+
+      return yield* Effect.fail(
+        new NoAgentsAvailableError({
+          message: 'No agents available for routing. Register at least one agent.'
+        })
+      );
+    });
+  }
+
+  /**
+   * Get fallback agent using cascade logic (sync version for backward compatibility).
    * Logs warnings when falling back.
    *
    * Cascade:
@@ -183,7 +278,7 @@ export class MessageRouter {
   }
 
   /**
-   * Get fallback agent silently (for testRoute).
+   * Get fallback agent silently (for testRoute, sync version for backward compatibility).
    * Same cascade logic but without logging.
    */
   private getFallbackAgentSilent(): string {
@@ -207,62 +302,41 @@ export class MessageRouter {
   }
 
   /**
-   * Log routing decision (when debug=true).
-   */
-  private logRoutingDecision(
-    decision: RoutingDecision,
-    match: RouteMatch | null,
-    durationMs: number
-  ): void {
-    const parts: string[] = [
-      `[Routing]`,
-      `agent="${decision.agent}"`,
-      `fallback=${decision.fallback}`,
-      `duration=${durationMs}ms`,
-    ];
-
-    if (match) {
-      parts.push(`matchType="${match.matchType}"`);
-      parts.push(`ruleId="${match.rule.id}"`);
-      parts.push(`specificity=${match.specificity}`);
-    }
-
-    console.log(parts.join(' '));
-  }
-
-  /**
    * Find the best matching rule for a message.
    *
    * @param message - The message to match
    * @param metadata - Message metadata for filtering
    * @returns Best match or null if no rules match
    */
-  async findBestMatch(
+  findBestMatch(
     message: string,
     metadata: Record<string, unknown>
-  ): Promise<RouteMatch | null> {
-    const matches: RouteMatch[] = [];
+  ): Effect.Effect<RouteMatch | null> {
+    const self = this;
+    return Effect.gen(function* () {
+      const matches: RouteMatch[] = [];
 
-    // Sort rules by priority (higher first) before checking
-    const sortedRules = [...this.config.rules].sort(
-      (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
-    );
+      // Sort rules by priority (higher first) before checking
+      const sortedRules = [...self.config.rules].sort(
+        (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
+      );
 
-    for (const rule of sortedRules) {
-      const match = await this.matchRule(message, metadata, rule);
-      if (match) {
-        matches.push(match);
+      for (const rule of sortedRules) {
+        const match = yield* self.matchRule(message, metadata, rule);
+        if (match) {
+          matches.push(match);
+        }
       }
-    }
 
-    if (matches.length === 0) {
-      return null;
-    }
+      if (matches.length === 0) {
+        return null;
+      }
 
-    // Sort by specificity descending
-    matches.sort((a, b) => b.specificity - a.specificity);
+      // Sort by specificity descending
+      matches.sort((a, b) => b.specificity - a.specificity);
 
-    return matches[0];
+      return matches[0];
+    });
   }
 
   /**
@@ -273,108 +347,124 @@ export class MessageRouter {
    * @param rule - The rule to match against
    * @returns Match result or null if no match
    */
-  async matchRule(
+  matchRule(
     message: string,
     metadata: Record<string, unknown>,
     rule: RoutingRule
-  ): Promise<RouteMatch | null> {
-    // 1. Check metadata filters first (all must match)
-    if (rule.metadata) {
-      if (!this.matchMetadata(metadata, rule.metadata)) {
-        return null;
+  ): Effect.Effect<RouteMatch | null> {
+    const self = this;
+    return Effect.gen(function* () {
+      // 1. Check metadata filters first (all must match)
+      if (rule.metadata) {
+        if (!self.matchMetadata(metadata, rule.metadata)) {
+          return null;
+        }
       }
-    }
 
-    // 2. Check custom matcher function
-    if (rule.matcher) {
-      try {
-        const result = await Promise.resolve(rule.matcher(message, metadata));
-        if (result) {
+      // 2. Check custom matcher function
+      if (rule.matcher) {
+        const matcherResult = yield* Effect.tryPromise({
+          try: () => Promise.resolve(rule.matcher!(message, metadata)),
+          catch: (error) => {
+            // Log warning and skip on error
+            if (self.config.debug) {
+              console.warn(
+                `[Routing] Matcher error for rule "${rule.id}":`,
+                error
+              );
+            }
+            return null;
+          }
+        }).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        );
+
+        if (matcherResult === true) {
           return {
             rule,
-            matchType: 'function',
+            matchType: 'function' as const,
             confidence: 0.8,
-            specificity: this.calculateSpecificity(rule, 'function'),
+            specificity: self.calculateSpecificity(rule, 'function'),
           };
         }
-        // Function returned false - don't match this rule
-        return null;
-      } catch (error) {
-        // Log warning and skip rule on matcher error
-        if (this.config.debug) {
-          console.warn(
-            `[Routing] Matcher error for rule "${rule.id}":`,
-            error
-          );
+        if (matcherResult === false || matcherResult === null) {
+          return null;
         }
-        return null;
       }
-    }
 
-    // 3. Check regex patterns (case-insensitive)
-    if (rule.patterns && rule.patterns.length > 0) {
-      for (const pattern of rule.patterns) {
-        try {
-          const regex = new RegExp(pattern, 'i');
-          if (regex.test(message)) {
-            // Check for exact match (pattern with anchors)
-            const isExact =
-              pattern.startsWith('^') &&
-              pattern.endsWith('$') &&
-              regex.test(message);
-            const matchType: MatchType = isExact ? 'exact' : 'regex';
+      // 3. Check regex patterns (case-insensitive)
+      if (rule.patterns && rule.patterns.length > 0) {
+        for (const pattern of rule.patterns) {
+          const patternMatch = yield* Effect.try({
+            try: () => {
+              const regex = new RegExp(pattern, 'i');
+              if (regex.test(message)) {
+                // Check for exact match (pattern with anchors)
+                const isExact =
+                  pattern.startsWith('^') &&
+                  pattern.endsWith('$');
+                const matchType: MatchType = isExact ? 'exact' : 'regex';
 
+                return {
+                  rule,
+                  matchType,
+                  confidence: isExact ? 1.0 : 0.8,
+                  specificity: self.calculateSpecificity(rule, matchType, pattern),
+                  matchedPattern: pattern,
+                };
+              }
+              return null;
+            },
+            catch: () => {
+              // Invalid regex - skip pattern
+              if (self.config.debug) {
+                console.warn(
+                  `[Routing] Invalid regex pattern "${pattern}" in rule "${rule.id}"`
+                );
+              }
+              return null;
+            }
+          });
+
+          if (patternMatch) {
+            return patternMatch;
+          }
+        }
+      }
+
+      // 4. Check keywords (word boundary matching, case-insensitive)
+      if (rule.keywords && rule.keywords.length > 0) {
+        for (const keyword of rule.keywords) {
+          if (self.matchKeyword(message, keyword)) {
             return {
               rule,
-              matchType,
-              confidence: isExact ? 1.0 : 0.8,
-              specificity: this.calculateSpecificity(rule, matchType, pattern),
-              matchedPattern: pattern,
+              matchType: 'keyword' as const,
+              confidence: 0.7,
+              specificity: self.calculateSpecificity(rule, 'keyword', keyword),
+              matchedPattern: keyword,
             };
           }
-        } catch {
-          // Invalid regex - skip pattern
-          if (this.config.debug) {
-            console.warn(
-              `[Routing] Invalid regex pattern "${pattern}" in rule "${rule.id}"`
-            );
-          }
         }
       }
-    }
 
-    // 4. Check keywords (word boundary matching, case-insensitive)
-    if (rule.keywords && rule.keywords.length > 0) {
-      for (const keyword of rule.keywords) {
-        if (this.matchKeyword(message, keyword)) {
-          return {
-            rule,
-            matchType: 'keyword',
-            confidence: 0.7,
-            specificity: this.calculateSpecificity(rule, 'keyword', keyword),
-            matchedPattern: keyword,
-          };
-        }
+      // 5. If only metadata was specified and it matched, this is a metadata-only match
+      if (
+        rule.metadata &&
+        Object.keys(rule.metadata).length > 0 &&
+        !rule.patterns &&
+        !rule.keywords &&
+        !rule.matcher
+      ) {
+        return {
+          rule,
+          matchType: 'metadata-only' as const,
+          confidence: 0.6,
+          specificity: self.calculateSpecificity(rule, 'metadata-only'),
+        };
       }
-    }
 
-    // 5. If only metadata was specified and it matched, this is a metadata-only match
-    if (
-      rule.metadata &&
-      Object.keys(rule.metadata).length > 0 &&
-      !rule.patterns &&
-      !rule.keywords &&
-      !rule.matcher
-    ) {
-      return {
-        rule,
-        matchType: 'metadata-only',
-        confidence: 0.6,
-        specificity: this.calculateSpecificity(rule, 'metadata-only'),
-      };
-    }
-
-    return null;
+      return null;
+    });
   }
 
   /**
