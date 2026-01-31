@@ -148,6 +148,16 @@ export class Fred implements FredLike {
 
     // Register shutdown hooks for MCP client cleanup
     this.agentManager.registerShutdownHooks();
+
+    // Deprecation warning for direct construction
+    // Only warn in development to avoid noise in production
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(
+        '[Fred] Deprecation: new Fred() is deprecated for long-running apps. ' +
+        'Use Fred.create() for proper Effect runtime initialization. ' +
+        'See: https://fred.dev/docs/migration/v0.2.5'
+      );
+    }
   }
 
   /**
