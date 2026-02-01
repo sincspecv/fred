@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
-import type { StreamEvent } from '../../src/index';
+import type { StreamEvent } from '@fred/core';
 import { Stream } from 'effect';
-import { createStreamResult, createStreamResultFromIterable } from '../../src/core/stream/result';
+import { createStreamResult, createStreamResultFromIterable } from '../../packages/core/src/stream/result';
 
 /**
  * Integration tests for StreamResult API.
