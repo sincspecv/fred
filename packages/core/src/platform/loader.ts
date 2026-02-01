@@ -35,41 +35,53 @@ export type PackLoadResult =
 export async function loadProviderPack(
   idOrPackage: string
 ): Promise<EffectProviderFactory> {
-  // 1. Check if it's a built-in first
+  // 1. Check if it's a built-in first (already registered via import)
   if (isBuiltinPack(idOrPackage)) {
     const factory = loadBuiltinPack(idOrPackage);
     if (factory) return factory;
   }
 
-  // 2. Try to load as external npm package
-  try {
-    const module = await import(idOrPackage);
-    const rawFactory = module.default ?? module;
+  // 2. Try to load @fred/provider-{id} package (workspace or installed)
+  const fredPackageName = `@fred/provider-${idOrPackage.toLowerCase()}`;
+  const packagesToTry = [
+    fredPackageName,
+    idOrPackage, // Original package name (e.g., custom provider)
+  ];
 
-    // 3. Validate exports with Zod schema
-    return validatePackExports(rawFactory, idOrPackage);
-  } catch (error) {
-    // 4. Convert to tagged error with remediation
-    if (error instanceof Error && error.message.includes('Cannot find module')) {
-      throw new ProviderPackLoadError({
-        packageName: idOrPackage,
-        reason: 'Package not installed',
-        remediation: `Install the provider pack:\n  bun add ${idOrPackage}`,
-        cause: error,
-      });
+  let lastError: Error | undefined;
+  for (const packageName of packagesToTry) {
+    try {
+      const module = await import(packageName);
+      const rawFactory = module.default ?? module;
+
+      // 3. Validate exports with Zod schema
+      return validatePackExports(rawFactory, packageName);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      // Continue to next package name to try
     }
+  }
 
-    if (error instanceof ProviderPackLoadError) {
-      throw error; // Already a tagged error
-    }
-
+  // 4. All attempts failed - convert to tagged error with remediation
+  if (lastError?.message.includes('Cannot find module') || lastError?.message.includes('Cannot find package')) {
     throw new ProviderPackLoadError({
-      packageName: idOrPackage,
-      reason: 'Failed to load package',
-      remediation: `Check that ${idOrPackage} exports a valid provider factory`,
-      cause: error,
+      packageName: fredPackageName,
+      reason: 'Package not installed',
+      remediation: `Install the provider pack:\n  bun add ${fredPackageName}`,
+      cause: lastError,
     });
   }
+
+  if (lastError instanceof ProviderPackLoadError) {
+    throw lastError; // Already a tagged error
+  }
+
+  throw new ProviderPackLoadError({
+    packageName: fredPackageName,
+    reason: 'Failed to load package',
+    remediation: `Check that ${fredPackageName} exports a valid provider factory`,
+    cause: lastError,
+  });
 }
 
 /**
@@ -141,19 +153,31 @@ export const loadProviderPackEffect = (
     }
   }
 
-  // Try external package (async)
+  const fredPackageName = `@fred/provider-${idOrPackage.toLowerCase()}`;
+
+  // Try @fred/provider-{id} package first, then original name
   return Effect.tryPromise({
     try: async () => {
-      const module = await import(idOrPackage);
-      const rawFactory = module.default ?? module;
-      return validatePackExports(rawFactory, idOrPackage);
+      const packagesToTry = [fredPackageName, idOrPackage];
+      let lastError: Error | undefined;
+
+      for (const packageName of packagesToTry) {
+        try {
+          const module = await import(packageName);
+          const rawFactory = module.default ?? module;
+          return validatePackExports(rawFactory, packageName);
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+        }
+      }
+      throw lastError ?? new Error(`Failed to load ${fredPackageName}`);
     },
     catch: (error) => {
-      if (error instanceof Error && error.message.includes('Cannot find module')) {
+      if (error instanceof Error && (error.message.includes('Cannot find module') || error.message.includes('Cannot find package'))) {
         return new ProviderPackLoadError({
-          packageName: idOrPackage,
+          packageName: fredPackageName,
           reason: 'Package not installed',
-          remediation: `Install the provider pack:\n  bun add ${idOrPackage}`,
+          remediation: `Install the provider pack:\n  bun add ${fredPackageName}`,
           cause: error,
         });
       }
