@@ -5,6 +5,14 @@ export * from './agent/agent';
 export * from './tool/tool';
 export type { EffectProviderFactory } from './platform/base';
 export * from './platform/provider';
+
+// Provider pack registry for external provider packages
+export {
+  registerBuiltinPack,
+  getBuiltinPack,
+  getBuiltinPackIds,
+  isBuiltinPack,
+} from './platform/packs';
 export * from './config/types';
 export { ToolRegistry } from './tool/registry';
 export { AgentManager } from './agent/manager';
