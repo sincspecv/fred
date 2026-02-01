@@ -1,40 +1,21 @@
 {
   "name": "fred",
   "version": "0.2.5",
+  "private": true,
   "description": "Fred - A flexible framework for building AI agents with intent-based routing",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
-  "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
-    },
-    "./effect": {
-      "types": "./src/effect/index.ts",
-      "import": "./src/effect/index.ts",
-      "default": "./src/effect/index.ts"
-    }
-  },
-  "files": [
-    "lib",
-    "src"
-  ],
+  "workspaces": ["packages/*"],
   "scripts": {
-    "dev": "bun run src/dev-chat.ts",
-    "server": "bun run src/server.ts",
-    "build": "bun build src/index.ts --outdir lib --target bun --format esm --minify --external:@effect/ai-openai --external:@effect/ai-anthropic --external:@effect/ai-google",
-    "prepublishOnly": "bun run build",
+    "dev": "bun run packages/dev/src/dev-chat.ts",
+    "build": "bun run --filter './packages/*' build",
     "test": "bun test",
     "test:unit": "bun test tests/unit",
     "test:all": "bun test",
     "docs:dev": "mkdocs serve",
     "docs:build": "mkdocs build",
-    "docs:deploy": "mkdocs gh-deploy"
-  },
-  "bin": {
-    "fred": "./src/cli/index.ts"
+    "docs:deploy": "mkdocs gh-deploy",
+    "ci:version": "changeset version && bun update",
+    "ci:publish": "for dir in packages/*; do (cd \"$dir\" && bun publish || true); done && changeset tag"
   },
   "keywords": [
     "ai",
@@ -45,28 +26,29 @@
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {
+  "devDependencies": {
+    "@changesets/cli": "^2.29.4",
+    "@changesets/changelog-github": "^0.5.1",
     "@effect/ai": "^0.33.2",
     "@effect/ai-anthropic": "^0.23.0",
     "@effect/ai-google": "^0.12.1",
     "@effect/ai-openai": "^0.37.2",
+    "@effect/language-service": "^0.72.0",
     "@effect/opentelemetry": "^0.61.0",
     "@effect/platform": "^0.94.2",
     "@effect/platform-bun": "^0.87.1",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.200.0",
     "@opentelemetry/sdk-trace-base": "^2.5.0",
+    "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9",
+    "@types/pg": "^8.16.0",
+    "chokidar": "^5.0.0",
     "effect": "^3.19.15",
     "graphology": "^0.26.0",
     "graphology-dag": "^0.4.1",
     "js-yaml": "^4.1.0",
-    "pg": "^8.17.2"
-  },
-  "devDependencies": {
-    "@effect/language-service": "^0.72.0",
-    "@types/bun": "latest",
-    "@types/js-yaml": "^4.0.9",
-    "@types/pg": "^8.16.0",
-    "chokidar": "^5.0.0"
+    "pg": "^8.17.2",
+    "typescript": "^5.8.3"
   }
 }
