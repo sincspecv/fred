@@ -205,9 +205,14 @@ async function installPackage(packageName: string): Promise<void> {
   console.log(`\nInstalling ${packageName}...\n`);
 
   try {
+    // For @fred/provider-* packages in monorepo, use workspace protocol
+    const packageSpec = packageName.startsWith('@fred/provider-')
+      ? `${packageName}@workspace:*`
+      : packageName;
+
     // Use spawnSync with array arguments to prevent command injection
     // This avoids shell interpretation of special characters
-    const result = spawnSync('bun', ['add', packageName], {
+    const result = spawnSync('bun', ['add', packageSpec], {
       cwd: process.cwd(),
       env: process.env,
       stdio: 'inherit',
