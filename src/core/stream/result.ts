@@ -1,4 +1,4 @@
-import { Effect, Stream, Chunk } from 'effect';
+import { Effect, Stream } from 'effect';
 import type { StreamEvent, TokenEvent, UsageEvent, ToolCallEvent, ToolResultEvent } from './events';
 
 /**
@@ -416,12 +416,8 @@ export class StreamResultImpl implements StreamResult {
 async function* streamToAsyncIterator<A, E>(
   stream: Stream.Stream<A, E>
 ): AsyncGenerator<A, void, unknown> {
-  // Use Effect.runPromise to consume the stream
-  const chunks = await Effect.runPromise(
-    Stream.runCollect(stream)
-  );
-
-  for (const chunk of Chunk.toArray(chunks)) {
+  const asyncIterable = Stream.toAsyncIterable(stream);
+  for await (const chunk of asyncIterable) {
     yield chunk;
   }
 }
