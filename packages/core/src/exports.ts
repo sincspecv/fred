@@ -96,3 +96,10 @@ export {
   MessageRouterService,
   MessageRouterServiceFromInstance,
 } from './routing/service';
+
+// Utility functions
+export { sanitizeError } from './utils/validation';
+
+// Stream event types and OpenAI conversion
+export type { StreamEvent } from './stream/events';
+export { toOpenAIStream } from './stream/openai';
