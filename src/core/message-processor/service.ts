@@ -391,7 +391,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
           routingSpan.setStatus('error', error.message);
         }
         return yield* Effect.fail(
-          RouteExecutionError('routing', error instanceof Error ? error : new Error(String(error)))
+          new RouteExecutionError({ routeType: 'routing', cause: error instanceof Error ? error : new Error(String(error)) })
         );
       } finally {
         routingSpan?.end();
@@ -413,10 +413,10 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
         validateMessageLength(message);
       } catch (error) {
         return yield* Effect.fail(
-          MessageValidationError(
-            'Message validation failed',
-            error instanceof Error ? error.message : String(error)
-          )
+          new MessageValidationError({
+            message: 'Message validation failed',
+            details: error instanceof Error ? error.message : String(error),
+          })
         );
       }
 
@@ -445,7 +445,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
         }
 
         if (!conversationId) {
-          return yield* Effect.fail(ConversationIdRequiredError());
+          return yield* Effect.fail(new ConversationIdRequiredError({}));
         }
 
         const useSemantic = options?.useSemanticMatching ?? true;
@@ -483,20 +483,20 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
 
         // Handle routing result
         if (route.type === 'none') {
-          return yield* Effect.fail(NoRouteFoundError(message));
+          return yield* Effect.fail(new NoRouteFoundError({ message }));
         }
 
         if (route.type === 'pipeline' || route.type === 'intent') {
           if (!route.response) {
             return yield* Effect.fail(
-              RouteExecutionError(route.type, new Error(`Route type ${route.type} did not return a response`))
+              new RouteExecutionError({ routeType: route.type, cause: new Error(`Route type ${route.type} did not return a response`) })
             );
           }
           response = route.response;
         } else if (route.type === 'agent' || route.type === 'default') {
           if (!route.agent) {
             return yield* Effect.fail(
-              RouteExecutionError(route.type, new Error(`Route type ${route.type} did not return an agent`))
+              new RouteExecutionError({ routeType: route.type, cause: new Error(`Route type ${route.type} did not return an agent`) })
             );
           }
           usedAgentId = route.agentId || null;
@@ -521,7 +521,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
                 sequentialVisibility ? previousMessages : []
               ),
               catch: (error) =>
-                RouteExecutionError('agent', error instanceof Error ? error : new Error(String(error))),
+                new RouteExecutionError({ routeType: 'agent', cause: error instanceof Error ? error : new Error(String(error)) }),
             });
             if (agentSpan) {
               agentSpan.setAttribute('response.length', response.content.length);
@@ -543,7 +543,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
           }
         } else {
           return yield* Effect.fail(
-            RouteExecutionError('unknown', new Error(`Unknown route type: ${route.type}`))
+            new RouteExecutionError({ routeType: 'unknown', cause: new Error(`Unknown route type: ${route.type}`) })
           );
         }
 
@@ -594,7 +594,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
           const handoffResult = yield* Effect.tryPromise({
             try: () => targetAgent.processMessage(messageWithContext, previousMessages),
             catch: (error) =>
-              HandoffError(usedAgentId || 'unknown', handoff.agentId, error instanceof Error ? error : new Error(String(error))),
+              new HandoffError({ fromAgentId: usedAgentId || 'unknown', toAgentId: handoff.agentId, cause: error instanceof Error ? error : new Error(String(error)) }),
           });
           currentResponse = handoffResult;
           usedAgentId = handoff.agentId;
@@ -668,21 +668,43 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
               });
 
               // Add tool results to context
+              // Per locked decision: ToolFailure is distinct from ToolResult
               for (let idx = 0; idx < currentResponse.toolCalls.length; idx++) {
                 const toolCall = currentResponse.toolCalls[idx];
                 if (toolCall.result !== undefined) {
-                  yield* self.contextStorage.addMessage(conversationId, {
-                    role: 'tool',
-                    content: [
-                      Prompt.makePart('tool-result', {
-                        id: toolCallIds[idx],
-                        name: toolCall.toolId,
-                        result: toolCall.result,
-                        isFailure: false,
-                        providerExecuted: false,
-                      }),
-                    ],
-                  });
+                  if (toolCall.error) {
+                    // Persist as ToolFailure record - distinct type with error code + message
+                    yield* self.contextStorage.addMessage(conversationId, {
+                      role: 'tool',
+                      content: [
+                        Prompt.makePart('tool-result', {
+                          id: toolCallIds[idx],
+                          name: toolCall.toolId,
+                          result: {
+                            __type: 'ToolFailure',
+                            error: toolCall.error,
+                            output: toolCall.result,
+                          },
+                          isFailure: true,
+                          providerExecuted: false,
+                        }),
+                      ],
+                    });
+                  } else {
+                    // Persist as ToolResult record - success case
+                    yield* self.contextStorage.addMessage(conversationId, {
+                      role: 'tool',
+                      content: [
+                        Prompt.makePart('tool-result', {
+                          id: toolCallIds[idx],
+                          name: toolCall.toolId,
+                          result: toolCall.result,
+                          isFailure: false,
+                          providerExecuted: false,
+                        }),
+                      ],
+                    });
+                  }
                 }
               }
             }
@@ -737,10 +759,10 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
           validateMessageLength(message);
         } catch (error) {
           return yield* Effect.fail(
-            MessageValidationError(
-              'Message validation failed',
-              error instanceof Error ? error.message : String(error)
-            )
+            new MessageValidationError({
+              message: 'Message validation failed',
+              details: error instanceof Error ? error.message : String(error),
+            })
           );
         }
 
@@ -752,7 +774,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
         }
 
         if (!conversationId) {
-          return yield* Effect.fail(ConversationIdRequiredError());
+          return yield* Effect.fail(new ConversationIdRequiredError({}));
         }
 
         const useSemantic = options?.useSemanticMatching ?? true;
@@ -782,14 +804,14 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
         );
 
         if (route.type === 'none') {
-          return yield* Effect.fail(NoRouteFoundError(message));
+          return yield* Effect.fail(new NoRouteFoundError({ message }));
         }
 
         // Handle pipeline/intent routes with synthetic events
         if (route.type === 'pipeline' || route.type === 'intent') {
           if (!route.response) {
             return yield* Effect.fail(
-              RouteExecutionError(route.type, new Error(`Route type ${route.type} did not return a response`))
+              new RouteExecutionError({ routeType: route.type, cause: new Error(`Route type ${route.type} did not return a response`) })
             );
           }
 
@@ -823,7 +845,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
         if (route.type === 'agent' || route.type === 'default') {
           if (!route.agent) {
             return yield* Effect.fail(
-              RouteExecutionError(route.type, new Error(`Route type ${route.type} did not return an agent`))
+              new RouteExecutionError({ routeType: route.type, cause: new Error(`Route type ${route.type} did not return an agent`) })
             );
           }
 
@@ -839,7 +861,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
         }
 
         return yield* Effect.fail(
-          RouteExecutionError('unknown', new Error(`Unknown route type: ${route.type}`))
+          new RouteExecutionError({ routeType: 'unknown', cause: new Error(`Unknown route type: ${route.type}`) })
         );
       })
     );
@@ -860,7 +882,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
       Effect.gen(function* () {
         const agent = yield* self.agentService.getAgentOptional(agentId);
         if (!agent) {
-          return yield* Effect.fail(AgentNotFoundError(agentId));
+          return yield* Effect.fail(new AgentNotFoundError({ agentId }));
         }
 
         const shouldPersistHistory = agent.config.persistHistory !== false;
@@ -949,16 +971,23 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
         }
 
         // Track per-step state for persistence
+        // Per locked decision: Use separate ToolFailure record type (not isFailure flag)
+        type ToolCallState = {
+          id: string;
+          toolName: string;
+          args: Record<string, unknown>;
+          result?: unknown;
+          /** Error info for failed tools - persisted as separate ToolFailure record */
+          error?: {
+            code: string;
+            message: string;
+          };
+        };
+
         type StepState = {
           stepIndex: number;
           text: string;
-          toolCalls: Array<{
-            id: string;
-            toolName: string;
-            args: Record<string, unknown>;
-            result?: unknown;
-            isFailure?: boolean;
-          }>;
+          toolCalls: ToolCallState[];
         };
 
         const stepStates = new Map<number, StepState>();
@@ -1005,16 +1034,26 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
               const toolCall = state.toolCalls.find(tc => tc.id === event.toolCallId);
               if (toolCall) {
                 toolCall.result = event.output;
-                toolCall.isFailure = false;
+                // Per OpenAI standard: error field in tool-result event indicates failure
+                if (event.error) {
+                  toolCall.error = {
+                    code: event.error.code,
+                    message: event.error.message,
+                  };
+                }
               }
             }
 
+            // Legacy tool-error event handling (backward compatibility)
             if (event.type === 'tool-error' && 'step' in event) {
               const state = getOrCreateStepState(event.step);
               const toolCall = state.toolCalls.find(tc => tc.id === event.toolCallId);
               if (toolCall) {
                 toolCall.result = event.error.message;
-                toolCall.isFailure = true;
+                toolCall.error = {
+                  code: event.error.name || 'TOOL_EXECUTION_ERROR',
+                  message: event.error.message,
+                };
               }
             }
 
@@ -1045,22 +1084,49 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
                     })
                   );
 
+                  // Persist tool results and failures as separate record types
+                  // Per locked decision: ToolFailure is distinct from ToolResult
                   for (const tc of state.toolCalls) {
                     if (tc.result !== undefined) {
-                      await Effect.runPromise(
-                        self.contextStorage.addMessage(conversationId, {
-                          role: 'tool',
-                          content: [
-                            Prompt.makePart('tool-result', {
-                              id: tc.id,
-                              name: tc.toolName,
-                              result: tc.result,
-                              isFailure: tc.isFailure ?? false,
-                              providerExecuted: false,
-                            }),
-                          ],
-                        })
-                      );
+                      if (tc.error) {
+                        // Persist as ToolFailure record - distinct type with error code + message
+                        // The error field in the result indicates this is a failure record
+                        await Effect.runPromise(
+                          self.contextStorage.addMessage(conversationId, {
+                            role: 'tool',
+                            content: [
+                              Prompt.makePart('tool-result', {
+                                id: tc.id,
+                                name: tc.toolName,
+                                // Result contains error message for model to see
+                                result: {
+                                  __type: 'ToolFailure',
+                                  error: tc.error,
+                                  output: tc.result,
+                                },
+                                isFailure: true,
+                                providerExecuted: false,
+                              }),
+                            ],
+                          })
+                        );
+                      } else {
+                        // Persist as ToolResult record - success case (clean)
+                        await Effect.runPromise(
+                          self.contextStorage.addMessage(conversationId, {
+                            role: 'tool',
+                            content: [
+                              Prompt.makePart('tool-result', {
+                                id: tc.id,
+                                name: tc.toolName,
+                                result: tc.result,
+                                isFailure: false,
+                                providerExecuted: false,
+                              }),
+                            ],
+                          })
+                        );
+                      }
                     }
                   }
 
@@ -1177,7 +1243,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
       }
 
       if (!conversationId) {
-        return yield* Effect.fail(ConversationIdRequiredError());
+        return yield* Effect.fail(new ConversationIdRequiredError({}));
       }
 
       const modelMessages = messages.map((message) => ({
@@ -1189,7 +1255,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
       const lastUserMessage = modelMessages[modelMessages.length - 1];
       if (!lastUserMessage || lastUserMessage.role !== 'user') {
         return yield* Effect.fail(
-          MessageValidationError('Last message must be from user', undefined)
+          new MessageValidationError({ message: 'Last message must be from user' })
         );
       }
 

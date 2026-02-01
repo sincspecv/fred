@@ -98,6 +98,11 @@ export interface AgentResponse {
     args: Record<string, any>;
     result?: any;
     metadata?: Record<string, unknown>;
+    /** Error info for failed tool calls (OpenAI API standard) */
+    error?: {
+      code: string;
+      message: string;
+    };
   }>;
   usage?: {
     inputTokens?: number;
