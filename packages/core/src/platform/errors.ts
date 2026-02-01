@@ -22,6 +22,13 @@ export class ProviderPackLoadError extends Data.TaggedError('ProviderPackLoadErr
   readonly cause?: unknown;
 }> {
   /**
+   * Get error message (for standard Error compatibility).
+   */
+  get message(): string {
+    return `Failed to load provider pack "${this.packageName}": ${this.reason}`;
+  }
+
+  /**
    * Format error as a helpful message with remediation steps.
    */
   toString(): string {

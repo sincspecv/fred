@@ -95,10 +95,14 @@ function detectAvailableProvider(): { platform: string; model: string } | { plat
  * Map platform names to Effect provider pack names
  */
 function getPackageNameForPlatform(platform: string): string | null {
+  // Map platform names to @fred/provider-* packages
+  // These packages auto-register when imported and handle the Effect AI integration
   const packageMap: Record<string, string> = {
-    openai: '@effect/ai-openai',
-    anthropic: '@effect/ai-anthropic',
-    google: '@effect/ai-google',
+    openai: '@fred/provider-openai',
+    anthropic: '@fred/provider-anthropic',
+    google: '@fred/provider-google',
+    groq: '@fred/provider-groq',
+    openrouter: '@fred/provider-openrouter',
   };
 
   return packageMap[platform.toLowerCase()] || null;
@@ -479,10 +483,18 @@ class DevChatRunner {
             } catch (providerError) {
               providerRegistered = false;
               // Always show provider registration errors
+              // Effect tagged errors have toString() but not always a message property
+              const errorMessage = providerError instanceof Error
+                ? (providerError.message || providerError.toString())
+                : String(providerError);
               const providerPack = getPackageNameForPlatform(providerInfo.platform);
-              console.error(`\nFailed to register ${providerInfo.platform} provider:`, providerError instanceof Error ? providerError.message : providerError);
+              console.error(`\nFailed to register ${providerInfo.platform} provider:`);
+              if (errorMessage && errorMessage.trim()) {
+                console.error(`   ${errorMessage}`);
+              }
               if (providerPack) {
-                console.error(`   Install with: bun add ${providerPack}`);
+                console.error(`\n   Install the provider package with:`);
+                console.error(`   bun add ${providerPack}`);
               }
               console.error('');
             }
