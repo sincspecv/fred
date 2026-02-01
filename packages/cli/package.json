@@ -1,0 +1,30 @@
+{
+  "name": "@fred/cli",
+  "version": "0.1.0",
+  "description": "Fred AI framework CLI",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "fred": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun --format esm"
+  },
+  "dependencies": {
+    "@fred/core": "workspace:*",
+    "@fred/dev": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "^3.19.0"
+  },
+  "devDependencies": {
+    "effect": "^3.19.15",
+    "@types/bun": "latest"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": ["fred", "cli", "ai", "agents"],
+  "license": "MIT"
+}
