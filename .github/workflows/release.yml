@@ -4,8 +4,11 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:  # Manual trigger for re-runs
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false  # Queue releases, don't cancel mid-publish
 
 jobs:
   release:
@@ -40,12 +43,13 @@ jobs:
           publish: bun run ci:publish
           title: "chore: version packages"
           commit: "chore: version packages"
+          createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Tag releases
+      - name: Output published packages
         if: steps.changesets.outputs.published == 'true'
         run: |
-          echo "Packages published:"
-          echo "${{ steps.changesets.outputs.publishedPackages }}"
+          echo "Published packages:"
+          echo '${{ steps.changesets.outputs.publishedPackages }}'
