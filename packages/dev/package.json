@@ -1,6 +1,7 @@
 {
   "name": "@fred/dev",
   "version": "0.1.0",
+  "private": true,
   "description": "Fred AI framework development tools",
   "type": "module",
   "main": "./src/index.ts",
