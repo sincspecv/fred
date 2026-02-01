@@ -13,11 +13,15 @@ export const OpenAiProviderFactory: EffectProviderFactory = {
   aliases: ['openai'],
   load: async (config: ProviderConfig) => {
     // Dynamic import to avoid hard dependency
-    const dynamicImport = new Function(
-      'specifier',
-      'return import(specifier)'
-    ) as (specifier: string) => Promise<typeof import('@effect/ai-openai')>;
-    const module = await dynamicImport('@effect/ai-openai');
+    // Use standard dynamic import instead of Function constructor
+    let module: typeof import('@effect/ai-openai');
+    try {
+      module = await import('@effect/ai-openai');
+    } catch (error) {
+      throw new Error(
+        `Failed to load @effect/ai-openai. Install it with: bun add @effect/ai-openai`
+      );
+    }
 
     const apiKeyEnvVar = config.apiKeyEnvVar ?? 'OPENAI_API_KEY';
     const apiKeyString = process.env[apiKeyEnvVar];

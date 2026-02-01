@@ -10,6 +10,7 @@ export class StdioTransport implements MCPTransportInterface {
   private pendingRequests: Map<string | number, {
     resolve: (response: MCPResponse) => void;
     reject: (error: Error) => void;
+    timeoutId: ReturnType<typeof setTimeout>;
   }> = new Map();
   private notificationHandlers: Array<(notification: MCPNotification) => void> = [];
   private serverRequestHandlers: Map<string, (params: any) => Promise<any> | any>;
@@ -18,6 +19,14 @@ export class StdioTransport implements MCPTransportInterface {
   private args: string[];
   private env?: Record<string, string>;
   private connected = false;
+
+  // Track bound event handlers for cleanup
+  private boundHandlers?: {
+    onData: (data: Buffer) => void;
+    onStderr: (data: Buffer) => void;
+    onExit: (code: number | null) => void;
+    onError: (error: Error) => void;
+  };
 
   constructor(command: string, args: string[] = [], env?: Record<string, string>) {
     this.command = command;
@@ -48,7 +57,9 @@ export class StdioTransport implements MCPTransportInterface {
       // Handle stdout - parse JSON-RPC messages
       // MCP uses JSON-RPC 2.0 over stdio with newline-delimited JSON
       let buffer = '';
-      this.process.stdout.on('data', (data: Buffer) => {
+
+      // Create bound handlers so we can remove them later
+      const onData = (data: Buffer) => {
         const rawData = data.toString();
         buffer += rawData;
         const lines = buffer.split('\n');
@@ -67,30 +78,37 @@ export class StdioTransport implements MCPTransportInterface {
             }
           }
         }
-      });
+      };
 
-      // Handle stderr
-      this.process.stderr?.on('data', (data: Buffer) => {
+      const onStderr = (data: Buffer) => {
         console.error('MCP server stderr:', data.toString());
-      });
+      };
 
-      // Handle process exit
-      this.process.on('exit', (code) => {
+      const onExit = (code: number | null) => {
         this.connected = false;
         // Only reject pending requests if exit code indicates an error (non-zero)
         if (code !== 0 && code !== null) {
-          for (const [id, { reject }] of this.pendingRequests.entries()) {
+          for (const [id, { reject, timeoutId }] of this.pendingRequests.entries()) {
+            clearTimeout(timeoutId);
             reject(new Error(`MCP server exited with code ${code}`));
           }
           this.pendingRequests.clear();
         }
-      });
+      };
 
-      // Handle process errors
-      this.process.on('error', (error) => {
+      const onError = (error: Error) => {
         this.connected = false;
         reject(error);
-      });
+      };
+
+      // Store handlers for cleanup
+      this.boundHandlers = { onData, onStderr, onExit, onError };
+
+      // Attach handlers
+      this.process.stdout.on('data', onData);
+      this.process.stderr?.on('data', onStderr);
+      this.process.on('exit', onExit);
+      this.process.on('error', onError);
 
       // Wait for the process to be ready
       // The process should be ready once it's spawned
@@ -102,12 +120,30 @@ export class StdioTransport implements MCPTransportInterface {
   }
 
   async disconnect(): Promise<void> {
+    // Remove event listeners before killing the process
+    if (this.process && this.boundHandlers) {
+      this.process.stdout?.off('data', this.boundHandlers.onData);
+      this.process.stderr?.off('data', this.boundHandlers.onStderr);
+      this.process.off('exit', this.boundHandlers.onExit);
+      this.process.off('error', this.boundHandlers.onError);
+      this.boundHandlers = undefined;
+    }
+
     if (this.process) {
       this.process.kill();
       this.process = undefined;
     }
-    this.connected = false;
+
+    // Clear all pending request timeouts to prevent memory leaks
+    for (const [id, { timeoutId }] of this.pendingRequests.entries()) {
+      clearTimeout(timeoutId);
+    }
     this.pendingRequests.clear();
+
+    // Clear notification handlers
+    this.notificationHandlers = [];
+
+    this.connected = false;
   }
 
   isConnected(): boolean {
@@ -125,25 +161,26 @@ export class StdioTransport implements MCPTransportInterface {
         request.id = ++this.requestIdCounter;
       }
 
-      // Store pending request
-      this.pendingRequests.set(request.id, { resolve, reject });
-
-      // Send request
-      const message = JSON.stringify(request) + '\n';
-      this.process!.stdin!.write(message, (error) => {
-        if (error) {
-          this.pendingRequests.delete(request.id);
-          reject(error);
-        }
-      });
-
-      // Set timeout (30 seconds default)
-      setTimeout(() => {
+      // Set timeout (30 seconds default) and store the ID for cleanup
+      const timeoutId = setTimeout(() => {
         if (this.pendingRequests.has(request.id)) {
           this.pendingRequests.delete(request.id);
           reject(new Error('Request timeout'));
         }
       }, 30000);
+
+      // Store pending request with timeout ID
+      this.pendingRequests.set(request.id, { resolve, reject, timeoutId });
+
+      // Send request
+      const message = JSON.stringify(request) + '\n';
+      this.process!.stdin!.write(message, (error) => {
+        if (error) {
+          clearTimeout(timeoutId);
+          this.pendingRequests.delete(request.id);
+          reject(error);
+        }
+      });
     });
   }
 
@@ -169,6 +206,16 @@ export class StdioTransport implements MCPTransportInterface {
   }
 
   /**
+   * Remove a notification handler
+   */
+  offNotification(handler: (notification: MCPNotification) => void): void {
+    const index = this.notificationHandlers.indexOf(handler);
+    if (index > -1) {
+      this.notificationHandlers.splice(index, 1);
+    }
+  }
+
+  /**
    * Register a handler for server requests
    */
   onServerRequest(method: string, handler: (params: any) => Promise<any> | any): void {
@@ -181,6 +228,8 @@ export class StdioTransport implements MCPTransportInterface {
       const response = message as MCPResponse;
       const pending = this.pendingRequests.get(response.id);
       if (pending) {
+        // Clear the timeout to prevent memory leak
+        clearTimeout(pending.timeoutId);
         this.pendingRequests.delete(response.id);
         if (response.error) {
           pending.reject(new Error(`MCP error: ${response.error.message}`));

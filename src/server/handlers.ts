@@ -1,5 +1,7 @@
+import { Schema } from 'effect';
 import { Fred } from '../index';
 import { AgentResponse } from '../core/agent/agent';
+import { sanitizeError } from '../utils/validation';
 
 /**
  * Request/response types
@@ -10,6 +12,31 @@ export interface MessageRequest {
     useSemanticMatching?: boolean;
     semanticThreshold?: number;
   };
+}
+
+/**
+ * Schema for validating MessageRequest
+ */
+export const MessageRequestSchema = Schema.Struct({
+  message: Schema.String.pipe(Schema.maxLength(1_000_000)), // 1MB max
+  options: Schema.optional(
+    Schema.Struct({
+      useSemanticMatching: Schema.optional(Schema.Boolean),
+      semanticThreshold: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+    })
+  ),
+});
+
+/**
+ * Validate and decode a MessageRequest from unknown input
+ * @throws Error if validation fails
+ */
+export function validateMessageRequest(input: unknown): MessageRequest {
+  try {
+    return Schema.decodeUnknownSync(MessageRequestSchema)(input);
+  } catch (error) {
+    throw new Error(`Invalid request: ${error instanceof Error ? error.message : 'validation failed'}`);
+  }
 }
 
 export interface MessageResponse {
@@ -40,7 +67,7 @@ export class ServerHandlers {
   async handleMessage(req: MessageRequest): Promise<MessageResponse> {
     try {
       const response = await this.framework.processMessage(req.message, req.options);
-      
+
       if (!response) {
         return {
           success: false,
@@ -53,9 +80,11 @@ export class ServerHandlers {
         data: response,
       };
     } catch (error) {
+      // Sanitize error message to prevent information leakage
+      const sanitized = sanitizeError(error, 'Message processing failed');
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        error: sanitized.message,
       };
     }
   }

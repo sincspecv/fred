@@ -3,6 +3,7 @@ import { ServerHandlers } from './handlers';
 import { Router } from './routes';
 import { ChatRoutes } from './chat/routes';
 import { ChatHandlers } from './chat/handlers';
+import { sanitizeError } from '../utils/validation';
 
 /**
  * HTTP server application
@@ -48,18 +49,20 @@ export class ServerApp {
 
         try {
           const response = await this.router.handleRequest(req);
-          
+
           // Add CORS headers to response
           response.headers.set('Access-Control-Allow-Origin', '*');
           response.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
           response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
-          
+
           return response;
         } catch (error) {
+          // Sanitize error message to prevent information leakage
+          const sanitized = sanitizeError(error, 'Request failed');
           return Response.json(
             {
               success: false,
-              error: error instanceof Error ? error.message : 'Internal server error',
+              error: sanitized.message,
             },
             { status: 500 }
           );

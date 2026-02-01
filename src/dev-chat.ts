@@ -6,7 +6,7 @@ import { Fred } from './index';
 import { WorkflowManager, WorkflowContext } from './core/workflow';
 import { resolve, join } from 'path';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { getBuiltinPackIds } from './core/platform/packs';
 
@@ -168,18 +168,55 @@ async function promptYesNo(question: string): Promise<boolean> {
 }
 
 /**
+ * Validate npm package name to prevent command injection
+ * Based on npm naming rules: https://github.com/npm/validate-npm-package-name
+ */
+function isValidPackageName(name: string): boolean {
+  // Must be a string and not empty
+  if (!name || typeof name !== 'string') return false;
+
+  // Maximum length of 214 characters
+  if (name.length > 214) return false;
+
+  // Cannot start with . or _
+  if (name.startsWith('.') || name.startsWith('_')) return false;
+
+  // Scoped package pattern: @scope/name
+  // Unscoped package pattern: name
+  // Valid characters: lowercase letters, numbers, hyphens, underscores, dots
+  const scopedPattern = /^@[a-z0-9-~][a-z0-9-._~]*\/[a-z0-9-~][a-z0-9-._~]*$/;
+  const unscopedPattern = /^[a-z0-9-~][a-z0-9-._~]*$/;
+
+  return scopedPattern.test(name) || unscopedPattern.test(name);
+}
+
+/**
  * Install a package using bun add
  */
 async function installPackage(packageName: string): Promise<void> {
+  // Validate package name to prevent command injection
+  if (!isValidPackageName(packageName)) {
+    throw new Error(`Invalid package name: "${packageName}". Package names must follow npm naming conventions.`);
+  }
+
   console.log(`\n📦 Installing ${packageName}...\n`);
-  
+
   try {
-    // Use bun add to install the package
-    execSync(`bun add ${packageName}`, {
+    // Use spawnSync with array arguments to prevent command injection
+    // This avoids shell interpretation of special characters
+    const result = spawnSync('bun', ['add', packageName], {
       cwd: process.cwd(),
       env: process.env,
       stdio: 'inherit',
     });
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    if (result.status !== 0) {
+      throw new Error(`bun add exited with code ${result.status}`);
+    }
     
     // Verify it was added to devDependencies or dependencies
     const packageJsonPath = join(process.cwd(), 'package.json');
@@ -205,11 +242,15 @@ async function installPackage(packageName: string): Promise<void> {
       writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
       
       // Run bun install to sync
-      execSync('bun install', {
+      const installResult = spawnSync('bun', ['install'], {
         cwd: process.cwd(),
         env: process.env,
         stdio: 'inherit',
       });
+
+      if (installResult.error) {
+        throw installResult.error;
+      }
     }
     
     console.log(`\n✅ ${packageName} installed successfully!\n`);
@@ -1203,26 +1244,7 @@ class DevChatRunner {
             }
 
             if (event.type === 'step-end') {
-              // Step completed - output buffered text only if this step had no tool calls
-              if (!currentStepHasToolCalls && bufferedTextForCurrentStep) {
-                // Filter out malformed XML-like tool call text
-                // Detect patterns like <function=...>...</function> or <tool...>...</tool>
-                const xmlToolCallPattern = /<(?:function|tool)[^>]*>.*?<\/(?:function|tool)>/gi;
-                const filteredText = bufferedTextForCurrentStep.replace(xmlToolCallPattern, '').trim();
-
-                // Debug logging if verbose mode and malformed tool call detected
-                if (this.options.verbose && filteredText !== bufferedTextForCurrentStep.trim()) {
-                  console.log('[DEBUG] Filtered malformed XML tool call from output');
-                }
-
-                // Only output if there's actual text remaining after filtering
-                if (filteredText) {
-                  await writeImmediate(filteredText);
-                  fullText += filteredText;
-                  hasStreamedText = true;
-                }
-                bufferedTextForCurrentStep = '';
-              }
+              bufferedTextForCurrentStep = '';
             }
 
             if (event.type === 'stream-error') {
@@ -1237,9 +1259,13 @@ class DevChatRunner {
 
             if (event.type === 'token') {
               if (event.delta && event.delta.length > 0) {
-                // Buffer text for current step - only output it at step-end if no tool calls were made
-                bufferedTextForCurrentStep += event.delta;
-                // Don't set hasStreamedText yet - we'll set it when we actually output at step-end
+                if (!currentStepHasToolCalls) {
+                  await writeImmediate(event.delta);
+                  fullText += event.delta;
+                  hasStreamedText = true;
+                } else {
+                  bufferedTextForCurrentStep += event.delta;
+                }
               }
             }
 

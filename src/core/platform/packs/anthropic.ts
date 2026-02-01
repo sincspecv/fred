@@ -13,11 +13,15 @@ export const AnthropicProviderFactory: EffectProviderFactory = {
   aliases: ['anthropic'],
   load: async (config: ProviderConfig) => {
     // Dynamic import to avoid hard dependency
-    const dynamicImport = new Function(
-      'specifier',
-      'return import(specifier)'
-    ) as (specifier: string) => Promise<typeof import('@effect/ai-anthropic')>;
-    const module = await dynamicImport('@effect/ai-anthropic');
+    // Use standard dynamic import instead of Function constructor
+    let module: typeof import('@effect/ai-anthropic');
+    try {
+      module = await import('@effect/ai-anthropic');
+    } catch (error) {
+      throw new Error(
+        `Failed to load @effect/ai-anthropic. Install it with: bun add @effect/ai-anthropic`
+      );
+    }
 
     const apiKeyEnvVar = config.apiKeyEnvVar ?? 'ANTHROPIC_API_KEY';
     const apiKeyString = process.env[apiKeyEnvVar];

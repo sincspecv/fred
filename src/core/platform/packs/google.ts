@@ -15,11 +15,15 @@ export const GoogleProviderFactory: EffectProviderFactory = {
   aliases: ['google', 'gemini'],
   load: async (config: ProviderConfig) => {
     // Dynamic import to avoid hard dependency
-    const dynamicImport = new Function(
-      'specifier',
-      'return import(specifier)'
-    ) as (specifier: string) => Promise<typeof import('@effect/ai-google')>;
-    const module = await dynamicImport('@effect/ai-google');
+    // Use standard dynamic import instead of Function constructor
+    let module: typeof import('@effect/ai-google');
+    try {
+      module = await import('@effect/ai-google');
+    } catch (error) {
+      throw new Error(
+        `Failed to load @effect/ai-google. Install it with: bun add @effect/ai-google`
+      );
+    }
 
     const apiKeyEnvVar = config.apiKeyEnvVar ?? 'GOOGLE_GENERATIVE_AI_API_KEY';
     const apiKeyString = process.env[apiKeyEnvVar];

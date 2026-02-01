@@ -1,5 +1,6 @@
-import { ServerHandlers, MessageRequest } from './handlers';
+import { ServerHandlers, validateMessageRequest } from './handlers';
 import { ChatRoutes } from './chat/routes';
+import { sanitizeError } from '../utils/validation';
 
 /**
  * Route handler type
@@ -26,9 +27,19 @@ export class Router {
   private setupRoutes(): void {
     // POST /message
     this.routes.set('POST /message', async (req) => {
-      const body = await req.json() as MessageRequest;
-      const response = await this.handlers.handleMessage(body);
-      return Response.json(response);
+      try {
+        const body = await req.json();
+        // Validate request body against schema
+        const validatedBody = validateMessageRequest(body);
+        const response = await this.handlers.handleMessage(validatedBody);
+        return Response.json(response);
+      } catch (error) {
+        const sanitized = sanitizeError(error, 'Invalid request');
+        return Response.json(
+          { success: false, error: sanitized.message },
+          { status: 400 }
+        );
+      }
     });
 
     // GET /agents
