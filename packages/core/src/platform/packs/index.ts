@@ -1,17 +1,23 @@
 import type { EffectProviderFactory } from '../base';
 
-// TODO: Move provider implementations to @fred/provider-* packages in Plan 03
-import { OpenAiProviderFactory } from './openai';
-import { AnthropicProviderFactory } from './anthropic';
-import { GoogleProviderFactory } from './google';
-import { GroqProviderFactory } from './groq';
-import { OpenRouterProviderFactory } from './openrouter';
-
 /**
  * Dynamic registry for provider packs.
  *
- * Supports both built-in providers (shipped with @fred/core) and
- * external providers (registered at runtime by @fred/provider-* packages).
+ * Supports both built-in providers (from @fred/provider-* packages) and
+ * external providers (registered at runtime by custom packages).
+ *
+ * Provider packages auto-register themselves when imported:
+ *
+ * @example
+ * ```typescript
+ * // In your application:
+ * import '@fred/provider-openai';  // Auto-registers OpenAI provider
+ * import '@fred/provider-anthropic';  // Auto-registers Anthropic provider
+ *
+ * // Now these providers are available via Fred's provider system
+ * await fred.useProvider('openai');
+ * await fred.useProvider('anthropic');
+ * ```
  */
 const packRegistry = new Map<string, EffectProviderFactory>();
 
@@ -19,8 +25,8 @@ const packRegistry = new Map<string, EffectProviderFactory>();
  * Register a provider pack in the registry.
  *
  * This function is used by provider packages to register themselves:
- * - Built-in providers register on module load (below)
- * - External providers call this during their initialization
+ * - Built-in providers from @fred/provider-* packages call this on import
+ * - External providers can also call this during their initialization
  *
  * @param pack - The provider factory to register
  */
@@ -94,20 +100,16 @@ export const BUILTIN_PACKS: Record<string, EffectProviderFactory> = new Proxy(
 );
 
 // =============================================================================
-// Register built-in providers
-// TODO: These registrations will move to @fred/provider-* packages in Plan 03
+// Provider implementations moved to @fred/provider-* packages
 // =============================================================================
-
-registerBuiltinPack(OpenAiProviderFactory);
-registerBuiltinPack(AnthropicProviderFactory);
-registerBuiltinPack(GoogleProviderFactory);
-registerBuiltinPack(GroqProviderFactory);
-registerBuiltinPack(OpenRouterProviderFactory);
-
-// Re-export individual factories for direct access
-// TODO: Move to @fred/provider-* packages in Plan 03
-export { OpenAiProviderFactory } from './openai';
-export { AnthropicProviderFactory } from './anthropic';
-export { GoogleProviderFactory } from './google';
-export { GroqProviderFactory } from './groq';
-export { OpenRouterProviderFactory } from './openrouter';
+//
+// To use providers, install the corresponding package and import it:
+//
+//   import '@fred/provider-openai';     // OpenAI via @effect/ai-openai
+//   import '@fred/provider-anthropic';  // Anthropic via @effect/ai-anthropic
+//   import '@fred/provider-google';     // Google/Gemini via @effect/ai-google
+//   import '@fred/provider-groq';       // Groq (Chat Completions API)
+//   import '@fred/provider-openrouter'; // OpenRouter via @effect/ai-openai
+//
+// Each provider auto-registers itself when imported.
+// =============================================================================

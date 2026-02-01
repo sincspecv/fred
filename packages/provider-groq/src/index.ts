@@ -11,8 +11,8 @@ import * as Prompt from '@effect/ai/Prompt';
 import * as Response from '@effect/ai/Response';
 import * as Tool from '@effect/ai/Tool';
 import { IdGenerator } from '@effect/ai/IdGenerator';
-import type { EffectProviderFactory } from '../base';
-import type { ProviderConfig, ProviderModelDefaults } from '../provider';
+import { registerBuiltinPack } from '@fred/core';
+import type { EffectProviderFactory, ProviderConfig, ProviderModelDefaults } from '@fred/core';
 
 /**
  * Groq Chat Completions API response types
@@ -601,4 +601,8 @@ export const GroqProviderFactory: EffectProviderFactory = {
   },
 };
 
+// Auto-register when imported
+registerBuiltinPack(GroqProviderFactory);
+
+export { GroqProviderFactory as groqPack };
 export default GroqProviderFactory;
