@@ -22,9 +22,30 @@ Fred is a flexible framework for building AI agents with intent-based routing, c
 
 ## Installation
 
-### Using create-fred (Recommended)
+### Package Installation
 
-The easiest way to get started is using `create-fred`:
+Fred is available as modular packages that you install based on your needs:
+
+```bash
+# Core package (required)
+bun add @fred/core effect
+
+# Add AI providers as needed
+bun add @fred/provider-openai @effect/ai-openai
+bun add @fred/provider-anthropic @effect/ai-anthropic
+bun add @fred/provider-google @effect/ai-google
+bun add @fred/provider-groq @effect/platform
+bun add @fred/provider-openrouter @effect/ai-openai
+
+# Install CLI globally (optional)
+bun add -g @fred/cli
+```
+
+Each provider package auto-registers when imported - no additional configuration needed.
+
+### Using create-fred (Recommended for New Projects)
+
+The easiest way to start a new project is using `create-fred`:
 
 ```bash
 bunx create-fred my-project
@@ -35,9 +56,15 @@ This will:
 - Automatically install all dependencies
 - Set up the embedded `fred` CLI for managing your project
 
-### Manual Installation
+### Development Installation
+
+For contributing to Fred:
 
 ```bash
+# Clone the repository
+git clone https://github.com/TheFancyRobot/fred.git
+cd fred
+
 # Install dependencies
 bun install
 ```
