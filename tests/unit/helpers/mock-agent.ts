@@ -1,4 +1,4 @@
-import { AgentInstance, AgentMessage, AgentResponse } from '../../../src/core/agent/agent';
+import { AgentInstance, AgentMessage, AgentResponse } from '../../../packages/core/src/agent/agent';
 
 /**
  * Create a mock agent instance for testing

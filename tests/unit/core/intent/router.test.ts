@@ -1,10 +1,10 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { Effect, Exit, Ref, Layer, Context } from 'effect';
-import { IntentRouter, createIntentRouter } from '../../../../src/core/intent/router';
-import { AgentService } from '../../../../src/core/agent/service';
-import { IntentMatch, Action } from '../../../../src/core/intent/intent';
+import { IntentRouter, createIntentRouter } from '../../../../packages/core/src/intent/router';
+import { AgentService } from '../../../../packages/core/src/agent/service';
+import { IntentMatch, Action } from '../../../../packages/core/src/intent/intent';
 import { createMockAgent } from '../../helpers/mock-agent';
-import type { AgentInstance } from '../../../../src/core/agent/agent';
+import type { AgentInstance } from '../../../../packages/core/src/agent/agent';
 
 describe('IntentRouter', () => {
   // Map to store mock agents

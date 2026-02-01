@@ -7,11 +7,11 @@
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { CheckpointManager } from '../../../../src/core/pipeline/checkpoint/manager';
-import { SqliteCheckpointStorage } from '../../../../src/core/pipeline/checkpoint/sqlite';
-import { PauseManager } from '../../../../src/core/pipeline/pause/manager';
-import type { PipelineContext } from '../../../../src/core/pipeline/context';
-import type { PauseMetadata } from '../../../../src/core/pipeline/pause/types';
+import { CheckpointManager } from '../../../../packages/core/src/pipeline/checkpoint/manager';
+import { SqliteCheckpointStorage } from '../../../../packages/core/src/pipeline/checkpoint/sqlite';
+import { PauseManager } from '../../../../packages/core/src/pipeline/pause/manager';
+import type { PipelineContext } from '../../../../packages/core/src/pipeline/context';
+import type { PauseMetadata } from '../../../../packages/core/src/pipeline/pause/types';
 
 describe('Persistence Tracing', () => {
   let checkpointManager: CheckpointManager;

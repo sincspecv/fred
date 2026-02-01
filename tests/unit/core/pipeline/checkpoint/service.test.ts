@@ -1,9 +1,9 @@
 import { describe, test, expect } from 'bun:test';
 import { Effect } from 'effect';
-import { CheckpointService, CheckpointServiceLive } from '../../../../../src/core/pipeline/checkpoint/service';
-import { CheckpointNotFoundError } from '../../../../../src/core/pipeline/errors';
-import type { CheckpointStorage, Checkpoint, CheckpointStatus } from '../../../../../src/core/pipeline/checkpoint/types';
-import type { PipelineContext } from '../../../../../src/core/pipeline/context';
+import { CheckpointService, CheckpointServiceLive } from '../../../../../packages/core/src/pipeline/checkpoint/service';
+import { CheckpointNotFoundError } from '../../../../../packages/core/src/pipeline/errors';
+import type { CheckpointStorage, Checkpoint, CheckpointStatus } from '../../../../../packages/core/src/pipeline/checkpoint/types';
+import type { PipelineContext } from '../../../../../packages/core/src/pipeline/context';
 
 /**
  * In-memory checkpoint storage for testing

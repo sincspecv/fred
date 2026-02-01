@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { Effect, Stream } from 'effect';
 import { LanguageModel, Prompt } from '@effect/ai';
-import { streamMultiStep } from '../../../../src/core/agent/streaming';
+import { streamMultiStep } from '../../../../packages/core/src/agent/streaming';
 
 describe('streamMultiStep', () => {
   const createMockModel = (parts: any[]) => {

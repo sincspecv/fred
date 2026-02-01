@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach, mock, spyOn } from 'bun:test';
-import { AgentFactory } from '../../../../src/core/agent/factory';
-import { ToolRegistry } from '../../../../src/core/tool/registry';
-import { AgentConfig } from '../../../../src/core/agent/agent';
+import { AgentFactory } from '../../../../packages/core/src/agent/factory';
+import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
+import { AgentConfig } from '../../../../packages/core/src/agent/agent';
 import { createMockProvider } from '../../helpers/mock-provider';
-import { ProviderDefinition } from '../../../../src/core/platform/provider';
+import { ProviderDefinition } from '../../../../packages/core/src/platform/provider';
 
 describe('AgentFactory', () => {
   let factory: AgentFactory;

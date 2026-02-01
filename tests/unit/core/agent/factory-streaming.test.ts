@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { Effect, Layer, Stream } from 'effect';
 import { LanguageModel, Prompt, Tool, Toolkit } from '@effect/ai';
-import { AgentFactory } from '../../../../src/core/agent/factory';
-import { ToolRegistry } from '../../../../src/core/tool/registry';
+import { AgentFactory } from '../../../../packages/core/src/agent/factory';
+import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
 import { createMockProvider } from '../../../unit/helpers/mock-provider';
-import type { StreamEvent } from '../../../../src/core/stream/events';
+import type { StreamEvent } from '../../../../packages/core/src/stream/events';
 
 describe('AgentFactory streamMessage integration', () => {
   let factory: AgentFactory;

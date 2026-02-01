@@ -9,12 +9,12 @@
  */
 
 import { describe, it, expect, beforeEach, mock, spyOn } from 'bun:test';
-import { executePipelineV2 } from '../../../../src/core/pipeline/executor';
-import type { ExtendedExecutionOptions } from '../../../../src/core/pipeline/executor';
-import type { PipelineConfigV2 } from '../../../../src/core/pipeline/pipeline';
-import type { PipelineContext } from '../../../../src/core/pipeline/context';
-import type { AgentManager } from '../../../../src/core/agent/manager';
-import type { CheckpointManager } from '../../../../src/core/pipeline/checkpoint/manager';
+import { executePipelineV2 } from '../../../../packages/core/src/pipeline/executor';
+import type { ExtendedExecutionOptions } from '../../../../packages/core/src/pipeline/executor';
+import type { PipelineConfigV2 } from '../../../../packages/core/src/pipeline/pipeline';
+import type { PipelineContext } from '../../../../packages/core/src/pipeline/context';
+import type { AgentManager } from '../../../../packages/core/src/agent/manager';
+import type { CheckpointManager } from '../../../../packages/core/src/pipeline/checkpoint/manager';
 
 // -----------------------------------------------------------------------------
 // Test Helpers

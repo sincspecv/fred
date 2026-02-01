@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { ToolRegistry } from '../../../../src/core/tool/registry';
-import { Tool } from '../../../../src/core/tool/tool';
+import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
+import { Tool } from '../../../../packages/core/src/tool/tool';
 import { Effect, LogLevel } from 'effect';
-import type { RedactionFilter, RedactionContext } from '../../../../src/core/observability/errors';
-import type { VerbosityOverrides } from '../../../../src/core/observability/otel';
+import type { RedactionFilter, RedactionContext } from '../../../../packages/core/src/observability/errors';
+import type { VerbosityOverrides } from '../../../../packages/core/src/observability/otel';
 
 describe('ToolRegistry', () => {
   let registry: ToolRegistry;

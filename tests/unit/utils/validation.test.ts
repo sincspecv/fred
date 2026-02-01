@@ -6,7 +6,7 @@ import {
   validatePipelineMessageCount,
   validateRegexPattern,
   sanitizeError,
-} from '../../../src/utils/validation';
+} from '../../../packages/core/src/utils/validation';
 
 describe('Validation Utils', () => {
   describe('validateId', () => {

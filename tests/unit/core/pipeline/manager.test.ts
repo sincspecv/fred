@@ -1,11 +1,11 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { PipelineManager } from '../../../../src/core/pipeline/manager';
-import { AgentManager } from '../../../../src/core/agent/manager';
-import { ToolRegistry } from '../../../../src/core/tool/registry';
-import { PipelineConfig } from '../../../../src/core/pipeline/pipeline';
+import { PipelineManager } from '../../../../packages/core/src/pipeline/manager';
+import { AgentManager } from '../../../../packages/core/src/agent/manager';
+import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
+import { PipelineConfig } from '../../../../packages/core/src/pipeline/pipeline';
 import { createMockAgent } from '../../helpers/mock-agent';
 import { createMockStorage } from '../../helpers/mock-storage';
-import { ContextManager } from '../../../../src/core/context/manager';
+import { ContextManager } from '../../../../packages/core/src/context/manager';
 import { createMockProvider } from '../../helpers/mock-provider';
 
 describe('PipelineManager', () => {

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { isFilePath, loadPromptFile } from '../../../src/utils/prompt-loader';
+import { isFilePath, loadPromptFile } from '../../../packages/core/src/utils/prompt-loader';
 
 describe('Prompt Loader', () => {
 

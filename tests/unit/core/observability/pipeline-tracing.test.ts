@@ -7,15 +7,15 @@
  */
 
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
-import { executePipelineV2 } from '../../../../src/core/pipeline/executor';
-import { executeGraphWorkflow } from '../../../../src/core/pipeline/graph-executor';
-import { AgentManager } from '../../../../src/core/agent/manager';
-import { AgentFactory } from '../../../../src/core/agent/factory';
-import { ToolRegistry } from '../../../../src/core/tool/registry';
-import { Tracer } from '../../../../src/core/tracing';
-import { Span } from '../../../../src/core/tracing/types';
-import type { PipelineConfigV2 } from '../../../../src/core/pipeline/pipeline';
-import type { GraphWorkflowConfig } from '../../../../src/core/pipeline/graph';
+import { executePipelineV2 } from '../../../../packages/core/src/pipeline/executor';
+import { executeGraphWorkflow } from '../../../../packages/core/src/pipeline/graph-executor';
+import { AgentManager } from '../../../../packages/core/src/agent/manager';
+import { AgentFactory } from '../../../../packages/core/src/agent/factory';
+import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
+import { Tracer } from '../../../../packages/core/src/tracing';
+import { Span } from '../../../../packages/core/src/tracing/types';
+import type { PipelineConfigV2 } from '../../../../packages/core/src/pipeline/pipeline';
+import type { GraphWorkflowConfig } from '../../../../packages/core/src/pipeline/graph';
 
 /**
  * Mock tracer for capturing span events and attributes

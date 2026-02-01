@@ -14,12 +14,12 @@ import {
   redact,
   defaultRedactionFilter,
   type RedactionContext,
-} from '../../../../src/core/observability/errors';
+} from '../../../../packages/core/src/observability/errors';
 import {
   shouldLogEvent,
   getEffectiveLogLevel,
   type VerbosityOverrides,
-} from '../../../../src/core/observability/otel';
+} from '../../../../packages/core/src/observability/otel';
 import { LogLevel } from 'effect';
 
 describe('Error Classification', () => {

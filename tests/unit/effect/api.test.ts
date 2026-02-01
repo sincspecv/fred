@@ -28,7 +28,7 @@ import {
 
   // Runtime
   createScopedFredRuntime,
-} from '../../../src/effect';
+} from '../../../packages/core/src/effect';
 
 describe('Effect API exports', () => {
   describe('Services', () => {

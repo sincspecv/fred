@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'bun:test';
 import { Effect, Layer } from 'effect';
-import { ProviderRegistryService, ProviderRegistryServiceLive } from '../../../../src/core/platform/service';
-import { ProviderNotFoundError } from '../../../../src/core/platform/errors';
-import type { ProviderDefinition, ProviderConfig } from '../../../../src/core/platform/provider';
+import { ProviderRegistryService, ProviderRegistryServiceLive } from '../../../../packages/core/src/platform/service';
+import { ProviderNotFoundError } from '../../../../packages/core/src/platform/errors';
+import type { ProviderDefinition, ProviderConfig } from '../../../../packages/core/src/platform/provider';
 
 // Mock provider definition for testing
 const createMockDefinition = (id: string, aliases: string[] = []): ProviderDefinition => ({

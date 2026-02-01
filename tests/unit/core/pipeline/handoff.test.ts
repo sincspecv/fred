@@ -6,7 +6,7 @@ import {
   type HandoffConfig,
   type HandoffRequest,
   type PipelineContext,
-} from '../../../../src/core/pipeline';
+} from '../../../../packages/core/src/pipeline';
 
 describe('Handoff Validation', () => {
   describe('validateHandoffTarget', () => {

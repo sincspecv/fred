@@ -1,13 +1,13 @@
 import { describe, test, expect } from 'bun:test';
 import { Effect, Layer } from 'effect';
-import { PipelineService, PipelineServiceLive } from '../../../../src/core/pipeline/service';
-import { AgentService, AgentServiceLive } from '../../../../src/core/agent/service';
-import { HookManagerService, HookManagerServiceLive } from '../../../../src/core/hooks/service';
-import { CheckpointService, CheckpointServiceLive } from '../../../../src/core/pipeline/checkpoint/service';
-import { PauseService, PauseServiceLive } from '../../../../src/core/pipeline/pause/service';
-import { ToolRegistryService, ToolRegistryServiceLive } from '../../../../src/core/tool/service';
-import { ProviderRegistryService, ProviderRegistryServiceLive } from '../../../../src/core/platform/service';
-import type { CheckpointStorage, Checkpoint, CheckpointStatus } from '../../../../src/core/pipeline/checkpoint/types';
+import { PipelineService, PipelineServiceLive } from '../../../../packages/core/src/pipeline/service';
+import { AgentService, AgentServiceLive } from '../../../../packages/core/src/agent/service';
+import { HookManagerService, HookManagerServiceLive } from '../../../../packages/core/src/hooks/service';
+import { CheckpointService, CheckpointServiceLive } from '../../../../packages/core/src/pipeline/checkpoint/service';
+import { PauseService, PauseServiceLive } from '../../../../packages/core/src/pipeline/pause/service';
+import { ToolRegistryService, ToolRegistryServiceLive } from '../../../../packages/core/src/tool/service';
+import { ProviderRegistryService, ProviderRegistryServiceLive } from '../../../../packages/core/src/platform/service';
+import type { CheckpointStorage, Checkpoint, CheckpointStatus } from '../../../../packages/core/src/pipeline/checkpoint/types';
 
 /**
  * Create a mock CheckpointStorage for testing.

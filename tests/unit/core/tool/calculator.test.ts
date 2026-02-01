@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { createCalculatorTool } from '../../../../src/core/tool/calculator';
+import { createCalculatorTool } from '../../../../packages/core/src/tool/calculator';
 
 describe('Calculator Tool', () => {
   const calculator = createCalculatorTool();

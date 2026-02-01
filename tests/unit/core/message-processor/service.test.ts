@@ -5,7 +5,7 @@ import {
   MessageProcessorServiceLive,
   MessageProcessorServiceLiveWithConfig,
   type MessageProcessorConfig,
-} from '../../../../src/core/message-processor/service';
+} from '../../../../packages/core/src/message-processor/service';
 import {
   MessageValidationError,
   NoRouteFoundError,
@@ -14,14 +14,14 @@ import {
   ConversationIdRequiredError,
   AgentNotFoundError,
   MaxHandoffDepthError,
-} from '../../../../src/core/message-processor/errors';
+} from '../../../../packages/core/src/message-processor/errors';
 import {
   isToolFailureRecord,
   type ToolFailureRecord,
-} from '../../../../src/core/message-processor/types';
-import { AgentService } from '../../../../src/core/agent/service';
-import { PipelineService } from '../../../../src/core/pipeline/service';
-import { ContextStorageService } from '../../../../src/core/context/service';
+} from '../../../../packages/core/src/message-processor/types';
+import { AgentService } from '../../../../packages/core/src/agent/service';
+import { PipelineService } from '../../../../packages/core/src/pipeline/service';
+import { ContextStorageService } from '../../../../packages/core/src/context/service';
 
 describe('MessageProcessorService Error Types', () => {
   test('MessageValidationError creates correct structure', () => {

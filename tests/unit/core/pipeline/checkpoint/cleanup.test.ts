@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
-import { CheckpointCleanupTask } from '../../../../../src/core/pipeline/checkpoint/cleanup';
-import type { CheckpointStorage } from '../../../../../src/core/pipeline/checkpoint/types';
+import { CheckpointCleanupTask } from '../../../../../packages/core/src/pipeline/checkpoint/cleanup';
+import type { CheckpointStorage } from '../../../../../packages/core/src/pipeline/checkpoint/types';
 
 describe('CheckpointCleanupTask', () => {
   let mockStorage: CheckpointStorage;

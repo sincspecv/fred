@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import type { StreamEvent } from '@fred/core';
+import type { StreamEvent } from '../../packages/core/src/stream/events';
 import { Stream } from 'effect';
 import { createStreamResult, createStreamResultFromIterable } from '../../packages/core/src/stream/result';
 

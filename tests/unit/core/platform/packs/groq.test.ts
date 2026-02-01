@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { GroqProviderFactory } from '../../../../../src/core/platform/packs/groq';
+import { GroqProviderFactory } from '../../../../../packages/provider-groq/src/index';
 
 describe('GroqProviderFactory', () => {
   describe('static properties', () => {

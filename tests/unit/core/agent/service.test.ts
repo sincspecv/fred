@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { Effect, Layer, Ref } from 'effect';
-import { AgentService, AgentServiceLive } from '../../../../src/core/agent/service';
-import { ToolRegistryService, ToolRegistryServiceLive } from '../../../../src/core/tool/service';
-import { ProviderRegistryService, ProviderRegistryServiceLive } from '../../../../src/core/platform/service';
-import { AgentNotFoundError, AgentAlreadyExistsError, AgentCreationError } from '../../../../src/core/agent/errors';
-import type { AgentConfig } from '../../../../src/core/agent/agent';
+import { AgentService, AgentServiceLive } from '../../../../packages/core/src/agent/service';
+import { ToolRegistryService, ToolRegistryServiceLive } from '../../../../packages/core/src/tool/service';
+import { ProviderRegistryService, ProviderRegistryServiceLive } from '../../../../packages/core/src/platform/service';
+import { AgentNotFoundError, AgentAlreadyExistsError, AgentCreationError } from '../../../../packages/core/src/agent/errors';
+import type { AgentConfig } from '../../../../packages/core/src/agent/agent';
 
 /**
  * Unit tests for AgentService

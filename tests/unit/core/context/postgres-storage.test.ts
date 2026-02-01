@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
-import { PostgresContextStorage } from '../../../../src/core/context/storage/postgres';
-import type { ConversationContext } from '../../../../src/core/context/context';
+import { PostgresContextStorage } from '../../../../packages/core/src/context/storage/postgres';
+import type { ConversationContext } from '../../../../packages/core/src/context/context';
 
 // -----------------------------------------------------------------------------
 // Mock Client Factory

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { Effect } from 'effect';
-import { HookManagerService, HookManagerServiceLive } from '../../../../src/core/hooks/service';
-import type { HookType, HookEvent } from '../../../../src/core/hooks/types';
+import { HookManagerService, HookManagerServiceLive } from '../../../../packages/core/src/hooks/service';
+import type { HookType, HookEvent } from '../../../../packages/core/src/hooks/types';
 
 const runWithService = <A, E>(effect: Effect.Effect<A, E, HookManagerService>) =>
   Effect.runPromise(effect.pipe(Effect.provide(HookManagerServiceLive)));

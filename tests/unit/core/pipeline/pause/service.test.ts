@@ -1,11 +1,11 @@
 import { describe, test, expect } from 'bun:test';
 import { Effect, Layer } from 'effect';
-import { PauseService, PauseServiceLive } from '../../../../../src/core/pipeline/pause/service';
-import { CheckpointService, CheckpointServiceLive } from '../../../../../src/core/pipeline/checkpoint/service';
-import { PauseNotFoundError, PauseExpiredError } from '../../../../../src/core/pipeline/errors';
-import type { CheckpointStorage, Checkpoint, CheckpointStatus } from '../../../../../src/core/pipeline/checkpoint/types';
-import type { PipelineContext } from '../../../../../src/core/pipeline/context';
-import type { PauseMetadata } from '../../../../../src/core/pipeline/pause/types';
+import { PauseService, PauseServiceLive } from '../../../../../packages/core/src/pipeline/pause/service';
+import { CheckpointService, CheckpointServiceLive } from '../../../../../packages/core/src/pipeline/checkpoint/service';
+import { PauseNotFoundError, PauseExpiredError } from '../../../../../packages/core/src/pipeline/errors';
+import type { CheckpointStorage, Checkpoint, CheckpointStatus } from '../../../../../packages/core/src/pipeline/checkpoint/types';
+import type { PipelineContext } from '../../../../../packages/core/src/pipeline/context';
+import type { PauseMetadata } from '../../../../../packages/core/src/pipeline/pause/types';
 
 /**
  * In-memory checkpoint storage for testing

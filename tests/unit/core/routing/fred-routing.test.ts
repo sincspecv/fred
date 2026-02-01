@@ -5,10 +5,10 @@
  */
 
 import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
-import { Fred } from '../../../../src/index';
-import { RoutingConfig } from '../../../../src/core/routing/types';
+import { Fred } from '../../../../packages/core/src/index';
+import { RoutingConfig } from '../../../../packages/core/src/routing/types';
 import { createMockProvider } from '../../helpers/mock-provider';
-import { AgentInstance } from '../../../../src/core/agent/agent';
+import { AgentInstance } from '../../../../packages/core/src/agent/agent';
 
 /**
  * Manually add a mock agent to Fred's agent manager for testing.

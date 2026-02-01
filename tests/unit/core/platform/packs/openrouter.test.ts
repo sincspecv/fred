@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { OpenRouterProviderFactory } from '../../../../../src/core/platform/packs/openrouter';
+import { OpenRouterProviderFactory } from '../../../../../packages/provider-openrouter/src/index';
 
 describe('OpenRouterProviderFactory', () => {
   describe('static properties', () => {

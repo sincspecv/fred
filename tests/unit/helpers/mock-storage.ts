@@ -1,4 +1,4 @@
-import { ContextStorage, ConversationContext } from '../../../src/core/context/context';
+import { ContextStorage, ConversationContext } from '../../../packages/core/src/context/context';
 
 /**
  * Create a mock in-memory context storage for testing

@@ -5,10 +5,10 @@
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { PipelineManager } from '../../../../src/core/pipeline/manager';
-import { AgentManager } from '../../../../src/core/agent/manager';
-import type { GraphWorkflowConfig } from '../../../../src/core/pipeline/graph';
-import type { AgentResponse } from '../../../../src/core/agent/agent';
+import { PipelineManager } from '../../../../packages/core/src/pipeline/manager';
+import { AgentManager } from '../../../../packages/core/src/agent/manager';
+import type { GraphWorkflowConfig } from '../../../../packages/core/src/pipeline/graph';
+import type { AgentResponse } from '../../../../packages/core/src/agent/agent';
 
 // Mock agent manager
 function createMockAgentManager(): AgentManager {

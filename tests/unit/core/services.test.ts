@@ -19,7 +19,7 @@ import {
   HookManagerService,
   CheckpointService,
   PauseService,
-} from '../../../src/core/services';
+} from '../../../packages/core/src/services';
 
 describe('FredLayers', () => {
   test('composes all services without errors', async () => {
@@ -156,7 +156,7 @@ describe('createScopedFredRuntime', () => {
 
 describe('Fred.create integration', () => {
   test('Fred.create initializes runtime', async () => {
-    const { Fred } = await import('../../../src/index');
+    const { Fred } = await import('../../../packages/core/src/index');
     const fred = await Fred.create();
 
     expect(fred).toBeInstanceOf(Fred);
@@ -179,7 +179,7 @@ describe('Fred.create integration', () => {
   });
 
   test('Fred constructor with lazy runtime works', async () => {
-    const { Fred } = await import('../../../src/index');
+    const { Fred } = await import('../../../packages/core/src/index');
     const fred = new Fred();
 
     // Runtime not yet initialized

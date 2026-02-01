@@ -7,8 +7,8 @@ import {
   wrapToolExecution,
   type ToolValidationError,
   type FieldValidationError,
-} from '../../../../src/core/tool/validation';
-import type { Tool } from '../../../../src/core/tool/tool';
+} from '../../../../packages/core/src/tool/validation';
+import type { Tool } from '../../../../packages/core/src/tool/tool';
 
 describe('Tool Validation - Structured Errors', () => {
   describe('Field-level validation error format', () => {

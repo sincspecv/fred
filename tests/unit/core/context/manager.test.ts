@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { ContextManager } from '../../../../src/core/context/manager';
+import { ContextManager } from '../../../../packages/core/src/context/manager';
 import { createMockStorage } from '../../helpers/mock-storage';
-import { ContextStorage, ConversationContext } from '../../../../src/core/context/context';
+import { ContextStorage, ConversationContext } from '../../../../packages/core/src/context/context';
 import type { Prompt } from '@effect/ai';
 
 describe('ContextManager', () => {

@@ -7,10 +7,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { PostgresCheckpointStorage } from '../../../../../src/core/pipeline/checkpoint/postgres';
-import { SqliteCheckpointStorage } from '../../../../../src/core/pipeline/checkpoint/sqlite';
-import type { Checkpoint, CheckpointStatus } from '../../../../../src/core/pipeline/checkpoint/types';
-import type { PipelineContext } from '../../../../../src/core/pipeline/context';
+import { PostgresCheckpointStorage } from '../../../../../packages/core/src/pipeline/checkpoint/postgres';
+import { SqliteCheckpointStorage } from '../../../../../packages/core/src/pipeline/checkpoint/sqlite';
+import type { Checkpoint, CheckpointStatus } from '../../../../../packages/core/src/pipeline/checkpoint/types';
+import type { PipelineContext } from '../../../../../packages/core/src/pipeline/context';
 
 // -----------------------------------------------------------------------------
 // Test Data Helpers

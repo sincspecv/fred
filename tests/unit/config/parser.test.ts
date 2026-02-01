@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import { parseConfig, detectConfigFormat } from '../../../src/config/parser';
-import { FrameworkConfig } from '../../../src/config/types';
+import { parseConfig, detectConfigFormat } from '../../../packages/core/src/config/parser';
+import { FrameworkConfig } from '../../../packages/core/src/config/types';
 
 describe('Config Parser', () => {
   describe('parseConfig - JSON', () => {

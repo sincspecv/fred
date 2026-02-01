@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { Stream } from 'effect';
-import type { AgentInstance, AgentMessage, AgentResponse } from '../../../../src/core/agent/agent';
+import type { AgentInstance, AgentMessage, AgentResponse } from '../../../../packages/core/src/agent/agent';
 import type {
   StreamEvent,
   HandoffStartEvent,
   RunEndEvent,
-} from '../../../../src/core/stream/events';
+} from '../../../../packages/core/src/stream/events';
 
 describe('Streaming Handoff Events', () => {
   describe('HandoffStartEvent type', () => {
@@ -174,7 +174,7 @@ describe('Streaming Handoff Events', () => {
 
 describe('makeHandoffStartEvent factory', () => {
   it('should create a valid HandoffStartEvent', async () => {
-    const { makeHandoffStartEvent } = await import('../../../../src/core/stream/events');
+    const { makeHandoffStartEvent } = await import('../../../../packages/core/src/stream/events');
 
     const event = makeHandoffStartEvent({
       runId: 'run_abc',
@@ -201,7 +201,7 @@ describe('makeHandoffStartEvent factory', () => {
   });
 
   it('should work without optional fields', async () => {
-    const { makeHandoffStartEvent } = await import('../../../../src/core/stream/events');
+    const { makeHandoffStartEvent } = await import('../../../../packages/core/src/stream/events');
 
     const event = makeHandoffStartEvent({
       runId: 'run_123',

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
-import { AgentManager } from '../../../../src/core/agent/manager';
-import { ToolRegistry } from '../../../../src/core/tool/registry';
-import { AgentConfig, AgentInstance } from '../../../../src/core/agent/agent';
+import { AgentManager } from '../../../../packages/core/src/agent/manager';
+import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
+import { AgentConfig, AgentInstance } from '../../../../packages/core/src/agent/agent';
 import { createMockAgent, createMockAgentWithResponse } from '../../helpers/mock-agent';
 import { createMockProvider } from '../../helpers/mock-provider';
 

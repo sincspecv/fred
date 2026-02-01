@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { validateConfig, extractIntents, extractAgents, extractTools, extractPipelines } from '../../../src/config/loader';
-import { FrameworkConfig } from '../../../src/config/types';
+import { validateConfig, extractIntents, extractAgents, extractTools, extractPipelines } from '../../../packages/core/src/config/loader';
+import { FrameworkConfig } from '../../../packages/core/src/config/types';
 
 describe('Config Loader', () => {
   describe('validateConfig', () => {

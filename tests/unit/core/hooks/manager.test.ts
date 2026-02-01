@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { HookManager } from '../../../../src/core/hooks/manager';
-import { HookType, HookEvent, HookResult } from '../../../../src/core/hooks/types';
+import { HookManager } from '../../../../packages/core/src/hooks/manager';
+import { HookType, HookEvent, HookResult } from '../../../../packages/core/src/hooks/types';
 
 describe('HookManager', () => {
   let manager: HookManager;

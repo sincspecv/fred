@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
-import { GraphWorkflowBuilder } from '../../../../src/core/pipeline/graph-builder';
-import { GraphWorkflowConfig } from '../../../../src/core/pipeline/graph';
-import { GraphValidationError } from '../../../../src/core/pipeline/graph-validator';
+import { GraphWorkflowBuilder } from '../../../../packages/core/src/pipeline/graph-builder';
+import { GraphWorkflowConfig } from '../../../../packages/core/src/pipeline/graph';
+import { GraphValidationError } from '../../../../packages/core/src/pipeline/graph-validator';
 
 describe('GraphWorkflowBuilder', () => {
   test('creates valid GraphWorkflowConfig', () => {

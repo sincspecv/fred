@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { calculateSimilarity, semanticMatch } from '../../../src/utils/semantic';
+import { calculateSimilarity, semanticMatch } from '../../../packages/core/src/utils/semantic';
 
 describe('Semantic Utils', () => {
   describe('calculateSimilarity', () => {

@@ -8,7 +8,7 @@ import {
   makeToolCallEvent,
   makeToolResultEvent,
   makeToolErrorEvent,
-} from '../../../../src/core/stream/events';
+} from '../../../../packages/core/src/stream/events';
 
 describe('Stream Event Factories', () => {
   const runId = 'run_123';

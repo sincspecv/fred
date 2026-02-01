@@ -1,6 +1,6 @@
 import { Effect, Layer } from 'effect';
 import type { LanguageModel } from '@effect/ai';
-import { ProviderDefinition } from '../../../src/core/platform/provider';
+import { ProviderDefinition } from '../../../packages/core/src/platform/provider';
 
 export function createMockProvider(platform: string = 'openai'): ProviderDefinition {
   const mockModel = {

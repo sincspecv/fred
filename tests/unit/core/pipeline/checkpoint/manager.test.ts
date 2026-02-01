@@ -3,13 +3,13 @@ import {
   CheckpointManager,
   type CheckpointManagerOptions,
   type SaveCheckpointOptions,
-} from '../../../../../src/core/pipeline/checkpoint/manager';
+} from '../../../../../packages/core/src/pipeline/checkpoint/manager';
 import type {
   CheckpointStorage,
   Checkpoint,
   CheckpointStatus,
-} from '../../../../../src/core/pipeline/checkpoint/types';
-import type { PipelineContext } from '../../../../../src/core/pipeline/context';
+} from '../../../../../packages/core/src/pipeline/checkpoint/types';
+import type { PipelineContext } from '../../../../../packages/core/src/pipeline/context';
 
 /**
  * Create a mock CheckpointStorage for testing.

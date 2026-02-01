@@ -4,8 +4,8 @@ import {
   deserializeMessage,
   serializeMetadata,
   deserializeMetadata,
-} from '../../../../src/core/context/storage/serialization';
-import type { ConversationMetadata } from '../../../../src/core/context/context';
+} from '../../../../packages/core/src/context/storage/serialization';
+import type { ConversationMetadata } from '../../../../packages/core/src/context/context';
 
 // Helper to create a mock Prompt message matching @effect/ai structure
 const MessageTypeId = '~effect/ai/Prompt/Message';

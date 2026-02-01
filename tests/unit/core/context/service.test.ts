@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { Effect, Layer } from 'effect';
-import { ContextStorageService, ContextStorageServiceLive } from '../../../../src/core/context/service';
-import { ContextNotFoundError } from '../../../../src/core/context/errors';
+import { ContextStorageService, ContextStorageServiceLive } from '../../../../packages/core/src/context/service';
+import { ContextNotFoundError } from '../../../../packages/core/src/context/errors';
 
 const runWithService = <A, E>(effect: Effect.Effect<A, E, ContextStorageService>) =>
   Effect.runPromise(effect.pipe(Effect.provide(ContextStorageServiceLive)));

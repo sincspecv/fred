@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'bun:test';
 import { Effect } from 'effect';
-import { ToolRegistryService, ToolRegistryServiceLive } from '../../../../src/core/tool/service';
-import { ToolNotFoundError, ToolAlreadyExistsError } from '../../../../src/core/tool/errors';
-import type { Tool } from '../../../../src/core/tool/tool';
+import { ToolRegistryService, ToolRegistryServiceLive } from '../../../../packages/core/src/tool/service';
+import { ToolNotFoundError, ToolAlreadyExistsError } from '../../../../packages/core/src/tool/errors';
+import type { Tool } from '../../../../packages/core/src/tool/tool';
 
 const createTestTool = (id: string): Tool => ({
   id,

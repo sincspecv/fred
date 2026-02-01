@@ -5,10 +5,10 @@
  */
 
 import { describe, it, expect, spyOn } from 'bun:test';
-import { WorkflowManager } from '../../../../src/core/workflow/manager';
-import { ToolRegistry } from '../../../../src/core/tool/registry';
-import { AgentManager } from '../../../../src/core/agent/manager';
-import { AgentInstance } from '../../../../src/core/agent/agent';
+import { WorkflowManager } from '../../../../packages/core/src/workflow/manager';
+import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
+import { AgentManager } from '../../../../packages/core/src/agent/manager';
+import { AgentInstance } from '../../../../packages/core/src/agent/agent';
 
 /**
  * Create a mock Fred-like object with agent manager

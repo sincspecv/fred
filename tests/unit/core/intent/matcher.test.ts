@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { Effect, Exit } from 'effect';
-import { createIntentMatcher, IntentMatcher } from '../../../../src/core/intent/matcher';
-import type { Intent } from '../../../../src/core/intent/intent';
+import { createIntentMatcher, IntentMatcher } from '../../../../packages/core/src/intent/matcher';
+import type { Intent } from '../../../../packages/core/src/intent/intent';
 
 describe('IntentMatcher', () => {
   const createTestMatcher = () => Effect.runPromise(createIntentMatcher());

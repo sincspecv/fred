@@ -6,12 +6,12 @@
 
 import { describe, it, expect, beforeEach, mock, spyOn } from 'bun:test';
 import { Effect, Exit } from 'effect';
-import { MessageRouter } from '../../../../src/core/routing/router';
-import { RoutingConfig, RoutingRule } from '../../../../src/core/routing/types';
-import { AgentManager } from '../../../../src/core/agent/manager';
-import { HookManager } from '../../../../src/core/hooks/manager';
-import { ToolRegistry } from '../../../../src/core/tool/registry';
-import { AgentInstance } from '../../../../src/core/agent/agent';
+import { MessageRouter } from '../../../../packages/core/src/routing/router';
+import { RoutingConfig, RoutingRule } from '../../../../packages/core/src/routing/types';
+import { AgentManager } from '../../../../packages/core/src/agent/manager';
+import { HookManager } from '../../../../packages/core/src/hooks/manager';
+import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
+import { AgentInstance } from '../../../../packages/core/src/agent/agent';
 
 /**
  * Create a mock agent manager with optional registered agents.

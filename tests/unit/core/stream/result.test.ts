@@ -5,8 +5,8 @@ import {
   createStreamResult,
   createStreamResultFromIterable,
   type TokenUsage
-} from '../../../../src/core/stream/result';
-import type { StreamEvent, TokenEvent, StepStartEvent, StepEndEvent, UsageEvent, ToolCallEvent, ToolResultEvent } from '../../../../src/core/stream/events';
+} from '../../../../packages/core/src/stream/result';
+import type { StreamEvent, TokenEvent, StepStartEvent, StepEndEvent, UsageEvent, ToolCallEvent, ToolResultEvent } from '../../../../packages/core/src/stream/events';
 
 // Helper to create test events
 const createTokenEvent = (delta: string, accumulated: string = delta): StreamEvent => ({

@@ -1,10 +1,18 @@
 import { describe, test, expect } from 'bun:test';
+
+// Import provider packages to trigger auto-registration
+import '../../../../../packages/provider-openai/src/index';
+import '../../../../../packages/provider-anthropic/src/index';
+import '../../../../../packages/provider-google/src/index';
+import '../../../../../packages/provider-groq/src/index';
+import '../../../../../packages/provider-openrouter/src/index';
+
 import {
   BUILTIN_PACKS,
   loadBuiltinPack,
   isBuiltinPack,
   getBuiltinPackIds,
-} from '../../../../../src/core/platform/packs/index';
+} from '../../../../../packages/core/src/platform/packs/index';
 
 describe('Built-in Pack Registry', () => {
   describe('BUILTIN_PACKS', () => {
@@ -19,7 +27,8 @@ describe('Built-in Pack Registry', () => {
     });
 
     test('includes all expected providers', () => {
-      const expectedProviders = ['anthropic', 'google', 'groq', 'openai', 'openrouter'];
+      // Note: 'gemini' is an alias for 'google' - both are registered
+      const expectedProviders = ['anthropic', 'gemini', 'google', 'groq', 'openai', 'openrouter'];
       const actualProviders = Object.keys(BUILTIN_PACKS).sort();
 
       expect(actualProviders).toEqual(expectedProviders);

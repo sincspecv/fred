@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { SqliteContextStorage } from '../../../../src/core/context/storage/sqlite';
+import { SqliteContextStorage } from '../../../../packages/core/src/context/storage/sqlite';
 import type {
   ConversationContext,
   ConversationMetadata,
-} from '../../../../src/core/context/context';
+} from '../../../../packages/core/src/context/context';
 
 // Helper to create a mock Prompt message matching @effect/ai structure
 const MessageTypeId = '~effect/ai/Prompt/Message';
