@@ -439,10 +439,43 @@ VERCEL_API_KEY=your_vercel_key
 # OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-**Note**: 
+**Note**:
 - Dev-chat automatically detects available providers from environment variables
 - You only need to add the API key for the provider you want to use
 - Make sure `.env` is in your `.gitignore` to avoid committing secrets
+
+## Release Process (Maintainers)
+
+Fred uses [Changesets](https://github.com/changesets/changesets) for version management and automated publishing.
+
+### How Releases Work
+
+1. **Create a changeset**: When making changes that should be released, run `bun changeset` and follow the prompts
+2. **Merge to main**: When your PR merges, the release workflow checks for changesets
+3. **Version PR**: If changesets exist, a "Version Packages" PR is automatically created
+4. **Publish**: When the Version Packages PR merges, packages are automatically published to npm
+
+### Setting Up NPM_TOKEN (Repository Maintainers)
+
+For automated publishing to work, the repository needs an `NPM_TOKEN` secret:
+
+1. **Create a granular npm token** at https://www.npmjs.com/settings/~/tokens
+   - Click "Generate New Token" -> "Granular Access Token"
+   - Token name: "GitHub Actions - Fred Publishing"
+   - Expiration: 90 days (maximum allowed)
+   - Packages: Select `@fred` scope or all packages
+   - Permissions: Read and write
+   - **Important**: Enable "Bypass 2FA" checkbox (required for CI/CD)
+
+2. **Add to GitHub repository secrets**
+   - Go to repository Settings -> Secrets and variables -> Actions
+   - Click "New repository secret"
+   - Name: `NPM_TOKEN`
+   - Value: Paste the npm token
+
+3. **Set a reminder** to rotate the token every 80 days (before 90-day expiration)
+
+**Note**: The `GITHUB_TOKEN` is automatically provided by GitHub Actions and doesn't require setup.
 
 ## Questions?
 
