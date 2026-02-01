@@ -45,6 +45,7 @@ import type {
   ToolCallEvent,
   ToolResultEvent,
   ToolErrorEvent,
+  ToolResultError,
   UsageEvent,
   MessageEndEvent,
 } from '../stream/events';
@@ -53,6 +54,7 @@ import {
   makeStepEndEvent,
   makeStepCompleteEvent,
   makeStreamErrorEvent,
+  makeToolResultEvent,
 } from '../stream/events';
 import { normalizeMessages } from '../messages';
 
@@ -103,7 +105,9 @@ interface ToolCall {
 }
 
 /**
- * Execute a single tool and return the result event
+ * Execute a single tool and return the result event.
+ * Following OpenAI API standard: failed tools return tool-result with error field,
+ * no separate tool-error event type.
  */
 const executeToolEffect = (
   toolCall: ToolCall,
@@ -113,10 +117,11 @@ const executeToolEffect = (
   messageId: string,
   stepIndex: number,
   sequence: number
-): Effect.Effect<{ event: ToolResultEvent | ToolErrorEvent; result: unknown; isError: boolean }, never> =>
+): Effect.Effect<{ event: ToolResultEvent; result: unknown; isError: boolean }, never> =>
   Effect.gen(function* () {
     const executor = toolHandlers?.get(toolCall.name);
     const toolStartTime = Date.now();
+    const isDevelopment = process.env.NODE_ENV === 'development';
 
     const result = yield* (
       executor
@@ -140,32 +145,19 @@ const executeToolEffect = (
     const toolCompletedAt = Date.now();
     const durationMs = toolCompletedAt - toolStartTime;
 
+    // Build error field for tool-result event (OpenAI API standard)
+    let toolError: ToolResultError | undefined;
     if (result.error) {
-      const event: ToolErrorEvent = {
-        type: 'tool-error',
-        sequence,
-        emittedAt: toolCompletedAt,
-        runId,
-        threadId,
-        messageId,
-        step: stepIndex,
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        error: {
-          message: result.error.message,
-          name: result.error.name,
-          stack: result.error.stack,
-        },
-        completedAt: toolCompletedAt,
-        durationMs,
+      toolError = {
+        code: result.error.name || 'TOOL_EXECUTION_ERROR',
+        message: result.error.message,
+        // Stack traces only in development
+        ...(isDevelopment && result.error.stack ? { stack: result.error.stack } : {}),
       };
-      return { event, result: result.result, isError: true };
     }
 
-    const event: ToolResultEvent = {
-      type: 'tool-result',
-      sequence,
-      emittedAt: toolCompletedAt,
+    // Always emit tool-result event, with error field when tool failed
+    const event = makeToolResultEvent({
       runId,
       threadId,
       messageId,
@@ -175,8 +167,12 @@ const executeToolEffect = (
       output: result.result,
       completedAt: toolCompletedAt,
       durationMs,
-    };
-    return { event, result: result.result, isError: false };
+      sequence,
+      emittedAt: toolCompletedAt,
+      error: toolError,
+    });
+
+    return { event, result: result.result, isError: !!result.error };
   });
 
 /**

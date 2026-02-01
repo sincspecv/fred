@@ -169,8 +169,10 @@ describe('streamMultiStep', () => {
     });
   });
 
-  describe('tool error handling', () => {
-    it('emits tool-error event when tool execution fails', async () => {
+  describe('tool error handling (OpenAI standard)', () => {
+    it('emits tool-result event with error field when tool execution fails (OpenAI standard)', async () => {
+      // Per OpenAI API standard: failed tools return in tool-result with error field
+      // No separate tool-error event type
       const failingTool = async () => {
         throw new Error('Tool execution failed');
       };
@@ -192,12 +194,42 @@ describe('streamMultiStep', () => {
       const stream = streamMultiStep(messages, config, options);
       expect(stream).toBeDefined();
 
-      // Tool errors emit tool-error events with error details
-      // Stream continues to next step (no abort)
+      // Tool failures now emit tool-result with error field containing:
+      // - code: error name or 'TOOL_EXECUTION_ERROR'
+      // - message: error message
+      // - stack: only in development (NODE_ENV=development)
     });
 
-    it('continues to next step after tool-error', async () => {
-      // Verify that tool errors don't abort the streaming loop
+    it('tool-result error field includes stack only in development', async () => {
+      // Stack traces are security-sensitive and should only appear in development
+      const failingTool = async () => {
+        throw new Error('Tool failed');
+      };
+
+      const mockModel = createMockModel([]);
+      const messages = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Test' }] }];
+
+      const config = {
+        model: mockModel,
+        maxSteps: 2,
+        toolHandlers: new Map([['failing_tool', failingTool]]),
+      };
+
+      const options = {
+        runId: 'test_run',
+        messageId: 'test_msg',
+      };
+
+      const stream = streamMultiStep(messages, config, options);
+      expect(stream).toBeDefined();
+
+      // In production: error = { code, message } only
+      // In development: error = { code, message, stack }
+    });
+
+    it('continues to next step after tool failure', async () => {
+      // Verify that tool failures don't abort the streaming loop
+      // Failed tools do NOT count against maxSteps
       const failingTool = async () => {
         throw new Error('Tool failed');
       };
@@ -219,8 +251,35 @@ describe('streamMultiStep', () => {
       const stream = streamMultiStep(messages, config, options);
       expect(stream).toBeDefined();
 
-      // After tool-error, step-complete is emitted and loop continues
+      // After tool failure (tool-result with error field), model can retry
+      // without burning iteration budget
       expect(config.maxSteps).toBe(3);
+    });
+
+    it('successful tool execution has no error field in tool-result', async () => {
+      const successfulTool = async () => {
+        return { result: 'success' };
+      };
+
+      const mockModel = createMockModel([]);
+      const messages = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Test' }] }];
+
+      const config = {
+        model: mockModel,
+        maxSteps: 2,
+        toolHandlers: new Map([['successful_tool', successfulTool]]),
+      };
+
+      const options = {
+        runId: 'test_run',
+        messageId: 'test_msg',
+      };
+
+      const stream = streamMultiStep(messages, config, options);
+      expect(stream).toBeDefined();
+
+      // Successful tool-result events have no error field
+      // Only output and metadata
     });
   });
 

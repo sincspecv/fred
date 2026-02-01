@@ -13,7 +13,8 @@ export type StreamEventType =
   | 'step-end'
   | 'step-complete'
   | 'stream-error'
-  | 'run-end';
+  | 'run-end'
+  | 'handoff-start';
 
 export interface StreamEventBase {
   type: StreamEventType;
@@ -72,6 +73,16 @@ export interface ToolCallEvent extends StreamEventBase {
   startedAt: number;
 }
 
+/**
+ * Tool result error structure (OpenAI API standard)
+ * Stack traces included only in development (NODE_ENV=development)
+ */
+export interface ToolResultError {
+  code: string;
+  message: string;
+  stack?: string; // Only in development
+}
+
 export interface ToolResultEvent extends StreamEventBase {
   type: 'tool-result';
   messageId: string;
@@ -82,6 +93,12 @@ export interface ToolResultEvent extends StreamEventBase {
   completedAt: number;
   durationMs: number;
   metadata?: Record<string, unknown>;
+  /**
+   * Error field for failed tool execution (OpenAI API standard).
+   * When present, the tool execution failed and output may contain error details.
+   * Stack traces are included only in development environment.
+   */
+  error?: ToolResultError;
 }
 
 export interface ToolErrorEvent extends StreamEventBase {
@@ -143,13 +160,27 @@ export interface RunEndEvent extends StreamEventBase {
       };
       metadata?: Record<string, unknown>;
     }>;
-    handoff?: unknown;
+    handoff?: {
+      type: 'handoff';
+      agentId: string;
+      message: string;
+      context?: Record<string, unknown>;
+    };
     usage?: {
       inputTokens?: number;
       outputTokens?: number;
       totalTokens?: number;
     };
   };
+}
+
+export interface HandoffStartEvent extends StreamEventBase {
+  type: 'handoff-start';
+  fromAgentId: string;
+  toAgentId: string;
+  message: string;
+  context?: Record<string, unknown>;
+  handoffDepth: number;
 }
 
 export type StreamEvent =
@@ -165,7 +196,8 @@ export type StreamEvent =
   | StepEndEvent
   | StepCompleteEvent
   | StreamErrorEvent
-  | RunEndEvent;
+  | RunEndEvent
+  | HandoffStartEvent;
 
 export interface StreamEventEnvelope {
   events: StreamEvent[];
@@ -315,6 +347,7 @@ export const makeToolResultEvent = ({
   metadata,
   sequence,
   emittedAt,
+  error,
 }: {
   runId: string;
   threadId?: string;
@@ -328,6 +361,7 @@ export const makeToolResultEvent = ({
   metadata?: Record<string, unknown>;
   sequence: number;
   emittedAt: number;
+  error?: ToolResultError;
 }): ToolResultEvent => ({
   type: 'tool-result',
   runId,
@@ -342,6 +376,7 @@ export const makeToolResultEvent = ({
   metadata,
   sequence,
   emittedAt,
+  error,
 });
 
 export const makeToolErrorEvent = ({
@@ -413,6 +448,39 @@ export const makeStreamErrorEvent = ({
   messageId,
   error,
   partialText,
+  sequence,
+  emittedAt,
+});
+
+export const makeHandoffStartEvent = ({
+  runId,
+  threadId,
+  fromAgentId,
+  toAgentId,
+  message,
+  context,
+  handoffDepth,
+  sequence,
+  emittedAt,
+}: {
+  runId: string;
+  threadId?: string;
+  fromAgentId: string;
+  toAgentId: string;
+  message: string;
+  context?: Record<string, unknown>;
+  handoffDepth: number;
+  sequence: number;
+  emittedAt: number;
+}): HandoffStartEvent => ({
+  type: 'handoff-start',
+  runId,
+  threadId,
+  fromAgentId,
+  toAgentId,
+  message,
+  context,
+  handoffDepth,
   sequence,
   emittedAt,
 });
