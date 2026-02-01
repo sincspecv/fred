@@ -207,7 +207,7 @@ async function installPackage(packageName: string): Promise<void> {
   try {
     // For @fred/provider-* packages in monorepo, use workspace protocol
     const packageSpec = packageName.startsWith('@fred/provider-')
-      ? `${packageName}@workspace:*`
+      ? `${packageName}@workspace:^`
       : packageName;
 
     // Use spawnSync with array arguments to prevent command injection

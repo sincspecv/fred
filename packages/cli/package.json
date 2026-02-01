@@ -12,8 +12,8 @@
     "build": "bun build src/index.ts --outdir dist --target bun --format esm"
   },
   "dependencies": {
-    "@fred/core": "workspace:*",
-    "@fred/dev": "workspace:*"
+    "@fred/core": "workspace:^",
+    "@fred/dev": "workspace:^"
   },
   "peerDependencies": {
     "effect": "^3.19.0"

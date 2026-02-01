@@ -17,7 +17,7 @@
     "build": "bun build src/index.ts --outdir dist --target bun --format esm"
   },
   "dependencies": {
-    "@fred/core": "workspace:*",
+    "@fred/core": "workspace:^",
     "chokidar": "^5.0.0"
   },
   "peerDependencies": {

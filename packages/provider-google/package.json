@@ -16,14 +16,14 @@
     "build": "bun build src/index.ts --outdir dist --target bun --format esm"
   },
   "peerDependencies": {
-    "@fred/core": "workspace:*",
+    "@fred/core": "workspace:^",
     "effect": "^3.19.0",
     "@effect/ai": "^0.33.0",
     "@effect/ai-google": "^0.12.0",
     "@effect/platform": "^0.94.0"
   },
   "devDependencies": {
-    "@fred/core": "workspace:*",
+    "@fred/core": "workspace:^",
     "effect": "^3.19.15",
     "@effect/ai": "^0.33.2",
     "@effect/ai-google": "^0.12.1",
