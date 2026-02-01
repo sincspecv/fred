@@ -53,6 +53,18 @@ export interface AgentConfig {
   toolChoice?: 'auto' | 'required' | 'none' | { type: 'tool'; toolName: string }; // Control tool usage
   toolTimeout?: number; // Timeout for tool execution in milliseconds (default: 300000 = 5 minutes)
   persistHistory?: boolean; // Whether to persist conversation history for this agent (default: true)
+  toolRetry?: ToolRetryPolicy; // Retry policy for tool execution
+}
+
+/**
+ * Tool retry policy configuration
+ * Only retries errors classified as RETRYABLE (transient network/rate limit errors)
+ */
+export interface ToolRetryPolicy {
+  maxRetries?: number; // Maximum number of retry attempts (default: 3)
+  backoffMs?: number; // Initial backoff delay in ms (default: 1000)
+  maxBackoffMs?: number; // Maximum backoff delay in ms (default: 10000)
+  jitterMs?: number; // Random jitter added to backoff in ms (default: 200)
 }
 
 /**

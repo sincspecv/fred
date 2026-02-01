@@ -4,7 +4,7 @@ import { Tool as EffectTool, Toolkit, LanguageModel, Prompt } from '@effect/ai';
 import { BunContext } from '@effect/platform-bun';
 import { FetchHttpClient } from '@effect/platform';
 import type { StreamEvent } from '../stream/events';
-import { AgentConfig, AgentMessage, AgentResponse } from './agent';
+import { AgentConfig, AgentMessage, AgentResponse, ToolRetryPolicy } from './agent';
 import { ProviderDefinition } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
 import type { Tool as FredTool } from '../tool/tool';
@@ -15,7 +15,7 @@ import { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
 import { wrapToolExecution } from '../tool/validation';
 import { annotateSpan } from '../observability/otel';
-import { attachErrorToSpan } from '../observability/errors';
+import { attachErrorToSpan, classifyError, ErrorClass } from '../observability/errors';
 import { normalizeMessages, filterHistoryForAgent } from '../messages';
 import { streamMultiStep } from './streaming';
 import { resolveTemplate } from '../variables/template';
@@ -210,6 +210,14 @@ export class AgentFactory {
     const tools = config.tools ? this.toolRegistry.getTools(config.tools) : [];
     const toolTimeout = config.toolTimeout ?? 300000;
 
+    // Tool retry policy with defaults
+    const retryPolicy: Required<ToolRetryPolicy> = {
+      maxRetries: config.toolRetry?.maxRetries ?? 3,
+      backoffMs: config.toolRetry?.backoffMs ?? 1000,
+      maxBackoffMs: config.toolRetry?.maxBackoffMs ?? 10000,
+      jitterMs: config.toolRetry?.jitterMs ?? 200,
+    };
+
     if (this.handoffHandler) {
       const handoffTool = createHandoffTool(
         this.handoffHandler.getAgent,
@@ -250,6 +258,18 @@ export class AgentFactory {
     }
 
     const effectTools: EffectTool.Any[] = [];
+
+    // Helper to compute backoff with jitter
+    const computeBackoff = (attempt: number): number => {
+      const exponentialBackoff = retryPolicy.backoffMs * Math.pow(2, attempt);
+      const boundedBackoff = Math.min(exponentialBackoff, retryPolicy.maxBackoffMs);
+      const jitter = Math.random() * retryPolicy.jitterMs;
+      return boundedBackoff + jitter;
+    };
+
+    // Helper to sleep for a given duration
+    const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
     const buildToolHandler = (toolId: string, execute?: (args: Record<string, any>) => Promise<any> | any) => {
       return (input: unknown) => {
         const startTime = Date.now();
@@ -258,6 +278,7 @@ export class AgentFactory {
           attributes: {
             'tool.id': toolId,
             'tool.timeout': toolTimeout,
+            'tool.retry.maxRetries': retryPolicy.maxRetries,
           },
         });
 
@@ -280,29 +301,97 @@ export class AgentFactory {
           ? wrapToolExecution(toolDefinition as any, executor)
           : executor;
 
-        return Effect.tryPromise({
-          try: async () => {
-            let timeoutId: ReturnType<typeof setTimeout> | undefined;
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              timeoutId = setTimeout(() => {
-                const timeoutError = new Error(`Tool "${toolId}" execution timed out after ${toolTimeout}ms`);
-                timeoutError.name = 'ToolTimeoutError';
-                reject(timeoutError);
-              }, toolTimeout);
-            });
+        // Execute tool with timeout
+        const executeWithTimeout = async (): Promise<any> => {
+          let timeoutId: ReturnType<typeof setTimeout> | undefined;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              const timeoutError = new Error(`Tool "${toolId}" execution timed out after ${toolTimeout}ms`);
+              timeoutError.name = 'ToolTimeoutError';
+              reject(timeoutError);
+            }, toolTimeout);
+          });
 
-            try {
-              const result = await Promise.race([
-                Promise.resolve(validatedExecute ? validatedExecute(input as Record<string, any>) : undefined),
-                timeoutPromise,
-              ]);
-              return result;
-            } finally {
-              if (timeoutId) {
-                clearTimeout(timeoutId);
-              }
+          try {
+            const result = await Promise.race([
+              Promise.resolve(validatedExecute ? validatedExecute(input as Record<string, any>) : undefined),
+              timeoutPromise,
+            ]);
+            return result;
+          } finally {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
             }
-          },
+          }
+        };
+
+        // Execute with retry logic for retryable errors only
+        const executeWithRetry = async (): Promise<any> => {
+          let lastError: Error | undefined;
+          let attempt = 0;
+
+          while (attempt <= retryPolicy.maxRetries) {
+            try {
+              const result = await executeWithTimeout();
+              // On successful retry, annotate the span
+              if (attempt > 0 && toolSpan) {
+                toolSpan.addEvent('retry.success', {
+                  'retry.attempt': attempt,
+                  'retry.totalAttempts': attempt + 1,
+                });
+              }
+              return result;
+            } catch (error) {
+              const err = error instanceof Error ? error : new Error(String(error));
+              lastError = err;
+
+              // Classify error to determine if retryable
+              const errorClass = classifyError(err);
+              const isRetryable = errorClass === ErrorClass.RETRYABLE;
+
+              // Annotate retry attempt on span
+              if (toolSpan) {
+                toolSpan.addEvent('retry.attempt', {
+                  'retry.attempt': attempt,
+                  'retry.errorClass': errorClass,
+                  'retry.isRetryable': isRetryable,
+                  'retry.errorMessage': err.message,
+                });
+              }
+
+              // Only retry if error is retryable and we haven't exhausted attempts
+              if (!isRetryable || attempt >= retryPolicy.maxRetries) {
+                if (toolSpan) {
+                  toolSpan.setAttribute('tool.retry.totalAttempts', attempt + 1);
+                  toolSpan.setAttribute('tool.retry.exhausted', attempt >= retryPolicy.maxRetries);
+                  toolSpan.addEvent('retry.error', {
+                    'retry.finalAttempt': attempt,
+                    'retry.exhausted': attempt >= retryPolicy.maxRetries,
+                    'retry.errorClass': errorClass,
+                  });
+                }
+                throw err;
+              }
+
+              // Wait before retrying
+              const backoffMs = computeBackoff(attempt);
+              if (toolSpan) {
+                toolSpan.addEvent('retry.backoff', {
+                  'retry.attempt': attempt,
+                  'retry.backoffMs': backoffMs,
+                });
+              }
+              await sleep(backoffMs);
+              attempt++;
+            }
+          }
+
+          // Should never reach here, but throw last error just in case
+          throw lastError ?? new Error(`Tool "${toolId}" failed after ${retryPolicy.maxRetries} retries`);
+        };
+
+        return Effect.tryPromise({
+          try: executeWithRetry,
           catch: (error) => {
             const executionTime = Date.now() - startTime;
             const err = error instanceof Error ? error : new Error(String(error));
