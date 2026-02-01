@@ -6,7 +6,8 @@ import { Fred } from '@fred/core';
 import { WorkflowManager, WorkflowContext, getBuiltinPackIds } from '@fred/core';
 import { resolve, join } from 'path';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
+import * as readline from 'readline';
 import chokidar, { type FSWatcher } from 'chokidar';
 
 /**
@@ -112,61 +113,55 @@ function getPackageNameForPlatform(platform: string): string | null {
  * Prompt user for yes/no input
  */
 async function promptYesNo(question: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const stdin = process.stdin;
+  // Check if stdin is available
+  if (!process.stdin || process.stdin.destroyed) {
+    return false;
+  }
 
-    // Check if stdin is available
-    if (!stdin || stdin.destroyed) {
-      resolve(false);
-      return;
-    }
+  // Use Bun's native prompt() which handles terminal I/O correctly
+  // @ts-ignore - Bun global
+  if (typeof prompt === 'function') {
+    const answer = prompt(`${question} (y/n): `);
+    if (answer === null) return false; // Ctrl+C or EOF
+    const trimmed = answer.trim().toLowerCase();
+    return trimmed === 'y' || trimmed === 'yes';
+  }
 
-    process.stdout.write(`${question} (y/n): `);
+  // Fallback for non-Bun environments: use readline
+  return new Promise((resolvePromise) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
 
-    stdin.resume();
-    stdin.setEncoding('utf8');
+    let answered = false;
 
-    let input = '';
+    const askQuestion = () => {
+      rl.question(`${question} (y/n): `, (answer) => {
+        const trimmed = answer.trim().toLowerCase();
 
-    const onData = (data: string) => {
-      for (const char of data) {
-        if (char === '\n' || char === '\r') {
-          // End of line - process the input
-          const trimmed = input.trim().toLowerCase();
-          stdin.pause();
-          stdin.removeListener('data', onData);
-
-          if (trimmed === 'y' || trimmed === 'yes') {
-            process.stdout.write(`yes\n`);
-            resolve(true);
-            return;
-          } else if (trimmed === 'n' || trimmed === 'no' || trimmed === '') {
-            // Empty input defaults to 'no'
-            process.stdout.write(trimmed ? 'no\n' : '\n');
-            resolve(false);
-          } else {
-            // Invalid input - ask again
-            process.stdout.write(`\nPlease enter 'y' or 'n': `);
-            input = '';
-            // Don't re-add listener - it's already there, just resume
-            stdin.resume();
-          }
-          return;
-        } else if (char === '\u0003') {
-          // Ctrl+C
-          stdin.pause();
-          stdin.removeListener('data', onData);
-          process.stdout.write('\n');
-          resolve(false);
-          return;
-        } else if (char >= ' ') {
-          // Printable character
-          input += char;
+        if (trimmed === 'y' || trimmed === 'yes') {
+          answered = true;
+          rl.close();
+          resolvePromise(true);
+        } else if (trimmed === 'n' || trimmed === 'no' || trimmed === '') {
+          answered = true;
+          rl.close();
+          resolvePromise(false);
+        } else {
+          console.log("Please enter 'y' or 'n'");
+          askQuestion();
         }
-      }
+      });
     };
 
-    stdin.on('data', onData);
+    rl.on('close', () => {
+      if (!answered) {
+        resolvePromise(false);
+      }
+    });
+
+    askQuestion();
   });
 }
 
@@ -369,11 +364,26 @@ async function ensureProviderPackageInstalled(): Promise<boolean> {
     await installPackage(packageName);
 
     // If we reach here, installation succeeded
-    // After installation, prompt user to restart
-    // Note: installPackage already prints success message
-    console.log('Please run `bun run dev` again to start the chat.\n');
-    process.exit(0);
-    return true; // Unreachable
+    // Automatically restart dev-chat so the new package is loaded
+    // (ESM module cache can't be invalidated, so we need a fresh process)
+    console.log('Restarting dev-chat...\n');
+
+    const child = spawn('bun', ['run', 'dev'], {
+      stdio: 'inherit',
+      cwd: process.cwd(),
+      env: process.env,
+    });
+
+    // Wait for child to exit, then exit parent with same code
+    // This prevents the parent from continuing execution
+    await new Promise<never>((_, reject) => {
+      child.on('exit', (code) => {
+        process.exit(code || 0);
+      });
+      child.on('error', (err) => {
+        reject(err);
+      });
+    });
   } catch (error) {
     // installPackage already prints detailed error messages, but we add a final message
     console.error(`\n   Installation failed. Please try installing manually:`);
@@ -394,6 +404,7 @@ class DevChatRunner {
   private isWaitingForInput = false;
   private setupHook?: (fred: Fred) => Promise<void>;
   private workflowContext?: WorkflowContext;
+  private watcher: FSWatcher | null = null;
   private options: { verbose: boolean; stream: boolean } = {
     verbose: process.argv.includes('-v') || process.argv.includes('--verbose'),
     stream: !process.argv.includes('--no-stream'),
@@ -401,6 +412,16 @@ class DevChatRunner {
 
   constructor(setupHook?: (fred: Fred) => Promise<void>) {
     this.setupHook = setupHook;
+  }
+
+  /**
+   * Cleanup resources
+   */
+  public async cleanup() {
+    if (this.watcher) {
+      await this.watcher.close();
+      console.log('File watcher closed');
+    }
   }
 
   /**
@@ -974,6 +995,9 @@ class DevChatRunner {
       process.exit(1);
     }
 
+    // Create file watcher AFTER package check to avoid interference with prompts
+    this.watcher = this.createFileWatcher();
+
     // Initialize Fred
     // If we reach here, the package is installed (or no package needed)
     // If a package was missing, ensureProviderPackageInstalled() will have
@@ -1413,21 +1437,6 @@ class DevChatRunner {
 }
 
 /**
- * Create a scoped file watcher with Effect finalizer for cleanup
- */
-const createScopedFileWatcher = (runner: DevChatRunner) =>
-  Effect.acquireRelease(
-    Effect.sync(() => runner.createFileWatcher()),
-    (watcher) =>
-      watcher
-        ? Effect.promise(async () => {
-            await watcher.close();
-            console.log('File watcher closed');
-          })
-        : Effect.void
-  );
-
-/**
  * Start dev chat interface (exported for CLI use)
  * Uses BunRuntime.runMain for proper signal handling and cleanup.
  * @param setupHook Optional function to call after Fred is initialized but before auto-agent creation
@@ -1436,11 +1445,9 @@ export function startDevChat(setupHook?: (fred: Fred) => Promise<void>): void {
   const runner = new DevChatRunner(setupHook);
 
   const program = Effect.gen(function* () {
-    yield* Effect.scoped(
-      Effect.gen(function* () {
-        yield* createScopedFileWatcher(runner);
-        yield* Effect.promise(() => runner.start());
-      })
+    yield* Effect.acquireRelease(
+      Effect.promise(() => runner.start()),
+      () => Effect.promise(() => runner.cleanup())
     );
   });
 
@@ -1454,11 +1461,9 @@ if (import.meta.main) {
   const runner = new DevChatRunner();
 
   const program = Effect.gen(function* () {
-    yield* Effect.scoped(
-      Effect.gen(function* () {
-        yield* createScopedFileWatcher(runner);
-        yield* Effect.promise(() => runner.start());
-      })
+    yield* Effect.acquireRelease(
+      Effect.promise(() => runner.start()),
+      () => Effect.promise(() => runner.cleanup())
     );
   });
 

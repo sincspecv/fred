@@ -54,5 +54,8 @@
     "ci:publish": "for dir in packages/*; do (cd \"$dir\" && bun publish || true); done && changeset tag"
   },
   "type": "module",
-  "workspaces": ["packages/*"]
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "@fred/provider-groq": "workspace:*"
+  }
 }

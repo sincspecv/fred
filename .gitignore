@@ -86,3 +86,6 @@ fred.config.local.json
 
 # Planning documents (local only)
 .planning/
+
+# Claude
+.claude/
