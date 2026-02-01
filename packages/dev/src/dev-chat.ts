@@ -350,9 +350,9 @@ async function ensureProviderPackageInstalled(): Promise<boolean> {
 
   // Package is not installed - prompt the user
   console.log(`\nRequired package ${packageName} is not installed.`);
-  console.log(`   This package is required to run dev-chat with ${providerInfo.platform}.\n`);
+  console.log(`   This package is required to run dev-chat with ${providerInfo.platform}.`);
 
-  const shouldInstall = await promptYesNo('Would you like to install it now?');
+  const shouldInstall = await promptYesNo('\nWould you like to install it now?');
 
   if (!shouldInstall) {
     console.log('\nExiting. Please install the package manually and try again:');
@@ -625,12 +625,31 @@ class DevChatRunner {
   public createFileWatcher(): FSWatcher | null {
     const projectRoot = process.cwd();
     const watchPaths = [
-      resolve(projectRoot, 'src'),
       resolve(projectRoot, 'config.json'),
       resolve(projectRoot, 'fred.config.json'),
       resolve(projectRoot, 'config.yaml'),
       resolve(projectRoot, 'fred.config.yaml'),
     ];
+
+    // Support both single-package (root src/) and monorepo (packages/*/src/) structures
+    const rootSrc = resolve(projectRoot, 'src');
+    if (existsSync(rootSrc)) {
+      watchPaths.push(rootSrc);
+    }
+
+    // Detect monorepo structure - watch all package src directories
+    const packagesDir = resolve(projectRoot, 'packages');
+    if (existsSync(packagesDir)) {
+      const packageDirs = require('fs').readdirSync(packagesDir, { withFileTypes: true });
+      for (const entry of packageDirs) {
+        if (entry.isDirectory()) {
+          const packageSrc = resolve(packagesDir, entry.name, 'src');
+          if (existsSync(packageSrc)) {
+            watchPaths.push(packageSrc);
+          }
+        }
+      }
+    }
 
     // Filter to only existing paths and validate they're within project root
     const existingPaths = watchPaths.filter(p => {
