@@ -1,5 +1,6 @@
 import { Effect, Layer, Stream } from 'effect';
 import * as Schema from 'effect/Schema';
+import * as AST from 'effect/SchemaAST';
 import { Tool as EffectTool, Toolkit, LanguageModel, Prompt } from '@effect/ai';
 import { BunContext } from '@effect/platform-bun';
 import { FetchHttpClient } from '@effect/platform';
@@ -19,6 +20,89 @@ import { attachErrorToSpan, classifyError, ErrorClass } from '../observability/e
 import { normalizeMessages, filterHistoryForAgent } from '../messages';
 import { streamMultiStep } from './streaming';
 import { resolveTemplate } from '../variables/template';
+
+/**
+ * Transform Schema.Struct fields to be OpenAI strict-mode compatible.
+ *
+ * OpenAI's strict mode requires ALL properties to be in the `required` array.
+ * Optional fields must use nullable types (e.g., `["string", "null"]`) instead
+ * of being omitted from `required`.
+ *
+ * This function transforms Schema.optional fields to Schema.NullOr equivalents,
+ * making them required but allowing null values.
+ *
+ * @see https://platform.openai.com/docs/guides/structured-outputs
+ */
+function transformFieldsForStrictMode(
+  inputSchema: Schema.Schema.Any | undefined
+): Record<string, Schema.Schema.Any> {
+  if (!inputSchema) return {};
+
+  const schemaAny = inputSchema as any;
+  if (!('fields' in schemaAny)) return {};
+
+  const fields = schemaAny.fields as Record<string, any>;
+  const ast = inputSchema.ast;
+
+  // Only transform TypeLiteral (struct) schemas
+  if (ast._tag !== 'TypeLiteral') return fields;
+
+  const transformedFields: Record<string, Schema.Schema.Any> = {};
+  const propSignatures = ast.propertySignatures;
+
+  for (const [key, fieldValue] of Object.entries(fields)) {
+    // Find the corresponding property signature to check isOptional
+    const propSig = propSignatures.find(
+      (p: AST.PropertySignature) => p.name === key
+    );
+
+    if (propSig?.isOptional) {
+      // For optional fields, extract the actual type (excluding UndefinedKeyword)
+      // and wrap with NullOr to make it required but nullable.
+      //
+      // Schema.optional(T) creates:
+      //   - PropertySignatureDeclaration with isOptional: true
+      //   - ast.type is Union of [T, UndefinedKeyword]
+      // We need to extract T and wrap it with NullOr.
+      let innerSchema: Schema.Schema.Any;
+
+      if (fieldValue && 'ast' in fieldValue) {
+        const fieldAst = fieldValue.ast;
+        if (fieldAst._tag === 'PropertySignatureDeclaration' && fieldAst.type) {
+          const typeAst = fieldAst.type;
+          // For optional fields, type is Union of [actualType, UndefinedKeyword]
+          if (typeAst._tag === 'Union' && typeAst.types.length === 2) {
+            // Extract the actual type (first member, not UndefinedKeyword)
+            const actualType = typeAst.types[0];
+            innerSchema = Schema.make(actualType);
+          } else {
+            // Fallback: use the type directly
+            innerSchema = Schema.make(typeAst);
+          }
+        } else {
+          // Unknown structure, skip transformation
+          transformedFields[key] = fieldValue;
+          continue;
+        }
+      } else if (Schema.isSchema(fieldValue)) {
+        // Direct schema (shouldn't happen for optional, but handle it)
+        innerSchema = fieldValue;
+      } else {
+        // Unknown structure, skip transformation
+        transformedFields[key] = fieldValue;
+        continue;
+      }
+
+      // Wrap with NullOr to make it required but nullable
+      transformedFields[key] = Schema.NullOr(innerSchema);
+    } else {
+      // Required fields stay as-is
+      transformedFields[key] = fieldValue;
+    }
+  }
+
+  return transformedFields;
+}
 
 function getSafeToolErrorMessage(toolId: string, error: unknown): string {
   // Extract user-friendly error message
@@ -440,12 +524,10 @@ export class AgentFactory {
     };
 
     for (const toolDef of tools) {
-      // Type-assert input as Struct (Fred convention: all tool inputs are Structs)
-      // Use any cast since Schema types don't overlap sufficiently for direct assertion
-      const inputSchema = toolDef.schema?.input as any;
-      const inputFields = inputSchema && 'fields' in inputSchema
-        ? inputSchema.fields
-        : {};
+      // Transform Schema fields for OpenAI strict-mode compatibility.
+      // This converts Schema.optional fields to Schema.NullOr, making them
+      // required in the JSON Schema but allowing null values.
+      const inputFields = transformFieldsForStrictMode(toolDef.schema?.input);
 
       effectTools.push(
         EffectTool.make(toolDef.id, {
@@ -486,10 +568,8 @@ export class AgentFactory {
             toolDefinitions.set(fredTool.id, fredTool);
             // Type-assert input as Struct (Fred convention: all tool inputs are Structs)
             // Use any cast since Schema types don't overlap sufficiently for direct assertion
-            const mcpInputSchema = fredTool.schema?.input as any;
-            const mcpInputFields = mcpInputSchema && 'fields' in mcpInputSchema
-              ? mcpInputSchema.fields
-              : {};
+            // Transform MCP tool fields for OpenAI strict-mode compatibility
+            const mcpInputFields = transformFieldsForStrictMode(fredTool.schema?.input);
 
             effectTools.push(
               EffectTool.make(fredTool.id, {
