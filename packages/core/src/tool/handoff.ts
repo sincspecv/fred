@@ -5,11 +5,14 @@ import { SpanKind } from '../tracing/types';
 
 /**
  * Handoff input type
+ *
+ * Note: context is a JSON string for OpenAI strict-mode compatibility.
+ * The execute function will parse it back to an object.
  */
 interface HandoffInput {
   agentId: string;
   message?: string;
-  context?: Record<string, unknown>;
+  context?: string; // JSON-stringified context for OpenAI compatibility
 }
 
 /**
@@ -33,17 +36,20 @@ export function createHandoffTool(
   getAvailableAgents: () => string[],
   tracer?: Tracer
 ): Tool<HandoffInput, HandoffResult, never> {
+  // Use Schema.String for context to avoid OpenAI strict-mode issues with
+  // additionalProperties. The context is JSON-stringified when passed.
+  // Schema.Record with Schema.Unknown produces invalid JSON Schema for OpenAI.
   const schema: ToolSchemaDefinition<HandoffInput, HandoffResult, never> = {
     input: Schema.Struct({
       agentId: Schema.String,
       message: Schema.optional(Schema.String),
-      context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+      context: Schema.optional(Schema.String), // JSON-stringified context
     }) as Schema.Schema<HandoffInput>,
     success: Schema.Struct({
       type: Schema.Literal('handoff'),
       agentId: Schema.String,
       message: Schema.String,
-      context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+      context: Schema.optional(Schema.String), // JSON-stringified context
     }) as Schema.Schema<HandoffResult>,
     metadata: {
       type: 'object',
@@ -57,8 +63,8 @@ export function createHandoffTool(
           description: 'The message to send to the target agent. If not provided, the original user message will be used.',
         },
         context: {
-          type: 'object',
-          description: 'Optional context to pass to the target agent',
+          type: 'string',
+          description: 'Optional JSON-stringified context object to pass to the target agent',
         },
       },
       required: ['agentId'],
@@ -71,7 +77,17 @@ export function createHandoffTool(
     description: 'Transfer the conversation to another agent. Use this when the current agent cannot handle the request and another agent would be better suited.',
     schema,
     execute: async (args: HandoffInput): Promise<HandoffResult> => {
-      const { agentId, message, context } = args;
+      const { agentId, message, context: contextStr } = args;
+      // Parse JSON context if provided
+      let context: Record<string, unknown> | undefined;
+      if (contextStr) {
+        try {
+          context = JSON.parse(contextStr);
+        } catch {
+          // If parsing fails, wrap the string in an object
+          context = { raw: contextStr };
+        }
+      }
 
       // Create span for handoff tool execution
       const handoffSpan = tracer?.startSpan('tool.handoff', {
