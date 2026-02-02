@@ -69,6 +69,32 @@ const defaultMetadata: ToolValidationMetadata = {
   coercions: [],
 };
 
+/**
+ * Convert null values to undefined for OpenAI compatibility.
+ *
+ * OpenAI strict mode requires all fields in `required` array, with optional
+ * fields using `anyOf: [type, null]`. When OpenAI doesn't want to provide
+ * an optional field, it sends `null`. But Effect Schema expects `undefined`.
+ *
+ * This function recursively converts all `null` values to `undefined`.
+ */
+function convertNullToUndefined<T>(value: T): T {
+  if (value === null) {
+    return undefined as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map(convertNullToUndefined) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) {
+      result[key] = convertNullToUndefined(val);
+    }
+    return result as T;
+  }
+  return value;
+}
+
 function stripUnknownFields<Input>(input: Input, schema: Schema.Schema<Input>): Input {
   const decoded = Schema.decodeUnknownSync(schema, { errors: 'all' })(input);
   const encoded = Schema.encodeSync(schema)(decoded);
@@ -241,6 +267,10 @@ function buildValidationError(toolId: string, error: unknown): ToolValidationErr
 export function decodeToolInputs<Input>(tool: Tool<Input>, input: unknown): ToolValidationResult<Input> {
   const schema = tool.schema?.input;
 
+  // Convert null values to undefined for OpenAI compatibility
+  // OpenAI sends null for optional fields, but Effect Schema expects undefined
+  const normalizedInput = convertNullToUndefined(input);
+
   if (!schema) {
     if (tool.strict) {
       return {
@@ -257,15 +287,15 @@ export function decodeToolInputs<Input>(tool: Tool<Input>, input: unknown): Tool
     return {
       result: {
         ok: true,
-        value: input as Input,
+        value: normalizedInput as Input,
         metadata: defaultMetadata,
       },
     };
   }
 
   try {
-    const decoded = stripUnknownFields(input as Input, schema);
-    const metadata = detectCoercions(input as Input, decoded);
+    const decoded = stripUnknownFields(normalizedInput as Input, schema);
+    const metadata = detectCoercions(normalizedInput as Input, decoded);
     return {
       result: {
         ok: true,
