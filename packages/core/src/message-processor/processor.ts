@@ -1118,61 +1118,65 @@ export class MessageProcessor {
           )
         );
 
-        // After the stream completes, check if we need to continue with a handoff
-        const streamWithHandoffContinuation = Stream.unwrap(
-          Effect.gen(function* () {
-            const allEvents = yield* Stream.runCollect(processedStream);
-            const eventsArray = Array.from(allEvents);
-
-            // If no handoff or max depth reached, just return collected events
-            if (!detectedHandoff || handoffDepth >= MAX_HANDOFF_DEPTH) {
-              if (handoffDepth >= MAX_HANDOFF_DEPTH && detectedHandoff) {
-                yield* Effect.logWarning('Maximum handoff depth reached. Stopping handoff chain.');
+        // Stream events incrementally, then check for handoff continuation after completion
+        // Using Stream.concat with Stream.suspend for lazy evaluation - handoff state is
+        // populated by Stream.tap as events flow through, then checked after stream completes
+        const streamWithHandoffContinuation = processedStream.pipe(
+          Stream.concat(
+            Stream.suspend(() => {
+              // This runs after processedStream completes - detectedHandoff is now set if present
+              if (!detectedHandoff || handoffDepth >= MAX_HANDOFF_DEPTH) {
+                if (handoffDepth >= MAX_HANDOFF_DEPTH && detectedHandoff) {
+                  console.warn('[Fred] Maximum handoff depth reached. Stopping handoff chain.');
+                }
+                return Stream.empty;
               }
-              return Stream.fromIterable(eventsArray);
-            }
 
-            // Handoff detected - create handoff event and continue with target agent
-            const handoffEvent: HandoffStartEvent = makeHandoffStartEvent({
-              runId: lastRunEndEvent?.runId ?? `run_${Date.now()}_handoff`,
-              threadId: conversationId,
-              fromAgentId: agentId,
-              toAgentId: detectedHandoff.agentId,
-              message: detectedHandoff.message || currentMessage,
-              context: detectedHandoff.context,
-              handoffDepth: handoffDepth + 1,
-              sequence: lastRunEndEvent ? lastRunEndEvent.sequence + 1 : eventsArray.length,
-              emittedAt: Date.now(),
-            });
+              // Handoff detected - create handoff event and continue with target agent
+              return Stream.unwrap(
+                Effect.gen(function* () {
+                  const handoffEvent: HandoffStartEvent = makeHandoffStartEvent({
+                    runId: lastRunEndEvent?.runId ?? `run_${Date.now()}_handoff`,
+                    threadId: conversationId,
+                    fromAgentId: agentId,
+                    toAgentId: detectedHandoff!.agentId,
+                    message: detectedHandoff!.message || currentMessage,
+                    context: detectedHandoff!.context,
+                    handoffDepth: handoffDepth + 1,
+                    sequence: lastRunEndEvent ? lastRunEndEvent.sequence + 1 : 0,
+                    emittedAt: Date.now(),
+                  });
 
-            // Get updated history for target agent
-            const updatedHistory = yield* Effect.promise(() =>
-              contextManager.getHistory(conversationId)
-            );
-            const updatedPreviousMessages: AgentMessage[] = updatedHistory.filter(
-              msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
-            ) as AgentMessage[];
+                  // Get updated history for target agent
+                  const updatedHistory = yield* Effect.promise(() =>
+                    contextManager.getHistory(conversationId)
+                  );
+                  const updatedPreviousMessages: AgentMessage[] = updatedHistory.filter(
+                    msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
+                  ) as AgentMessage[];
 
-            const targetMessage = detectedHandoff.message || currentMessage;
-            const targetContext = detectedHandoff.context
-              ? `\n\nContext: ${JSON.stringify(detectedHandoff.context)}`
-              : '';
+                  const targetMessage = detectedHandoff!.message || currentMessage;
+                  const targetContext = detectedHandoff!.context
+                    ? `\n\nContext: ${JSON.stringify(detectedHandoff!.context)}`
+                    : '';
 
-            return Stream.fromIterable(eventsArray).pipe(
-              Stream.concat(Stream.make(handoffEvent)),
-              Stream.concat(
-                self.createAgentStreamWithHandoff(
-                  detectedHandoff.agentId,
-                  targetMessage + targetContext,
-                  updatedPreviousMessages,
-                  handoffDepth + 1,
-                  conversationId,
-                  sequentialVisibility,
-                  detectedHandoff.context
-                )
-              )
-            );
-          })
+                  return Stream.make(handoffEvent).pipe(
+                    Stream.concat(
+                      self.createAgentStreamWithHandoff(
+                        detectedHandoff!.agentId,
+                        targetMessage + targetContext,
+                        updatedPreviousMessages,
+                        handoffDepth + 1,
+                        conversationId,
+                        sequentialVisibility,
+                        detectedHandoff!.context
+                      )
+                    )
+                  );
+                })
+              );
+            })
+          )
         );
 
         return streamWithHandoffContinuation as Stream.Stream<StreamEvent, MessageProcessorError, never>;
