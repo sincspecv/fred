@@ -1,5 +1,7 @@
-import { GoldenTrace, validateGoldenTrace } from './golden-trace';
-import { AssertionResult } from './assertions';
+import { validateGoldenTrace } from './golden-trace';
+import { decodeAssertionSpecs, runAssertion } from './assertions';
+import type { GoldenTrace } from './golden-trace';
+import type { AssertionResult, AssertionSpec } from './assertions';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 
@@ -9,10 +11,7 @@ import { join } from 'path';
 export interface TestCase {
   name: string;
   traceFile: string;
-  assertions: Array<{
-    type: string;
-    args: any[];
-  }>;
+  assertions: unknown[];
 }
 
 /**
@@ -30,65 +29,24 @@ export interface TestResult {
  */
 export async function runAssertions(
   trace: GoldenTrace,
-  assertions: Array<{ type: string; args: any[] }>
+  assertions: unknown[]
 ): Promise<AssertionResult[]> {
-  const results: AssertionResult[] = [];
+  let typedSpecs: AssertionSpec[];
 
-  // Import assertion functions dynamically
-  const {
-    assertToolCalled,
-    assertAgentSelected,
-    assertHandoff,
-    assertResponseContains,
-    assertSpan,
-    assertTiming,
-    assertSchema,
-  } = await import('./assertions');
-
-  for (const assertion of assertions) {
-    try {
-      let result: AssertionResult;
-
-      switch (assertion.type) {
-        case 'toolCalled':
-          result = assertToolCalled(trace, assertion.args[0] as string, assertion.args[1] as Record<string, any> | undefined);
-          break;
-        case 'agentSelected':
-          result = assertAgentSelected(trace, assertion.args[0] as string);
-          break;
-        case 'handoff':
-          result = assertHandoff(trace, assertion.args[0] as string | undefined, assertion.args[1] as string | undefined);
-          break;
-        case 'responseContains':
-          result = assertResponseContains(trace, assertion.args[0] as string, assertion.args[1] as boolean | undefined);
-          break;
-        case 'span':
-          result = assertSpan(trace, assertion.args[0] as string, assertion.args[1] as Record<string, any> | undefined);
-          break;
-        case 'timing':
-          result = assertTiming(trace, assertion.args[0] as string, assertion.args[1] as number);
-          break;
-        case 'schema':
-          result = assertSchema(trace);
-          break;
-        default:
-          result = {
-            passed: false,
-            message: `Unknown assertion type: ${assertion.type}`,
-          };
-      }
-
-      results.push(result);
-    } catch (error) {
-      results.push({
-        passed: false,
-        message: `Error running assertion ${assertion.type}: ${error instanceof Error ? error.message : String(error)}`,
-        details: { error },
-      });
-    }
+  try {
+    typedSpecs = decodeAssertionSpecs(assertions);
+  } catch (error) {
+    return [{
+      type: 'schema',
+      passed: false,
+      message: `Invalid assertion suite: ${error instanceof Error ? error.message : String(error)}`,
+      details: {
+        assertions,
+      },
+    }];
   }
 
-  return results;
+  return typedSpecs.map((spec) => runAssertion(trace, spec));
 }
 
 /**
