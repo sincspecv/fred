@@ -1,4 +1,4 @@
-import { Fred, sanitizeError } from '@fred/core';
+import { Fred, sanitizeError } from '@fancyrobot/fred';
 import { ServerHandlers } from './handlers';
 import { Router } from './routes';
 import { ChatRoutes } from './chat/routes';

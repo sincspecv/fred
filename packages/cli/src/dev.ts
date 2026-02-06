@@ -8,8 +8,8 @@
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { pathToFileURL } from 'url';
-import { Fred } from '@fred/core';
-import { startDevChat } from '@fred/dev';
+import { Fred } from '@fancyrobot/fred';
+import { startDevChat } from '@fancyrobot/fred-dev';
 
 /**
  * Try to load and call project's setup() function if it exists

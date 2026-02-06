@@ -1,6 +1,6 @@
 {
-  "name": "@fred/core",
-  "version": "0.2.0",
+  "name": "@fancyrobot/fred",
+  "version": "0.2.5",
   "description": "Fred AI agent framework - core package",
   "type": "module",
   "main": "./src/index.ts",

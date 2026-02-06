@@ -1,4 +1,4 @@
-import { Fred, ContextManager, toOpenAIStream, StreamEvent } from '@fred/core';
+import { Fred, ContextManager, toOpenAIStream, StreamEvent } from '@fancyrobot/fred';
 import { ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChunk, ChatMessage } from './chat';
 import { Stream } from 'effect';
 import type { Prompt } from '@effect/ai';

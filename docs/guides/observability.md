@@ -37,7 +37,7 @@ All spans and logs include essential identifiers:
 Configure observability in your Fred config:
 
 ```typescript
-import { Fred } from '@fred/core';
+import { Fred } from '@fancyrobot/fred';
 
 const fred = new Fred({
   observability: {
@@ -121,7 +121,7 @@ Fred automatically classifies errors into categories that determine logging beha
 Errors are classified based on message content:
 
 ```typescript
-import { classifyError, ErrorClass } from '@fred/core/observability/errors';
+import { classifyError, ErrorClass } from '@fancyrobot/fred/observability/errors';
 
 const error = new Error('Rate limit exceeded: 429');
 const errorClass = classifyError(error); // ErrorClass.RETRYABLE
@@ -136,7 +136,7 @@ const errorClass = classifyError(error); // ErrorClass.RETRYABLE
 Attach metadata to spans for errors:
 
 ```typescript
-import { attachErrorToSpan } from '@fred/core/observability/errors';
+import { attachErrorToSpan } from '@fancyrobot/fred/observability/errors';
 
 const span = tracer.startSpan('my-operation');
 try {
@@ -176,7 +176,7 @@ By default, Fred redacts request/response payloads at info level and above:
 Provide a custom filter for fine-grained control:
 
 ```typescript
-import { type RedactionFilter } from '@fred/core/observability/errors';
+import { type RedactionFilter } from '@fancyrobot/fred/observability/errors';
 
 const customRedactionFilter: RedactionFilter = (payload, context) => {
   // Context provides: payloadType, source, logLevel, errorClass
@@ -201,7 +201,7 @@ const customRedactionFilter: RedactionFilter = (payload, context) => {
 toolRegistry.setRedactionFilter(customRedactionFilter);
 
 // Or use directly
-import { redact } from '@fred/core/observability/errors';
+import { redact } from '@fancyrobot/fred/observability/errors';
 
 const safePayload = redact(payload, {
   payloadType: 'request',
@@ -240,7 +240,7 @@ Control which events are logged to manage volume and cost.
 ### Gating High-Volume Events
 
 ```typescript
-import { shouldLogEvent } from '@fred/core/observability/otel';
+import { shouldLogEvent } from '@fancyrobot/fred/observability/otel';
 
 // Check if event should be logged
 const shouldLog = shouldLogEvent(
@@ -487,7 +487,7 @@ Propagate trace context to external calls:
 ## Example: Full Configuration
 
 ```typescript
-import { Fred } from '@fred/core';
+import { Fred } from '@fancyrobot/fred';
 import { LogLevel } from 'effect';
 
 const fred = new Fred({

@@ -41,8 +41,8 @@ export async function loadProviderPack(
     if (factory) return factory;
   }
 
-  // 2. Try to load @fred/provider-{id} package (workspace or installed)
-  const fredPackageName = `@fred/provider-${idOrPackage.toLowerCase()}`;
+  // 2. Try to load @fancyrobot/fred-{id} package (workspace or installed)
+  const fredPackageName = `@fancyrobot/fred-${idOrPackage.toLowerCase()}`;
   const packagesToTry = [
     fredPackageName,
     idOrPackage, // Original package name (e.g., custom provider)
@@ -153,9 +153,9 @@ export const loadProviderPackEffect = (
     }
   }
 
-  const fredPackageName = `@fred/provider-${idOrPackage.toLowerCase()}`;
+  const fredPackageName = `@fancyrobot/fred-${idOrPackage.toLowerCase()}`;
 
-  // Try @fred/provider-{id} package first, then original name
+  // Try @fancyrobot/fred-{id} package first, then original name
   return Effect.tryPromise({
     try: async () => {
       const packagesToTry = [fredPackageName, idOrPackage];

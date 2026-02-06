@@ -1,5 +1,5 @@
 import { Schema } from 'effect';
-import { sanitizeError } from '@fred/core';
+import { sanitizeError } from '@fancyrobot/fred';
 import { ChatHandlers } from './handlers';
 import { ChatCompletionRequest } from './chat';
 

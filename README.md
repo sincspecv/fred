@@ -28,17 +28,17 @@ Fred is available as modular packages that you install based on your needs:
 
 ```bash
 # Core package (required)
-bun add @fred/core effect
+bun add @fancyrobot/fred effect
 
 # Add AI providers as needed
-bun add @fred/provider-openai @effect/ai-openai
-bun add @fred/provider-anthropic @effect/ai-anthropic
-bun add @fred/provider-google @effect/ai-google
-bun add @fred/provider-groq @effect/platform
-bun add @fred/provider-openrouter @effect/ai-openai
+bun add @fancyrobot/fred-openai @effect/ai-openai
+bun add @fancyrobot/fred-anthropic @effect/ai-anthropic
+bun add @fancyrobot/fred-google @effect/ai-google
+bun add @fancyrobot/fred-groq @effect/platform
+bun add @fancyrobot/fred-openrouter @effect/ai-openai
 
 # Install CLI globally (optional)
-bun add -g @fred/cli
+bun add -g @fancyrobot/fred-cli
 ```
 
 Each provider package auto-registers when imported - no additional configuration needed.
@@ -729,4 +729,3 @@ Tests use Bun's built-in test framework and focus on deterministic functionality
 ## License
 
 MIT
-

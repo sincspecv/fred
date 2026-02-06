@@ -1,6 +1,6 @@
 import { Effect, Redacted } from 'effect';
-import { registerBuiltinPack } from '@fred/core';
-import type { EffectProviderFactory, ProviderConfig, ProviderModelDefaults } from '@fred/core';
+import { registerBuiltinPack } from '@fancyrobot/fred';
+import type { EffectProviderFactory, ProviderConfig, ProviderModelDefaults } from '@fancyrobot/fred';
 
 /**
  * OpenRouter provider pack factory.

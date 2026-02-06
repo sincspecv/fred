@@ -3,7 +3,7 @@ import type { EffectProviderFactory } from '../base';
 /**
  * Dynamic registry for provider packs.
  *
- * Supports both built-in providers (from @fred/provider-* packages) and
+ * Supports both built-in providers (from @fancyrobot/fred-* packages) and
  * external providers (registered at runtime by custom packages).
  *
  * Provider packages auto-register themselves when imported:
@@ -11,8 +11,8 @@ import type { EffectProviderFactory } from '../base';
  * @example
  * ```typescript
  * // In your application:
- * import '@fred/provider-openai';  // Auto-registers OpenAI provider
- * import '@fred/provider-anthropic';  // Auto-registers Anthropic provider
+ * import '@fancyrobot/fred-openai';  // Auto-registers OpenAI provider
+ * import '@fancyrobot/fred-anthropic';  // Auto-registers Anthropic provider
  *
  * // Now these providers are available via Fred's provider system
  * await fred.useProvider('openai');
@@ -25,7 +25,7 @@ const packRegistry = new Map<string, EffectProviderFactory>();
  * Register a provider pack in the registry.
  *
  * This function is used by provider packages to register themselves:
- * - Built-in providers from @fred/provider-* packages call this on import
+ * - Built-in providers from @fancyrobot/fred-* packages call this on import
  * - External providers can also call this during their initialization
  *
  * @param pack - The provider factory to register
@@ -100,16 +100,16 @@ export const BUILTIN_PACKS: Record<string, EffectProviderFactory> = new Proxy(
 );
 
 // =============================================================================
-// Provider implementations moved to @fred/provider-* packages
+// Provider implementations moved to @fancyrobot/fred-* packages
 // =============================================================================
 //
 // To use providers, install the corresponding package and import it:
 //
-//   import '@fred/provider-openai';     // OpenAI via @effect/ai-openai
-//   import '@fred/provider-anthropic';  // Anthropic via @effect/ai-anthropic
-//   import '@fred/provider-google';     // Google/Gemini via @effect/ai-google
-//   import '@fred/provider-groq';       // Groq (Chat Completions API)
-//   import '@fred/provider-openrouter'; // OpenRouter via @effect/ai-openai
+//   import '@fancyrobot/fred-openai';     // OpenAI via @effect/ai-openai
+//   import '@fancyrobot/fred-anthropic';  // Anthropic via @effect/ai-anthropic
+//   import '@fancyrobot/fred-google';     // Google/Gemini via @effect/ai-google
+//   import '@fancyrobot/fred-groq';       // Groq (Chat Completions API)
+//   import '@fancyrobot/fred-openrouter'; // OpenRouter via @effect/ai-openai
 //
 // Each provider auto-registers itself when imported.
 // =============================================================================

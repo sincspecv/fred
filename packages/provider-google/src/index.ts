@@ -1,8 +1,8 @@
 import { Effect, Redacted } from 'effect';
 import * as HttpClient from '@effect/platform/HttpClient';
 import * as HttpClientRequest from '@effect/platform/HttpClientRequest';
-import { registerBuiltinPack } from '@fred/core';
-import type { EffectProviderFactory, ProviderConfig, ProviderModelDefaults } from '@fred/core';
+import { registerBuiltinPack } from '@fancyrobot/fred';
+import type { EffectProviderFactory, ProviderConfig, ProviderModelDefaults } from '@fancyrobot/fred';
 
 /**
  * Google (Gemini) provider pack factory.

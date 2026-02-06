@@ -2,8 +2,8 @@
 
 import { BunRuntime } from '@effect/platform-bun';
 import { Effect } from 'effect';
-import { Fred } from '@fred/core';
-import { WorkflowManager, WorkflowContext, getBuiltinPackIds } from '@fred/core';
+import { Fred } from '@fancyrobot/fred';
+import { WorkflowManager, WorkflowContext, getBuiltinPackIds } from '@fancyrobot/fred';
 import { resolve, join } from 'path';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { spawn, spawnSync } from 'child_process';
@@ -96,14 +96,14 @@ function detectAvailableProvider(): { platform: string; model: string } | { plat
  * Map platform names to Effect provider pack names
  */
 function getPackageNameForPlatform(platform: string): string | null {
-  // Map platform names to @fred/provider-* packages
+  // Map platform names to @fancyrobot/fred-* packages
   // These packages auto-register when imported and handle the Effect AI integration
   const packageMap: Record<string, string> = {
-    openai: '@fred/provider-openai',
-    anthropic: '@fred/provider-anthropic',
-    google: '@fred/provider-google',
-    groq: '@fred/provider-groq',
-    openrouter: '@fred/provider-openrouter',
+    openai: '@fancyrobot/fred-openai',
+    anthropic: '@fancyrobot/fred-anthropic',
+    google: '@fancyrobot/fred-google',
+    groq: '@fancyrobot/fred-groq',
+    openrouter: '@fancyrobot/fred-openrouter',
   };
 
   return packageMap[platform.toLowerCase()] || null;
@@ -200,8 +200,8 @@ async function installPackage(packageName: string): Promise<void> {
   console.log(`\nInstalling ${packageName}...\n`);
 
   try {
-    // For @fred/provider-* packages in monorepo, use workspace protocol
-    const packageSpec = packageName.startsWith('@fred/provider-')
+    // For @fancyrobot/fred-* packages in monorepo, use workspace protocol
+    const packageSpec = packageName.startsWith('@fancyrobot/fred-')
       ? `${packageName}@workspace:^`
       : packageName;
 
