@@ -39,6 +39,24 @@ export interface HookEvent {
   data: any;
   conversationId?: string;
   metadata?: Record<string, any>;
+  /** Unique identifier for this run */
+  runId?: string;
+  /** Intent identifier */
+  intentId?: string;
+  /** Agent identifier */
+  agentId?: string;
+  /** ISO 8601 timestamp when event occurred */
+  timestamp?: string;
+  /** OpenTelemetry trace ID */
+  traceId?: string;
+  /** OpenTelemetry span ID */
+  spanId?: string;
+  /** OpenTelemetry parent span ID */
+  parentSpanId?: string;
+  /** Pipeline identifier (for pipeline runs) */
+  pipelineId?: string;
+  /** Step name (for pipeline steps) */
+  stepName?: string;
 }
 
 /**
