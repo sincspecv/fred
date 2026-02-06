@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Ref } from 'effect';
 import type { HookType, HookEvent, HookResult, HookHandler } from './types';
+import { ObservabilityService } from '../observability/service';
 
 /**
  * Error thrown when hook execution encounters catastrophic failure
@@ -10,6 +11,11 @@ export class HookExecutionError extends Error {
     this.name = 'HookExecutionError';
   }
 }
+
+/**
+ * Hook execution outcome for telemetry
+ */
+type HookOutcome = 'executed' | 'skipped' | 'aborted' | 'modified' | 'error';
 
 /**
  * HookManagerService interface for Effect-based hook management
@@ -70,7 +76,10 @@ export const HookManagerService = Context.GenericTag<HookManagerService>(
  * Implementation of HookManagerService
  */
 class HookManagerServiceImpl implements HookManagerService {
-  constructor(private hooks: Ref.Ref<Map<HookType, HookHandler[]>>) {}
+  constructor(
+    private hooks: Ref.Ref<Map<HookType, HookHandler[]>>,
+    private observability?: ObservabilityService
+  ) {}
 
   registerHook(type: HookType, handler: HookHandler): Effect.Effect<void> {
     const self = this;
@@ -105,11 +114,38 @@ class HookManagerServiceImpl implements HookManagerService {
   executeHooks(type: HookType, event: HookEvent): Effect.Effect<HookResult[], HookExecutionError> {
     const self = this;
     return Effect.gen(function* () {
+      const startTime = Date.now();
+
       const hooks = yield* Ref.get(self.hooks);
       const handlers = hooks.get(type);
       if (!handlers || handlers.length === 0) return [];
 
+      // Log hook execution start
+      if (self.observability) {
+        yield* self.observability.logStructured({
+          level: 'debug',
+          message: `Executing hooks: ${type}`,
+          metadata: {
+            'hook.type': type,
+            'hook.handlerCount': handlers.length,
+            runId: event.runId,
+            conversationId: event.conversationId,
+            intentId: event.intentId,
+            agentId: event.agentId,
+            pipelineId: event.pipelineId,
+            stepName: event.stepName,
+          },
+        });
+      }
+
       const results: HookResult[] = [];
+      const outcomes: Record<HookOutcome, number> = {
+        executed: 0,
+        skipped: 0,
+        aborted: 0,
+        modified: 0,
+        error: 0,
+      };
 
       for (let i = 0; i < handlers.length; i++) {
         const handler = handlers[i];
@@ -128,6 +164,7 @@ class HookManagerServiceImpl implements HookManagerService {
 
         const result = yield* handlerEffect.pipe(
           Effect.catchAll((error) => {
+            outcomes.error++;
             // Log but continue - hooks should not block execution
             if (process.env.NODE_ENV !== 'test') {
               console.error(`Error executing hook ${type}:`, error);
@@ -139,7 +176,46 @@ class HookManagerServiceImpl implements HookManagerService {
 
         if (result) {
           results.push(result);
+
+          // Classify outcome
+          let outcome: HookOutcome = 'executed';
+          if (result.skip) {
+            outcome = 'skipped';
+          } else if (result.abort) {
+            outcome = 'aborted';
+          } else if (result.data !== undefined || result.context !== undefined || result.metadata !== undefined) {
+            outcome = 'modified';
+          }
+          outcomes[outcome]++;
+        } else {
+          outcomes.executed++;
         }
+      }
+
+      const endTime = Date.now();
+      const durationMs = endTime - startTime;
+
+      // Log hook execution completion
+      if (self.observability) {
+        yield* self.observability.logStructured({
+          level: 'debug',
+          message: `Completed hooks: ${type}`,
+          metadata: {
+            'hook.type': type,
+            'hook.durationMs': durationMs,
+            'hook.resultsCount': results.length,
+            'hook.outcomes': outcomes,
+            runId: event.runId,
+            conversationId: event.conversationId,
+            intentId: event.intentId,
+            agentId: event.agentId,
+            pipelineId: event.pipelineId,
+            stepName: event.stepName,
+          },
+        });
+
+        // Record hook event metric
+        yield* self.observability.recordHookEvent(type);
       }
 
       return results;
@@ -220,6 +296,10 @@ export const HookManagerServiceLive = Layer.effect(
   HookManagerService,
   Effect.gen(function* () {
     const hooks = yield* Ref.make(new Map<HookType, HookHandler[]>());
-    return new HookManagerServiceImpl(hooks);
+
+    // Optionally inject ObservabilityService if available
+    const observability = yield* Effect.serviceOption(ObservabilityService);
+
+    return new HookManagerServiceImpl(hooks, observability._tag === 'Some' ? observability.value : undefined);
   })
 );
