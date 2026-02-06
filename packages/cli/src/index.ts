@@ -94,9 +94,9 @@ Commands:
   test <pattern>           Run tests matching pattern
   eval                    Run evaluation workflows
   eval record --run-id <id>           Record evaluation artifact for a run
-  eval replay --trace-id <id>         Replay run from checkpoint (latest by default)
+  eval replay --trace-id <id>         Replay run from checkpoint (latest by default, optional: --from-step <n> --mode retry|skip|restart)
   eval compare --baseline <id> --candidate <id>  Compare two evaluation traces
-  eval suite --suite <file>           Run evaluation suite manifest
+  eval suite --suite <file>           Run evaluation suite manifest with aggregate metrics and intent diagnostics
 
 Options:
   --config <file>          Path to Fred config file
