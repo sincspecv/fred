@@ -136,6 +136,8 @@ export class Fred implements FredLike {
       messageRouter: this.messageRouter,
       memoryDefaults: this.memoryDefaults,
       defaultAgentId: this.defaultAgentId,
+      hookManager: this.hookManager,
+      observabilityService: undefined, // Will be set via configureObservability if needed
     });
     this.configInitializer = new ConfigInitializer();
 

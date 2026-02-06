@@ -6,6 +6,8 @@ import type { IntentRouter } from '../intent/router';
 import type { PipelineManager } from '../pipeline/manager';
 import type { MessageRouter } from '../routing/router';
 import type { Tracer } from '../tracing';
+import type { HookManager } from '../hooks/manager';
+import type { ObservabilityService } from '../observability/service';
 
 /**
  * ToolFailure record type for persistence (distinct from ToolResult).
@@ -85,6 +87,8 @@ export interface MessageProcessorDeps {
   messageRouter?: MessageRouter;
   memoryDefaults: MemoryDefaults;
   defaultAgentId?: string;
+  hookManager?: HookManager;
+  observabilityService?: ObservabilityService;
 }
 
 /**

@@ -5,6 +5,8 @@ import type { StreamEvent } from '../stream/events';
 import { SpanKind } from '../tracing/types';
 import { validateMessageLength } from '../utils/validation';
 import { semanticMatch } from '../utils/semantic';
+import { createCorrelationContext, runWithCorrelationContext } from '../observability/context';
+import type { HookEvent } from '../hooks/types';
 import {
   createStreamIdGenerator,
   generateSyntheticStreamEvents,
@@ -69,7 +71,8 @@ export class MessageProcessor {
     message: string,
     semanticMatcher?: SemanticMatcherFn,
     previousMessages: AgentMessage[] = [],
-    options?: { conversationId?: string; sequentialVisibility?: boolean }
+    options?: { conversationId?: string; sequentialVisibility?: boolean },
+    runId?: string
   ): Effect.Effect<RouteResult, MessageProcessorError> {
     const self = this;
 
@@ -82,6 +85,8 @@ export class MessageProcessor {
         tracer,
         messageRouter,
         defaultAgentId,
+        hookManager,
+        observabilityService,
       } = self.deps;
 
       const conversationId = options?.conversationId;
@@ -249,19 +254,63 @@ export class MessageProcessor {
           );
 
           if (match) {
+            // Emit afterIntentDetermined hook
+            if (hookManager && observabilityService && runId) {
+              const hookEvent: HookEvent = {
+                type: 'afterIntentDetermined',
+                data: { intent: match.intent, confidence: match.confidence, matchType: match.matchType },
+                conversationId,
+                runId,
+                intentId: match.intent.id,
+                timestamp: new Date().toISOString(),
+              };
+              yield* Effect.promise(() => hookManager.executeHooks('afterIntentDetermined', hookEvent));
+            }
+
             if (routingSpan) {
               routingSpan.setAttributes({
                 'routing.method': 'intent.matching',
                 'routing.intentId': match.intent.id,
                 'routing.confidence': match.confidence,
                 'routing.matchType': match.matchType,
+                'intent.id': match.intent.id,
+                'intent.confidence': match.confidence,
+                'intent.matchType': match.matchType,
               });
             }
 
             // Route to matched intent's action
             if (match.intent.action.type === 'agent') {
+              // Emit beforeAgentSelected hook
+              if (hookManager && observabilityService && runId) {
+                const hookEvent: HookEvent = {
+                  type: 'beforeAgentSelected',
+                  data: { agentId: match.intent.action.target, intent: match.intent },
+                  conversationId,
+                  runId,
+                  intentId: match.intent.id,
+                  agentId: match.intent.action.target,
+                  timestamp: new Date().toISOString(),
+                };
+                yield* Effect.promise(() => hookManager.executeHooks('beforeAgentSelected', hookEvent));
+              }
+
               const agent = agentManager.getAgent(match.intent.action.target);
               if (agent) {
+                // Emit afterAgentSelected hook
+                if (hookManager && observabilityService && runId) {
+                  const hookEvent: HookEvent = {
+                    type: 'afterAgentSelected',
+                    data: { agentId: match.intent.action.target, intent: match.intent },
+                    conversationId,
+                    runId,
+                    intentId: match.intent.id,
+                    agentId: match.intent.action.target,
+                    timestamp: new Date().toISOString(),
+                  };
+                  yield* Effect.promise(() => hookManager.executeHooks('afterAgentSelected', hookEvent));
+                }
+
                 if (routingSpan) {
                   routingSpan.setStatus('ok');
                 }
@@ -360,7 +409,19 @@ export class MessageProcessor {
         agentManager,
         tracer,
         memoryDefaults,
+        hookManager,
+        observabilityService,
       } = self.deps;
+
+      // Generate runId for this message processing
+      const runId = `run_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      const conversationId = options?.conversationId || contextManager.generateConversationId();
+
+      // Create correlation context
+      const correlationContext = createCorrelationContext({
+        runId,
+        conversationId,
+      });
 
       // Validate message input
       yield* Effect.try({
@@ -378,6 +439,8 @@ export class MessageProcessor {
           'message.length': message.length,
           'options.useSemanticMatching': options?.useSemanticMatching ?? true,
           'options.semanticThreshold': options?.semanticThreshold ?? 0.6,
+          'run.id': runId,
+          'conversation.id': conversationId,
         },
       });
 
@@ -386,26 +449,38 @@ export class MessageProcessor {
         tracer?.setActiveSpan(rootSpan);
       }
 
+      // Emit beforeMessageReceived hook
+      if (hookManager && observabilityService) {
+        const hookEvent: HookEvent = {
+          type: 'beforeMessageReceived',
+          data: { message },
+          conversationId,
+          runId,
+          timestamp: new Date().toISOString(),
+        };
+        yield* Effect.promise(() => hookManager.executeHooks('beforeMessageReceived', hookEvent));
+      }
+
       const executeProcessing = Effect.gen(function* () {
         const requireConversationId = options?.requireConversationId ?? memoryDefaults.requireConversationId;
-        const conversationId = options?.conversationId
+        const actualConversationId = options?.conversationId
           ? options.conversationId
           : requireConversationId
             ? undefined
-            : contextManager.generateConversationId();
+            : conversationId;
         const useSemantic = options?.useSemanticMatching ?? true;
         const threshold = options?.semanticThreshold ?? 0.6;
 
-        if (!conversationId) {
+        if (!actualConversationId) {
           return yield* Effect.fail(new ConversationIdRequiredError({}));
         }
 
         if (rootSpan) {
-          rootSpan.setAttribute('conversation.id', conversationId);
+          rootSpan.setAttribute('conversation.id', actualConversationId);
         }
 
         // Get conversation history
-        const history = yield* Effect.promise(() => contextManager.getHistory(conversationId));
+        const history = yield* Effect.promise(() => contextManager.getHistory(actualConversationId));
 
         const previousMessages: AgentMessage[] = history.filter(
           msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool'
@@ -418,13 +493,26 @@ export class MessageProcessor {
             }
           : undefined;
 
+        // Emit beforeIntentDetermined hook
+        if (hookManager && observabilityService) {
+          const hookEvent: HookEvent = {
+            type: 'beforeIntentDetermined',
+            data: { message },
+            conversationId: actualConversationId,
+            runId,
+            timestamp: new Date().toISOString(),
+          };
+          yield* Effect.promise(() => hookManager.executeHooks('beforeIntentDetermined', hookEvent));
+        }
+
         // Route message to appropriate handler
         const sequentialVisibility = options?.sequentialVisibility ?? memoryDefaults.sequentialVisibility ?? true;
         const route = yield* self.routeMessageEffect(
           message,
           semanticMatcher,
           sequentialVisibility ? previousMessages : [],
-          { conversationId, sequentialVisibility }
+          { conversationId: actualConversationId, sequentialVisibility },
+          runId
         );
 
         let response: AgentResponse;
@@ -451,6 +539,19 @@ export class MessageProcessor {
             }));
           }
           usedAgentId = route.agentId || null;
+
+          // Emit beforeResponseGenerated hook
+          if (hookManager && observabilityService) {
+            const hookEvent: HookEvent = {
+              type: 'beforeResponseGenerated',
+              data: { agentId: route.agentId, message },
+              conversationId: actualConversationId,
+              runId,
+              agentId: route.agentId,
+              timestamp: new Date().toISOString(),
+            };
+            yield* Effect.promise(() => hookManager.executeHooks('beforeResponseGenerated', hookEvent));
+          }
 
           // Create span for agent execution
           const agentSpan = tracer?.startSpan('agent.process', {
@@ -481,6 +582,20 @@ export class MessageProcessor {
                 agentSpan.setAttribute('response.hasToolCalls', (resp.toolCalls?.length ?? 0) > 0);
                 agentSpan.setAttribute('response.hasHandoff', resp.handoff !== undefined);
                 agentSpan.setStatus('ok');
+              }
+            })),
+            Effect.tap((resp) => Effect.gen(function* () {
+              // Emit afterResponseGenerated hook
+              if (hookManager && observabilityService) {
+                const hookEvent: HookEvent = {
+                  type: 'afterResponseGenerated',
+                  data: { agentId: route.agentId, response: resp },
+                  conversationId: actualConversationId,
+                  runId,
+                  agentId: route.agentId,
+                  timestamp: new Date().toISOString(),
+                };
+                yield* Effect.promise(() => hookManager.executeHooks('afterResponseGenerated', hookEvent));
               }
             })),
             Effect.tapError((error) => Effect.sync(() => {
@@ -677,6 +792,19 @@ export class MessageProcessor {
             };
             yield* Effect.promise(() => contextManager.addMessage(conversationId, assistantMessage));
           }
+        }
+
+        // Emit afterMessageReceived hook
+        if (hookManager && observabilityService) {
+          const hookEvent: HookEvent = {
+            type: 'afterMessageReceived',
+            data: { message, response: finalResponse },
+            conversationId: actualConversationId,
+            runId,
+            agentId: finalAgentId || undefined,
+            timestamp: new Date().toISOString(),
+          };
+          yield* Effect.promise(() => hookManager.executeHooks('afterMessageReceived', hookEvent));
         }
 
         return finalResponse;
