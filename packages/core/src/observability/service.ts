@@ -50,6 +50,7 @@ export interface SamplingDecision {
  */
 export interface RunRecord {
   runId: string;
+  traceId?: string;
   startTime: number;
   endTime?: number;
   /** Hook events recorded for this run */
@@ -64,6 +65,8 @@ export interface RunRecord {
   hasError: boolean;
   /** Whether this run was slow */
   isSlow: boolean;
+  /** Correlation context for this run */
+  correlationContext?: CorrelationContext;
 }
 
 /**
@@ -108,6 +111,55 @@ export interface ModelUsage {
   outputTokens: number;
   cost?: number;
   messageHash?: string;
+}
+
+/**
+ * Metrics snapshot for JSON export.
+ */
+export interface MetricsSnapshot {
+  timestamp: number;
+  runId?: string;
+  metrics: {
+    hookEvents: Record<string, number>;
+    tokenUsage: {
+      total: number;
+      byProvider: Record<string, { input: number; output: number; total: number }>;
+    };
+    modelCost: {
+      total: number;
+      byProvider: Record<string, number>;
+    };
+  };
+}
+
+/**
+ * OpenTelemetry metrics export format.
+ */
+export interface OtelMetricsExport {
+  resourceMetrics: Array<{
+    resource: {
+      attributes: Record<string, string>;
+    };
+    scopeMetrics: Array<{
+      scope: {
+        name: string;
+        version: string;
+      };
+      metrics: Array<{
+        name: string;
+        description: string;
+        unit?: string;
+        sum?: {
+          dataPoints: Array<{
+            attributes: Record<string, string>;
+            value: number;
+            timeUnixNano: string;
+          }>;
+          isMonotonic: boolean;
+        };
+      }>;
+    }>;
+  }>;
 }
 
 /**
@@ -168,6 +220,14 @@ export class ObservabilityService extends Context.Tag('ObservabilityService')<
     readonly getRunRecord: (runId: string) => Effect.Effect<RunRecord | undefined>;
     /** Export run as trace */
     readonly exportTrace: (runId: string) => Effect.Effect<RunRecord | undefined>;
+    /** Export metrics as JSON snapshot */
+    readonly exportMetrics: (options?: { runId?: string; safe?: boolean }) => Effect.Effect<MetricsSnapshot>;
+    /** Export metrics in Prometheus text format */
+    readonly exportMetricsPrometheus: () => Effect.Effect<string>;
+    /** Export metrics in OpenTelemetry format */
+    readonly exportMetricsOtel: () => Effect.Effect<OtelMetricsExport>;
+    /** Get traceId by runId */
+    readonly getTraceIdByRunId: (runId: string) => Effect.Effect<string | undefined>;
   }
 >() {}
 
@@ -228,6 +288,13 @@ export const ObservabilityServiceLive = Layer.effect(
 
     // In-memory run store
     const runStore = new Map<string, RunRecord>();
+
+    // Global metrics aggregation for export
+    const globalMetrics = {
+      hookEvents: new Map<string, number>(),
+      tokenUsage: new Map<string, { input: number; output: number }>(),
+      modelCost: new Map<string, number>(),
+    };
 
     return {
       getContext: () => Effect.sync(() => getCurrentCorrelationContext()),
@@ -306,6 +373,11 @@ export const ObservabilityServiceLive = Layer.effect(
             Metric.increment,
             Effect.annotateLogs({ hookType })
           );
+          // Also track in global metrics for export
+          globalMetrics.hookEvents.set(
+            hookType,
+            (globalMetrics.hookEvents.get(hookType) ?? 0) + 1
+          );
         }),
 
       recordTokenUsage: (options) =>
@@ -320,6 +392,13 @@ export const ObservabilityServiceLive = Layer.effect(
               outputTokens: options.outputTokens,
             })
           );
+          // Also track in global metrics for export
+          const key = `${options.provider}:${options.model}`;
+          const existing = globalMetrics.tokenUsage.get(key) ?? { input: 0, output: 0 };
+          globalMetrics.tokenUsage.set(key, {
+            input: existing.input + options.inputTokens,
+            output: existing.output + options.outputTokens,
+          });
         }),
 
       recordModelCost: (options) =>
@@ -344,6 +423,12 @@ export const ObservabilityServiceLive = Layer.effect(
             })
           );
 
+          // Also track in global metrics for export
+          globalMetrics.modelCost.set(
+            modelKey,
+            (globalMetrics.modelCost.get(modelKey) ?? 0) + totalCost
+          );
+
           return totalCost;
         }),
 
@@ -351,8 +436,11 @@ export const ObservabilityServiceLive = Layer.effect(
 
       startRun: (runId) =>
         Effect.sync(() => {
+          const ctx = getCurrentCorrelationContext();
+          const spanIds = getCurrentSpanIds();
           runStore.set(runId, {
             runId,
+            traceId: spanIds.traceId,
             startTime: Date.now(),
             hookEvents: [],
             stepSpans: [],
@@ -360,6 +448,7 @@ export const ObservabilityServiceLive = Layer.effect(
             modelUsage: [],
             hasError: false,
             isSlow: false,
+            correlationContext: ctx,
           });
         }),
 
@@ -429,6 +518,218 @@ export const ObservabilityServiceLive = Layer.effect(
             return { ...record };
           }
           return undefined;
+        }),
+
+      exportMetrics: (options = {}) =>
+        Effect.sync(() => {
+          const timestamp = Date.now();
+          let hookEvents: Record<string, number> = {};
+          let tokenUsageByProvider: Record<string, { input: number; output: number; total: number }> = {};
+          let costByProvider: Record<string, number> = {};
+
+          if (options.runId) {
+            // Filter by specific runId
+            const record = runStore.get(options.runId);
+            if (record) {
+              // Aggregate hook events
+              for (const event of record.hookEvents) {
+                hookEvents[event.hookType] = (hookEvents[event.hookType] ?? 0) + 1;
+              }
+
+              // Aggregate token usage
+              for (const usage of record.modelUsage) {
+                const providerKey = `${usage.provider}:${usage.model}`;
+                if (!tokenUsageByProvider[providerKey]) {
+                  tokenUsageByProvider[providerKey] = { input: 0, output: 0, total: 0 };
+                }
+                tokenUsageByProvider[providerKey].input += usage.inputTokens;
+                tokenUsageByProvider[providerKey].output += usage.outputTokens;
+                tokenUsageByProvider[providerKey].total += usage.inputTokens + usage.outputTokens;
+
+                if (usage.cost !== undefined) {
+                  costByProvider[providerKey] = (costByProvider[providerKey] ?? 0) + usage.cost;
+                }
+              }
+            }
+          } else {
+            // Use global metrics
+            hookEvents = Object.fromEntries(globalMetrics.hookEvents.entries());
+
+            for (const [key, usage] of globalMetrics.tokenUsage.entries()) {
+              tokenUsageByProvider[key] = {
+                input: usage.input,
+                output: usage.output,
+                total: usage.input + usage.output,
+              };
+            }
+
+            costByProvider = Object.fromEntries(globalMetrics.modelCost.entries());
+          }
+
+          // Calculate totals
+          const totalTokens = Object.values(tokenUsageByProvider).reduce(
+            (sum, usage) => sum + usage.total,
+            0
+          );
+          const totalCost = Object.values(costByProvider).reduce((sum, cost) => sum + cost, 0);
+
+          return {
+            timestamp,
+            runId: options.runId,
+            metrics: {
+              hookEvents,
+              tokenUsage: {
+                total: totalTokens,
+                byProvider: tokenUsageByProvider,
+              },
+              modelCost: {
+                total: totalCost,
+                byProvider: costByProvider,
+              },
+            },
+          };
+        }),
+
+      exportMetricsPrometheus: () =>
+        Effect.sync(() => {
+          const lines: string[] = [];
+
+          // Hook events counter
+          lines.push('# HELP fred_hook_events_total Total hook events by type');
+          lines.push('# TYPE fred_hook_events_total counter');
+          for (const [hookType, count] of globalMetrics.hookEvents.entries()) {
+            lines.push(`fred_hook_events_total{hook_type="${hookType}"} ${count}`);
+          }
+
+          // Token usage counter
+          lines.push('# HELP fred_tokens_usage_total Total token usage by provider and model');
+          lines.push('# TYPE fred_tokens_usage_total counter');
+          for (const [key, usage] of globalMetrics.tokenUsage.entries()) {
+            const [provider, model] = key.split(':');
+            lines.push(
+              `fred_tokens_usage_total{provider="${provider}",model="${model}",type="input"} ${usage.input}`
+            );
+            lines.push(
+              `fred_tokens_usage_total{provider="${provider}",model="${model}",type="output"} ${usage.output}`
+            );
+          }
+
+          // Model cost counter
+          lines.push('# HELP fred_model_cost_total Total model cost by provider and model');
+          lines.push('# TYPE fred_model_cost_total counter');
+          for (const [key, cost] of globalMetrics.modelCost.entries()) {
+            const [provider, model] = key.split(':');
+            lines.push(`fred_model_cost_total{provider="${provider}",model="${model}"} ${cost}`);
+          }
+
+          return lines.join('\n') + '\n';
+        }),
+
+      exportMetricsOtel: () =>
+        Effect.sync(() => {
+          const timestamp = Date.now();
+          const timeUnixNano = `${timestamp}000000`; // Convert to nanoseconds
+
+          const metrics: OtelMetricsExport['resourceMetrics'][0]['scopeMetrics'][0]['metrics'] = [];
+
+          // Hook events metric
+          const hookEventDataPoints = Array.from(globalMetrics.hookEvents.entries()).map(
+            ([hookType, count]) => ({
+              attributes: { hook_type: hookType },
+              value: count,
+              timeUnixNano,
+            })
+          );
+          if (hookEventDataPoints.length > 0) {
+            metrics.push({
+              name: 'fred.hook.events',
+              description: 'Hook events by type',
+              sum: {
+                dataPoints: hookEventDataPoints,
+                isMonotonic: true,
+              },
+            });
+          }
+
+          // Token usage metrics
+          const tokenDataPoints: Array<{
+            attributes: Record<string, string>;
+            value: number;
+            timeUnixNano: string;
+          }> = [];
+          for (const [key, usage] of globalMetrics.tokenUsage.entries()) {
+            const [provider, model] = key.split(':');
+            tokenDataPoints.push({
+              attributes: { provider, model, type: 'input' },
+              value: usage.input,
+              timeUnixNano,
+            });
+            tokenDataPoints.push({
+              attributes: { provider, model, type: 'output' },
+              value: usage.output,
+              timeUnixNano,
+            });
+          }
+          if (tokenDataPoints.length > 0) {
+            metrics.push({
+              name: 'fred.tokens.usage',
+              description: 'Token usage by provider and model',
+              unit: 'tokens',
+              sum: {
+                dataPoints: tokenDataPoints,
+                isMonotonic: true,
+              },
+            });
+          }
+
+          // Model cost metrics
+          const costDataPoints = Array.from(globalMetrics.modelCost.entries()).map(([key, cost]) => {
+            const [provider, model] = key.split(':');
+            return {
+              attributes: { provider, model },
+              value: cost,
+              timeUnixNano,
+            };
+          });
+          if (costDataPoints.length > 0) {
+            metrics.push({
+              name: 'fred.model.cost',
+              description: 'Model cost by provider and model',
+              unit: 'USD',
+              sum: {
+                dataPoints: costDataPoints,
+                isMonotonic: true,
+              },
+            });
+          }
+
+          return {
+            resourceMetrics: [
+              {
+                resource: {
+                  attributes: {
+                    'service.name': config.serviceMetadata?.serviceName ?? 'fred',
+                    'service.version': config.serviceMetadata?.serviceVersion ?? '0.3.0',
+                  },
+                },
+                scopeMetrics: [
+                  {
+                    scope: {
+                      name: 'fred-observability',
+                      version: '1.0.0',
+                    },
+                    metrics,
+                  },
+                ],
+              },
+            ],
+          };
+        }),
+
+      getTraceIdByRunId: (runId) =>
+        Effect.sync(() => {
+          const record = runStore.get(runId);
+          return record?.traceId;
         }),
     };
   })

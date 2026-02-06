@@ -120,6 +120,37 @@ class HookManagerServiceImpl implements HookManagerService {
       const handlers = hooks.get(type);
       if (!handlers || handlers.length === 0) return [];
 
+      // Wire exportTrace function into hook correlation context
+      if (self.observability && event.runId) {
+        const exportTraceFn = async (traceIdOverride?: string) => {
+          // If traceId is provided, use it directly
+          // Otherwise, resolve from runId
+          let traceId = traceIdOverride;
+          if (!traceId && event.runId) {
+            traceId = yield* self.observability!.getTraceIdByRunId(event.runId);
+          }
+          if (!traceId) {
+            return undefined;
+          }
+          // For now, exportTrace uses runId as the lookup key
+          return yield* self.observability!.exportTrace(event.runId!);
+        };
+
+        event.correlation = {
+          runId: event.runId,
+          conversationId: event.conversationId,
+          intentId: event.intentId,
+          agentId: event.agentId,
+          timestamp: event.timestamp,
+          traceId: event.traceId,
+          spanId: event.spanId,
+          parentSpanId: event.parentSpanId,
+          pipelineId: event.pipelineId,
+          stepName: event.stepName,
+          exportTrace: exportTraceFn,
+        };
+      }
+
       // Log hook execution start
       if (self.observability) {
         yield* self.observability.logStructured({
