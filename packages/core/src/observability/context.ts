@@ -115,7 +115,7 @@ export function getCurrentCorrelationContext(): CorrelationContext | undefined {
  */
 export function withCorrelationContext(ctx: CorrelationContext) {
   return <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    FiberRef.locally(CorrelationContextRef, ctx)(
+    Effect.locally(CorrelationContextRef, ctx)(
       Effect.sync(() => correlationBridge.enterWith(ctx)).pipe(
         Effect.flatMap(() => effect)
       )
