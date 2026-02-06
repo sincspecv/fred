@@ -1,6 +1,6 @@
 {
   "name": "@fred/provider-google",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Google (Gemini) provider for Fred AI framework",
   "type": "module",
   "main": "./src/index.ts",
@@ -32,6 +32,12 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["fred", "google", "gemini", "ai", "provider"],
+  "keywords": [
+    "fred",
+    "google",
+    "gemini",
+    "ai",
+    "provider"
+  ],
   "license": "MIT"
 }

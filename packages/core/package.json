@@ -1,6 +1,6 @@
 {
   "name": "@fred/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fred AI agent framework - core package",
   "type": "module",
   "main": "./src/index.ts",
@@ -40,6 +40,12 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["ai", "agents", "framework", "effect", "typescript"],
+  "keywords": [
+    "ai",
+    "agents",
+    "framework",
+    "effect",
+    "typescript"
+  ],
   "license": "MIT"
 }

@@ -1,6 +1,6 @@
 {
   "name": "@fred/dev",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Fred AI framework development tools",
   "type": "module",
@@ -33,6 +33,11 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["fred", "dev", "cli", "development"],
+  "keywords": [
+    "fred",
+    "dev",
+    "cli",
+    "development"
+  ],
   "license": "MIT"
 }

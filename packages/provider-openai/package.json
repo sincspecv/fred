@@ -1,6 +1,6 @@
 {
   "name": "@fred/provider-openai",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "OpenAI provider for Fred AI framework",
   "type": "module",
   "main": "./src/index.ts",
@@ -30,6 +30,11 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["fred", "openai", "ai", "provider"],
+  "keywords": [
+    "fred",
+    "openai",
+    "ai",
+    "provider"
+  ],
   "license": "MIT"
 }
