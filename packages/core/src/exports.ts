@@ -67,6 +67,9 @@ export * from './eval/service';
 export { GoldenTraceRecorder } from './eval/recorder';
 export * from './eval/assertions';
 export * from './eval/assertion-runner';
+export * from './eval/replay';
+export * from './eval/mock-tools';
+export * from './eval/test-clock';
 
 // Observability exports
 export { buildObservabilityLayers, annotateSpan, withFredSpan } from './observability/otel';
