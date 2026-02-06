@@ -49,6 +49,12 @@ import {
   ProviderRegistryService,
   HookManagerService,
 } from './services';
+import { normalizeRunRecord, normalizeLegacyGoldenTrace } from './eval/normalizer';
+import { FileTraceStorageLive } from './eval/storage';
+import { compare } from './eval/comparator';
+import { createReplayOrchestrator, replay, replayWithStorage } from './eval/replay';
+import { runSuite, parseSuiteManifest, decodeSuiteManifest } from './eval/suite';
+import { calculateIntentMetrics } from './eval/metrics';
 
 /**
  * Fred - Main class for building AI agents
@@ -569,6 +575,26 @@ export class Fred implements FredLike {
     this.runtimePromise = null;
   }
 }
+
+/**
+ * Public evaluation helpers exposed from the main Fred entrypoint.
+ *
+ * This keeps evaluation workflows available from `@fancyrobot/fred`
+ * without requiring internal path imports.
+ */
+export const evaluation = {
+  normalizeRunRecord,
+  normalizeLegacyGoldenTrace,
+  compare,
+  createReplayOrchestrator,
+  replay,
+  replayWithStorage,
+  runSuite,
+  parseSuiteManifest,
+  decodeSuiteManifest,
+  calculateIntentMetrics,
+  FileTraceStorageLive,
+} as const;
 
 // Re-export all types and classes
 export * from './exports';

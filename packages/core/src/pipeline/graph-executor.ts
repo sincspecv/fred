@@ -514,6 +514,11 @@ export async function executeGraphWorkflow(
         // Add branch decision event if conditional edges exist
         const outgoingEdges = config.edges.filter(e => e.from === nodeId);
         if (outgoingEdges.some(e => e.condition)) {
+          graphSpan?.addEvent('graph.branch_decision', {
+            'branch.sourceNode': nodeId,
+            'branch.takenNodes': JSON.stringify(nextNodes),
+          });
+
           // Record taken branches
           for (const next of nextNodes) {
             const edge = outgoingEdges.find(e => e.to === next);

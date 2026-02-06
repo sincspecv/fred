@@ -68,6 +68,9 @@ export { GoldenTraceRecorder } from './eval/recorder';
 export * from './eval/assertions';
 export * from './eval/assertion-runner';
 export * from './eval/replay';
+export * from './eval/comparator';
+export * from './eval/suite';
+export * from './eval/metrics';
 export * from './eval/mock-tools';
 export * from './eval/test-clock';
 
