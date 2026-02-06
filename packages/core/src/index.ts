@@ -628,3 +628,14 @@ export type {
   AgentNotFoundError,
   MaxHandoffDepthError,
 } from './message-processor/errors';
+
+// Re-export evaluation types
+export type {
+  SuiteManifest,
+  SuiteCaseDefinition,
+  SuiteCaseExecutionResult,
+  SuiteCaseReport,
+  SuiteReport,
+  SuiteCompareConfig,
+  SuiteReplayConfig,
+} from './eval';
