@@ -342,8 +342,8 @@ export function createDefaultEvalCommandService(options: DefaultEvalCommandServi
       };
     },
     suite: async ({ suitePath }) => {
-      // Read suite manifest from file
-      const readFileFn = options.readFileFn ?? readFile;
+      // Read suite manifest from file (as UTF-8 string)
+      const readFileFn = options.readFileFn ?? ((path: string) => readFile(path, 'utf-8'));
       const manifestContent = await readFileFn(resolve(suitePath));
       const manifest = options.parseSuiteManifestFn
         ? options.parseSuiteManifestFn(manifestContent)
