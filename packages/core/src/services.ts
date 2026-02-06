@@ -21,6 +21,7 @@ import { MessageProcessorService, MessageProcessorServiceLive } from './message-
 import { IntentMatcherService, IntentMatcherServiceLive } from './intent/service';
 import { IntentRouterService, IntentRouterServiceLive } from './intent/service';
 import { MessageRouterService, MessageRouterServiceFromInstance } from './routing/service';
+import { ObservabilityService, ObservabilityServiceLive } from './observability/service';
 import type { CheckpointStorage, Checkpoint, CheckpointStatus } from './pipeline/checkpoint/types';
 
 /**
@@ -39,7 +40,8 @@ export type FredServices =
   | CheckpointService
   | PauseService
   | PipelineService
-  | MessageProcessorService;
+  | MessageProcessorService
+  | ObservabilityService;
 
 /**
  * Fred runtime type with all services
@@ -199,11 +201,12 @@ const CheckpointServiceLive = Layer.effect(
 
 /**
  * Base layers with no external dependencies
- * Wave 1: ToolRegistry, HookManager
+ * Wave 1: ToolRegistry, HookManager, Observability
  */
 const baseLayer = Layer.mergeAll(
   ToolRegistryServiceLive,
-  HookManagerServiceLive
+  HookManagerServiceLive,
+  ObservabilityServiceLive
 );
 
 /**
@@ -264,6 +267,7 @@ const messageProcessorLayer = MessageProcessorServiceLive.pipe(
  * ```
  * ToolRegistryService (Wave 1)
  * HookManagerService (Wave 1)
+ * ObservabilityService (Wave 1)
  *       |
  *       v
  * ProviderRegistryService (Wave 2)
@@ -354,4 +358,6 @@ export {
   IntentRouterServiceLive,
   MessageRouterService,
   MessageRouterServiceFromInstance,
+  ObservabilityService,
+  ObservabilityServiceLive,
 };

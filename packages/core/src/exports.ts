@@ -67,6 +67,23 @@ export * from './eval/assertion-runner';
 // Observability exports
 export { buildObservabilityLayers, annotateSpan, withFredSpan } from './observability/otel';
 export type { ObservabilityLayers } from './observability/otel';
+export {
+  createCorrelationContext,
+  getCurrentCorrelationContext,
+  runWithCorrelationContext,
+  getCurrentSpanIds,
+} from './observability/context';
+export type { CorrelationContext } from './observability/context';
+export { ObservabilityService, ObservabilityServiceLive } from './observability/service';
+export type {
+  ObservabilityServiceConfig,
+  SamplingDecision,
+  RunRecord,
+  HookEvent,
+  StepSpan,
+  ToolUsage,
+  ModelUsage,
+} from './observability/service';
 
 // Stream output utilities
 export { streamOutput, streamOutputSimple, StreamOutputError } from './stream/output';
