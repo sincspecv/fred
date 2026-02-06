@@ -2,6 +2,13 @@ import { HookType, HookEvent, HookResult, HookHandler } from './types';
 import { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
 import { getActiveSpan, setActiveSpan } from '../tracing/context';
+import type { ObservabilityService } from '../observability/service';
+import { Effect } from 'effect';
+
+/**
+ * Hook execution outcome for telemetry
+ */
+type HookOutcome = 'executed' | 'skipped' | 'aborted' | 'modified' | 'error';
 
 /**
  * Hook manager for registering and executing hooks
@@ -9,12 +16,20 @@ import { getActiveSpan, setActiveSpan } from '../tracing/context';
 export class HookManager {
   private hooks: Map<HookType, HookHandler[]> = new Map();
   private tracer?: Tracer;
+  private observability?: ObservabilityService;
 
   /**
    * Set the tracer for hook execution tracing
    */
   setTracer(tracer?: Tracer): void {
     this.tracer = tracer;
+  }
+
+  /**
+   * Set the observability service for telemetry
+   */
+  setObservability(observability?: ObservabilityService): void {
+    this.observability = observability;
   }
 
   /**
@@ -52,6 +67,28 @@ export class HookManager {
       return [];
     }
 
+    const startTime = Date.now();
+
+    // Log hook execution start
+    if (this.observability) {
+      await Effect.runPromise(
+        this.observability.logStructured({
+          level: 'debug',
+          message: `Executing hooks: ${type}`,
+          metadata: {
+            'hook.type': type,
+            'hook.handlerCount': handlers.length,
+            runId: event.runId,
+            conversationId: event.conversationId,
+            intentId: event.intentId,
+            agentId: event.agentId,
+            pipelineId: event.pipelineId,
+            stepName: event.stepName,
+          },
+        })
+      );
+    }
+
     // Create span for hook execution if tracing is enabled
     const hookSpan = this.tracer?.startSpan('hook.execute', {
       kind: SpanKind.INTERNAL,
@@ -67,6 +104,14 @@ export class HookManager {
     }
 
     const results: HookResult[] = [];
+    const outcomes: Record<HookOutcome, number> = {
+      executed: 0,
+      skipped: 0,
+      aborted: 0,
+      modified: 0,
+      error: 0,
+    };
+
     try {
       for (let i = 0; i < handlers.length; i++) {
         const handler = handlers[i];
@@ -82,23 +127,54 @@ export class HookManager {
           const result = await handler(event);
           if (result) {
             results.push(result);
+
+            // Classify outcome
+            let outcome: HookOutcome = 'executed';
+            if (result.skip) {
+              outcome = 'skipped';
+            } else if (result.abort) {
+              outcome = 'aborted';
+            } else if (result.data !== undefined || result.context !== undefined || result.metadata !== undefined) {
+              outcome = 'modified';
+            }
+            outcomes[outcome]++;
+
             if (handlerSpan) {
               handlerSpan.setAttribute('hook.result.hasData', result.data !== undefined);
               handlerSpan.setAttribute('hook.result.hasContext', result.context !== undefined);
               handlerSpan.setAttribute('hook.result.skip', result.skip ?? false);
+              handlerSpan.setAttribute('hook.result.abort', result.abort ?? false);
+              handlerSpan.setAttribute('hook.outcome', outcome);
               handlerSpan.setStatus('ok');
             }
-          } else if (handlerSpan) {
-            handlerSpan.setStatus('ok');
+
+            // Hash payloads in telemetry
+            if (this.observability && result.data !== undefined) {
+              const dataHash = await Effect.runPromise(
+                this.observability.hashPayload(result.data)
+              );
+              if (handlerSpan) {
+                handlerSpan.setAttribute('hook.result.dataHash', dataHash);
+              }
+            }
+          } else {
+            outcomes.executed++;
+            if (handlerSpan) {
+              handlerSpan.setAttribute('hook.outcome', 'executed');
+              handlerSpan.setStatus('ok');
+            }
           }
         } catch (error) {
+          outcomes.error++;
+
           // Only log errors in non-test environments to avoid noise in test output
-          // Errors are still tracked via tracing spans
+          // Errors are still tracked via tracing spans and telemetry
           if (process.env.NODE_ENV !== 'test') {
             console.error(`Error executing hook ${type}:`, error);
           }
           if (handlerSpan && error instanceof Error) {
             handlerSpan.recordException(error);
+            handlerSpan.setAttribute('hook.outcome', 'error');
             handlerSpan.setStatus('error', error.message);
           }
           // Continue executing other hooks even if one fails
@@ -107,9 +183,43 @@ export class HookManager {
         }
       }
 
+      const endTime = Date.now();
+      const durationMs = endTime - startTime;
+
       if (hookSpan) {
         hookSpan.setAttribute('hook.resultsCount', results.length);
+        hookSpan.setAttribute('hook.durationMs', durationMs);
+        Object.entries(outcomes).forEach(([outcome, count]) => {
+          hookSpan.setAttribute(`hook.outcome.${outcome}`, count);
+        });
         hookSpan.setStatus('ok');
+      }
+
+      // Log hook execution completion
+      if (this.observability) {
+        await Effect.runPromise(
+          this.observability.logStructured({
+            level: 'debug',
+            message: `Completed hooks: ${type}`,
+            metadata: {
+              'hook.type': type,
+              'hook.durationMs': durationMs,
+              'hook.resultsCount': results.length,
+              'hook.outcomes': outcomes,
+              runId: event.runId,
+              conversationId: event.conversationId,
+              intentId: event.intentId,
+              agentId: event.agentId,
+              pipelineId: event.pipelineId,
+              stepName: event.stepName,
+            },
+          })
+        );
+
+        // Record hook event metric
+        await Effect.runPromise(
+          this.observability.recordHookEvent(type)
+        );
       }
     } catch (error) {
       if (hookSpan && error instanceof Error) {
