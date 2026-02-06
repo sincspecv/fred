@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { handleEvalCommand } from '../../../packages/cli/src/eval';
+import { mkdtemp, mkdir, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import {
+  createDefaultEvalCommandService,
+  handleEvalCommand,
+  type EvalCommandIO,
+} from '../../../packages/cli/src/eval';
+import type { EvaluationArtifact } from '../../../packages/core/src/eval/artifact';
+import type { ReplayRuntimeAdapter } from '../../../packages/core/src/eval/replay';
 
 function createHarness(overrides?: {
   record?: (input: { runId: string }) => Promise<unknown>;
@@ -57,6 +66,84 @@ function createHarness(overrides?: {
         },
       },
     },
+  };
+}
+
+function createIoHarness(): { stdout: string[]; stderr: string[]; io: EvalCommandIO } {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+
+  return {
+    stdout,
+    stderr,
+    io: {
+      stdout: (message: string) => {
+        stdout.push(message);
+      },
+      stderr: (message: string) => {
+        stderr.push(message);
+      },
+    },
+  };
+}
+
+function makeArtifact(traceId: string, overrides?: Partial<EvaluationArtifact>): EvaluationArtifact {
+  const base: EvaluationArtifact = {
+    version: '1.0',
+    traceId,
+    run: {
+      runId: 'run-a',
+      hasError: false,
+      isSlow: false,
+    },
+    environment: {
+      environment: 'test',
+      fredVersion: '0.3.0-test',
+    },
+    input: {
+      message: 'hello',
+    },
+    routing: {
+      method: 'intent.matching',
+      intentId: 'support.intent',
+      agentId: 'support-agent',
+    },
+    response: {
+      content: 'ok',
+    },
+    steps: [],
+    toolCalls: [],
+    checkpoints: [],
+    handoffs: [],
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    run: {
+      ...base.run,
+      ...(overrides?.run ?? {}),
+    },
+    environment: {
+      ...base.environment,
+      ...(overrides?.environment ?? {}),
+    },
+    input: {
+      ...base.input,
+      ...(overrides?.input ?? {}),
+    },
+    routing: {
+      ...base.routing,
+      ...(overrides?.routing ?? {}),
+    },
+    response: {
+      ...base.response,
+      ...(overrides?.response ?? {}),
+    },
+    steps: overrides?.steps ?? base.steps,
+    toolCalls: overrides?.toolCalls ?? base.toolCalls,
+    checkpoints: overrides?.checkpoints ?? base.checkpoints,
+    handoffs: overrides?.handoffs ?? base.handoffs,
   };
 }
 
@@ -216,5 +303,152 @@ describe('cli eval command', () => {
     expect(errorExitCode).toBe(1);
     expect(observed[0]).toBe(2);
     expect(harness.stderr.join('\n')).toContain('Invalid --from-step value');
+  });
+
+  test('default compare path uses core comparator semantics with volatile-field tolerance', async () => {
+    const traceDirectory = await mkdtemp(join(tmpdir(), 'fred-eval-'));
+    const baseline = makeArtifact('trace-baseline', { run: { runId: 'run-1', hasError: false, isSlow: false } });
+    const candidate = makeArtifact('trace-candidate', { run: { runId: 'run-2', hasError: false, isSlow: false } });
+
+    await mkdir(traceDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(join(traceDirectory, 'trace-baseline.json'), JSON.stringify(baseline, null, 2), 'utf-8'),
+      writeFile(join(traceDirectory, 'trace-candidate.json'), JSON.stringify(candidate, null, 2), 'utf-8'),
+    ]);
+
+    const ioHarness = createIoHarness();
+    const service = createDefaultEvalCommandService({ traceDirectory });
+
+    const exitCode = await handleEvalCommand(
+      ['compare'],
+      { baseline: 'trace-baseline', candidate: 'trace-candidate', output: 'json' },
+      { service, io: ioHarness.io }
+    );
+
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(ioHarness.stdout[0] ?? '{}');
+    expect(parsed.data.passed).toBe(true);
+    expect(parsed.data.scorecard.failedChecks).toBe(0);
+  });
+
+  test('default compare path returns regression scorecard and exit code 2 on behavior changes', async () => {
+    const traceDirectory = await mkdtemp(join(tmpdir(), 'fred-eval-'));
+    const baseline = makeArtifact('trace-a');
+    const candidate = makeArtifact('trace-b', {
+      routing: {
+        method: 'default.agent',
+        agentId: 'fallback-agent',
+      },
+    });
+
+    await mkdir(traceDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(join(traceDirectory, 'trace-a.json'), JSON.stringify(baseline, null, 2), 'utf-8'),
+      writeFile(join(traceDirectory, 'trace-b.json'), JSON.stringify(candidate, null, 2), 'utf-8'),
+    ]);
+
+    const ioHarness = createIoHarness();
+    const service = createDefaultEvalCommandService({ traceDirectory });
+
+    const exitCode = await handleEvalCommand(
+      ['compare'],
+      { baseline: 'trace-a', candidate: 'trace-b', output: 'json' },
+      { service, io: ioHarness.io }
+    );
+
+    expect(exitCode).toBe(2);
+    const parsed = JSON.parse(ioHarness.stdout[0] ?? '{}');
+    expect(parsed.data.passed).toBe(false);
+    expect(parsed.data.scorecard.failedChecks).toBe(1);
+    expect(parsed.data.scorecard.regressions[0]).toEqual({
+      check: 'routing',
+      path: 'routing',
+      message: 'Routing behavior changed',
+    });
+  });
+
+  test('default record path executes EvaluationService-backed recorder', async () => {
+    const traceDirectory = await mkdtemp(join(tmpdir(), 'fred-eval-'));
+    const observed: Array<{ runId: string; traceDirectory: string }> = [];
+
+    const service = createDefaultEvalCommandService({
+      traceDirectory,
+      recordWithEvaluationService: async (runId, recordTraceDirectory) => {
+        observed.push({ runId, traceDirectory: recordTraceDirectory });
+        return makeArtifact('trace-run-99', {
+          run: {
+            runId,
+            hasError: false,
+            isSlow: false,
+          },
+        });
+      },
+    });
+    const ioHarness = createIoHarness();
+
+    const exitCode = await handleEvalCommand(
+      ['record'],
+      { 'run-id': 'run-99', output: 'json' },
+      { service, io: ioHarness.io }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(observed).toEqual([{ runId: 'run-99', traceDirectory }]);
+    expect(JSON.parse(ioHarness.stdout[0] ?? '{}').data.traceId).toBe('trace-run-99');
+  });
+
+  test('default replay path executes replay orchestrator with checkpoint selection', async () => {
+    const observed: {
+      configPath?: string;
+      replayArgs?: { traceId: string; fromCheckpoint?: number; mode?: 'retry' | 'skip' | 'restart' };
+    } = {};
+
+    const runtime: ReplayRuntimeAdapter = {
+      initializeFromConfig: async () => {
+        return;
+      },
+      resumeFromCheckpoint: () => ({ ok: true }),
+    };
+
+    const service = createDefaultEvalCommandService({
+      configPath: '/tmp/fred.config.yaml',
+      createRuntime: () => runtime,
+      createReplayOrchestratorFn: (deps) => {
+        observed.configPath = deps.configPath;
+        return {
+          replay: async (traceId, replayOptions) => {
+            const normalizedOptions = replayOptions ?? {};
+            observed.replayArgs = {
+              traceId,
+              fromCheckpoint: normalizedOptions.fromCheckpoint,
+              mode: normalizedOptions.mode,
+            };
+            return {
+              traceId,
+              runId: 'run-1',
+              checkpointStep: normalizedOptions.fromCheckpoint ?? 0,
+              mode: normalizedOptions.mode ?? 'skip',
+              output: { ok: true },
+              outputHash: 'hash-1',
+            };
+          },
+        };
+      },
+    });
+    const ioHarness = createIoHarness();
+
+    const exitCode = await handleEvalCommand(
+      ['replay'],
+      { 'trace-id': 'trace-55', 'from-step': '3', mode: 'retry', output: 'json' },
+      { service, io: ioHarness.io }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(observed.configPath).toBe('/tmp/fred.config.yaml');
+    expect(observed.replayArgs).toEqual({
+      traceId: 'trace-55',
+      fromCheckpoint: 3,
+      mode: 'retry',
+    });
   });
 });
