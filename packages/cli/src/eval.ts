@@ -11,8 +11,11 @@ import {
   TraceStorageService,
   compare,
   createReplayOrchestrator,
+  evaluation,
   type EvaluationArtifact,
   type ReplayRuntimeAdapter,
+  type SuiteCaseExecutionResult,
+  type SuiteManifest,
   validateEvaluationArtifact,
 } from '@fancyrobot/fred';
 import { Effect, Layer } from 'effect';
@@ -82,6 +85,9 @@ export interface DefaultEvalCommandServiceOptions {
   compareArtifacts?: typeof compare;
   createReplayOrchestratorFn?: typeof createReplayOrchestrator;
   recordWithEvaluationService?: (runId: string, traceDirectory: string) => Promise<EvaluationArtifact>;
+  runSuiteFn?: typeof evaluation.runSuite;
+  parseSuiteManifestFn?: typeof evaluation.parseSuiteManifest;
+  readFileFn?: (path: string) => Promise<string>;
 }
 
 function getOption(options: Record<string, unknown>, ...keys: string[]): unknown {
@@ -307,10 +313,92 @@ export function createDefaultEvalCommandService(options: DefaultEvalCommandServi
       };
     },
     suite: async ({ suitePath }) => {
-      return {
-        suitePath,
-        message: 'Suite execution requires host-provided case execution wiring.',
-      };
+      // Read suite manifest from file
+      const readFileFn = options.readFileFn ?? readFile;
+      const manifestContent = await readFileFn(resolve(suitePath));
+      const manifest = options.parseSuiteManifestFn
+        ? options.parseSuiteManifestFn(manifestContent)
+        : evaluation.parseSuiteManifest(manifestContent);
+
+      const createReplayOrchestratorFn = options.createReplayOrchestratorFn ?? createReplayOrchestrator;
+      const configPath = resolveConfigPath(options.configPath);
+
+      const storage = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            return yield* TraceStorageService;
+          }),
+          FileTraceStorageLive({ directory: traceDirectory })
+        )
+      );
+
+      const runtime = options.createRuntime ? options.createRuntime() : createFredReplayRuntime();
+
+      // Build orchestrator for replay
+      const orchestrator = createReplayOrchestratorFn({
+        storage,
+        runtime,
+        configPath: configPath ? resolve(configPath) : undefined,
+      });
+
+      const runSuiteFn = options.runSuiteFn ?? evaluation.runSuite;
+
+      // Execute suite using core runner
+      return await runSuiteFn(
+        manifest,
+        async (testCase, index) => {
+          const id = testCase.id ?? `${index + 1}`;
+          const result: SuiteCaseExecutionResult = {};
+
+          try {
+            // If baseline trace is specified in case, load it
+            let baseline: EvaluationArtifact | undefined;
+            if (testCase.input) {
+              baseline = await loadArtifact(testCase.input, traceDirectory);
+            }
+
+            // Execute replay for the case to generate candidate trace
+            const replayResult = await orchestrator.replay(`${id}-candidate`, {
+              fromCheckpoint: testCase.replay?.fromCheckpoint,
+              mode: testCase.replay?.enabled ? undefined : 'skip',
+            });
+
+            // The replay output contains trace data - extract it
+            // The output can be any type but for our purposes contains the execution trace
+            const candidateTrace = replayResult.output as any;
+            const candidateArtifact = candidateTrace?.artifact ?? candidateTrace;
+
+            // Extract latency and token usage from replay result
+            const latencyMs = replayResult.checkpointStep ? 0 : undefined;
+
+            // Normalize candidate to GoldenTrace format if needed
+            const candidateAsGolden = candidateArtifact as any;
+
+            result.trace = candidateAsGolden;
+            result.baseline = baseline;
+            result.candidate = candidateArtifact;
+            result.latencyMs = latencyMs;
+
+            // Extract token usage from trace if available
+            if (candidateAsGolden?.trace?.metrics?.tokenUsage) {
+              result.tokenUsage = candidateAsGolden.trace.metrics.tokenUsage;
+            } else if (candidateArtifact?.trace?.metrics?.tokenUsage) {
+              result.tokenUsage = candidateArtifact.trace.metrics.tokenUsage;
+            }
+
+            // Extract predicted intent from routing
+            if (candidateAsGolden?.trace?.routing?.intentId) {
+              result.predictedIntent = candidateAsGolden.trace.routing.intentId;
+            } else if (candidateArtifact?.trace?.routing?.intentId) {
+              result.predictedIntent = candidateArtifact.trace.routing.intentId;
+            }
+          } catch (error) {
+            result.error = error instanceof Error ? error.message : String(error);
+          }
+
+          return result;
+        }
+      );
     },
   };
 }
