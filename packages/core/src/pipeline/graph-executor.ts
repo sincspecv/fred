@@ -33,6 +33,8 @@ import { prepareHandoffContext } from './handoff';
 import type { AgentResponse } from '../agent/agent';
 import { Effect } from 'effect';
 import { annotateSpan } from '../observability/otel';
+import { getCurrentCorrelationContext, getCurrentSpanIds } from '../observability/context';
+import { ObservabilityService } from '../observability/service';
 
 /**
  * Graph execution result
@@ -217,9 +219,23 @@ export async function executeGraphWorkflow(
   };
 
   try {
-    // Execute beforePipeline hooks
+    // Execute beforePipeline hooks with correlation context
     if (hookManager) {
-      const beforeEvent: HookEvent = { type: 'beforePipeline', data: pipelineData };
+      const correlationCtx = getCurrentCorrelationContext();
+      const spanIds = getCurrentSpanIds();
+      const beforeEvent: HookEvent = {
+        type: 'beforePipeline',
+        data: pipelineData,
+        // Populate correlation fields
+        runId: context.metadata.runId as string | undefined || correlationCtx?.runId,
+        conversationId: context.conversationId || correlationCtx?.conversationId,
+        intentId: correlationCtx?.intentId,
+        timestamp: new Date().toISOString(),
+        traceId: spanIds.traceId || correlationCtx?.traceId,
+        spanId: spanIds.spanId || correlationCtx?.spanId,
+        parentSpanId: spanIds.parentSpanId || correlationCtx?.parentSpanId,
+        pipelineId: config.id,
+      };
       const beforeResult = await hookManager.executeHooksAndMerge('beforePipeline', beforeEvent);
 
       if (beforeResult.metadata) {
@@ -287,12 +303,34 @@ export async function executeGraphWorkflow(
       if (node.type === 'fork') {
         const forkNode = node as ForkNode;
 
-        // Add fork event to span
+        // Add fork event to span with correlation
+        const runId = context.metadata.runId as string | undefined;
         graphSpan?.addEvent('graph.fork', {
           'fork.nodeId': nodeId,
           'fork.branches': forkNode.branches.join(','),
           'fork.branchCount': forkNode.branches.length,
+          ...(runId ? { 'fred.runId': runId } : {}),
         });
+
+        // Record fork via ObservabilityService (best-effort)
+        if (runId) {
+          const recordForkEffect = Effect.gen(function* () {
+            const service = yield* ObservabilityService;
+            yield* service.logStructured({
+              level: 'debug',
+              message: 'Graph fork execution',
+              metadata: {
+                graphId: config.id,
+                forkNodeId: nodeId,
+                branches: forkNode.branches,
+              },
+            });
+          });
+
+          Effect.runPromise(recordForkEffect).catch(() => {
+            // Best-effort: ignore failures
+          });
+        }
 
         // Execute all branches in parallel
         const branchPromises = forkNode.branches.map(async (branchId) => {
@@ -362,13 +400,36 @@ export async function executeGraphWorkflow(
       if (node.type === 'join') {
         const joinNode = node as JoinNode;
 
-        // Add join event to span
+        // Add join event to span with correlation
+        const runId = context.metadata.runId as string | undefined;
         graphSpan?.addEvent('graph.join', {
           'join.nodeId': nodeId,
           'join.sources': joinNode.sources.join(','),
           'join.sourceCount': joinNode.sources.length,
           'join.strategy': joinNode.mergeStrategy,
+          ...(runId ? { 'fred.runId': runId } : {}),
         });
+
+        // Record join via ObservabilityService (best-effort)
+        if (runId) {
+          const recordJoinEffect = Effect.gen(function* () {
+            const service = yield* ObservabilityService;
+            yield* service.logStructured({
+              level: 'debug',
+              message: 'Graph join execution',
+              metadata: {
+                graphId: config.id,
+                joinNodeId: nodeId,
+                sources: joinNode.sources,
+                strategy: joinNode.mergeStrategy,
+              },
+            });
+          });
+
+          Effect.runPromise(recordJoinEffect).catch(() => {
+            // Best-effort: ignore failures
+          });
+        }
 
         // Merge outputs from source nodes
         const sourceOutputs = joinNode.sources.map(srcId => nodeOutputs[srcId]);
@@ -404,12 +465,16 @@ export async function executeGraphWorkflow(
       }
 
       // Execute regular node (agent, function, conditional, pipeline)
+      const runId = context.metadata.runId as string | undefined;
       const nodeSpan = tracer?.startSpan(`graph.node.${nodeId}`, {
         kind: SpanKind.INTERNAL,
         attributes: {
           'node.id': nodeId,
           'node.type': node.type,
           'graph.id': config.id,
+          // Add correlation attributes
+          ...(runId ? { 'fred.runId': runId } : {}),
+          ...(context.conversationId ? { 'fred.conversationId': context.conversationId } : {}),
         },
       });
 
@@ -445,11 +510,59 @@ export async function executeGraphWorkflow(
         // Add branch decision event if conditional edges exist
         const outgoingEdges = config.edges.filter(e => e.from === nodeId);
         if (outgoingEdges.some(e => e.condition)) {
-          graphSpan?.addEvent('graph.branch_decision', {
-            'branch.sourceNode': nodeId,
-            'branch.selectedNodes': nextNodes.join(','),
-            'branch.totalEdges': outgoingEdges.length,
-          });
+          // Record taken branches
+          for (const next of nextNodes) {
+            const edge = outgoingEdges.find(e => e.to === next);
+            graphSpan?.addEvent('graph.branch_taken', {
+              'branch.sourceNode': nodeId,
+              'branch.targetNode': next,
+              'branch.condition': edge?.condition ? JSON.stringify(edge.condition) : 'default',
+              'branch.taken': true,
+            });
+
+            nodeSpan?.addEvent('graph.branch_taken', {
+              'branch.targetNode': next,
+              'branch.taken': true,
+            });
+          }
+
+          // Record not-taken branches
+          const notTakenEdges = outgoingEdges.filter(e => !nextNodes.includes(e.to));
+          for (const edge of notTakenEdges) {
+            graphSpan?.addEvent('graph.branch_not_taken', {
+              'branch.sourceNode': nodeId,
+              'branch.targetNode': edge.to,
+              'branch.condition': edge.condition ? JSON.stringify(edge.condition) : 'default',
+              'branch.taken': false,
+            });
+
+            nodeSpan?.addEvent('graph.branch_not_taken', {
+              'branch.targetNode': edge.to,
+              'branch.taken': false,
+            });
+          }
+
+          // Record branch via ObservabilityService (best-effort)
+          const runId = context.metadata.runId as string | undefined;
+          if (runId) {
+            const recordBranchEffect = Effect.gen(function* () {
+              const service = yield* ObservabilityService;
+              yield* service.logStructured({
+                level: 'debug',
+                message: 'Graph branch decision',
+                metadata: {
+                  graphId: config.id,
+                  nodeId,
+                  takenNodes: nextNodes,
+                  notTakenNodes: notTakenEdges.map(e => e.to),
+                },
+              });
+            });
+
+            Effect.runPromise(recordBranchEffect).catch(() => {
+              // Best-effort: ignore failures
+            });
+          }
         }
 
         for (const nextId of nextNodes) {
@@ -481,10 +594,24 @@ export async function executeGraphWorkflow(
       }
     }
 
-    // Execute afterPipeline hooks
+    // Execute afterPipeline hooks with correlation context
     if (hookManager) {
       const afterData = { ...pipelineData, context };
-      const afterEvent: HookEvent = { type: 'afterPipeline', data: afterData };
+      const afterCorrelationCtx = getCurrentCorrelationContext();
+      const afterSpanIds = getCurrentSpanIds();
+      const afterEvent: HookEvent = {
+        type: 'afterPipeline',
+        data: afterData,
+        // Populate correlation fields
+        runId: context.metadata.runId as string | undefined || afterCorrelationCtx?.runId,
+        conversationId: context.conversationId || afterCorrelationCtx?.conversationId,
+        intentId: afterCorrelationCtx?.intentId,
+        timestamp: new Date().toISOString(),
+        traceId: afterSpanIds.traceId || afterCorrelationCtx?.traceId,
+        spanId: afterSpanIds.spanId || afterCorrelationCtx?.spanId,
+        parentSpanId: afterSpanIds.parentSpanId || afterCorrelationCtx?.parentSpanId,
+        pipelineId: config.id,
+      };
       await hookManager.executeHooksAndMerge('afterPipeline', afterEvent);
     }
 
@@ -557,9 +684,25 @@ async function executeNode(
     },
   };
 
-  // Execute beforeStep hooks
+  // Execute beforeStep hooks with correlation context
   if (hookManager) {
-    const beforeEvent: HookEvent = { type: 'beforeStep', data: stepData };
+    const correlationCtx = getCurrentCorrelationContext();
+    const spanIds = getCurrentSpanIds();
+    const beforeEvent: HookEvent = {
+      type: 'beforeStep',
+      data: stepData,
+      // Populate correlation fields
+      runId: context.metadata.runId as string | undefined || correlationCtx?.runId,
+      conversationId: context.conversationId || correlationCtx?.conversationId,
+      intentId: correlationCtx?.intentId,
+      agentId: (node.type === 'agent' ? node.agentId : undefined) || correlationCtx?.agentId,
+      timestamp: new Date().toISOString(),
+      traceId: spanIds.traceId || correlationCtx?.traceId,
+      spanId: spanIds.spanId || correlationCtx?.spanId,
+      parentSpanId: spanIds.parentSpanId || correlationCtx?.parentSpanId,
+      pipelineId: config.id,
+      stepName: node.name || node.id,
+    };
     const beforeResult = await hookManager.executeHooksAndMerge('beforeStep', beforeEvent);
 
     if (beforeResult.metadata) {
@@ -642,10 +785,49 @@ async function executeNode(
       throw new Error(`Unknown node type: ${(node as any).type}`);
   }
 
-  // Execute afterStep hooks
+  // Record node execution via ObservabilityService (best-effort)
+  const runId = context.metadata.runId as string | undefined;
+  if (runId) {
+    const recordNodeEffect = Effect.gen(function* () {
+      const service = yield* ObservabilityService;
+      yield* service.recordRunStepSpan(runId, {
+        stepName: node.name || node.id,
+        startTime: Date.now(), // Approximate - actual start was earlier
+        endTime: Date.now(),
+        status: 'success',
+        metadata: {
+          graphId: config.id,
+          nodeType: node.type,
+          nodeId: node.id,
+        },
+      });
+    });
+
+    Effect.runPromise(recordNodeEffect).catch(() => {
+      // Best-effort: ignore failures
+    });
+  }
+
+  // Execute afterStep hooks with correlation context
   if (hookManager) {
     const afterData: StepHookEventData = { ...stepData, result };
-    const afterEvent: HookEvent = { type: 'afterStep', data: afterData };
+    const afterCorrelationCtx = getCurrentCorrelationContext();
+    const afterSpanIds = getCurrentSpanIds();
+    const afterEvent: HookEvent = {
+      type: 'afterStep',
+      data: afterData,
+      // Populate correlation fields
+      runId: context.metadata.runId as string | undefined || afterCorrelationCtx?.runId,
+      conversationId: context.conversationId || afterCorrelationCtx?.conversationId,
+      intentId: afterCorrelationCtx?.intentId,
+      agentId: (node.type === 'agent' ? node.agentId : undefined) || afterCorrelationCtx?.agentId,
+      timestamp: new Date().toISOString(),
+      traceId: afterSpanIds.traceId || afterCorrelationCtx?.traceId,
+      spanId: afterSpanIds.spanId || afterCorrelationCtx?.spanId,
+      parentSpanId: afterSpanIds.parentSpanId || afterCorrelationCtx?.parentSpanId,
+      pipelineId: config.id,
+      stepName: node.name || node.id,
+    };
     const afterResult = await hookManager.executeHooksAndMerge('afterStep', afterEvent);
 
     if (afterResult.metadata) {
