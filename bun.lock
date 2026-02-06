@@ -5,18 +5,18 @@
     "": {
       "name": "fred",
       "dependencies": {
-        "@fred/provider-groq": "workspace:*",
+        "@fancyrobot/fred-groq": "workspace:*",
       },
       "devDependencies": {
-        "@changesets/changelog-github": "^0.5.1",
-        "@changesets/cli": "^2.29.4",
+        "@changesets/changelog-github": "^0.5.2",
+        "@changesets/cli": "^2.29.8",
         "@effect/ai": "^0.33.2",
         "@effect/ai-anthropic": "^0.23.0",
         "@effect/ai-google": "^0.12.1",
         "@effect/ai-openai": "^0.37.2",
-        "@effect/language-service": "^0.72.0",
+        "@effect/language-service": "^0.72.1",
         "@effect/opentelemetry": "^0.61.0",
-        "@effect/platform": "^0.94.2",
+        "@effect/platform": "^0.94.3",
         "@effect/platform-bun": "^0.87.1",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/exporter-trace-otlp-http": "^0.200.0",
@@ -25,23 +25,23 @@
         "@types/js-yaml": "^4.0.9",
         "@types/pg": "^8.16.0",
         "chokidar": "^5.0.0",
-        "effect": "^3.19.15",
+        "effect": "^3.19.16",
         "graphology": "^0.26.0",
         "graphology-dag": "^0.4.1",
-        "js-yaml": "^4.1.0",
-        "pg": "^8.17.2",
-        "typescript": "^5.8.3",
+        "js-yaml": "^4.1.1",
+        "pg": "^8.18.0",
+        "typescript": "^5.9.3",
       },
     },
     "packages/cli": {
-      "name": "@fred/cli",
+      "name": "@fancyrobot/fred-cli",
       "version": "0.2.0",
       "bin": {
         "fred": "./src/index.ts",
       },
       "dependencies": {
-        "@fred/core": "workspace:^",
-        "@fred/dev": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
+        "@fancyrobot/fred-dev": "workspace:^",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -52,8 +52,8 @@
       },
     },
     "packages/core": {
-      "name": "@fred/core",
-      "version": "0.2.0",
+      "name": "@fancyrobot/fred",
+      "version": "0.2.5",
       "dependencies": {
         "graphology": "^0.26.0",
         "graphology-dag": "^0.4.1",
@@ -72,10 +72,10 @@
       },
     },
     "packages/dev": {
-      "name": "@fred/dev",
+      "name": "@fancyrobot/fred-dev",
       "version": "0.1.1",
       "dependencies": {
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "chokidar": "^5.0.0",
       },
       "devDependencies": {
@@ -89,84 +89,84 @@
       },
     },
     "packages/provider-anthropic": {
-      "name": "@fred/provider-anthropic",
+      "name": "@fancyrobot/fred-anthropic",
       "version": "1.0.0",
       "devDependencies": {
         "@effect/ai": "^0.33.2",
         "@effect/ai-anthropic": "^0.23.0",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.15",
       },
       "peerDependencies": {
         "@effect/ai": "^0.33.0",
         "@effect/ai-anthropic": "^0.23.0",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.0",
       },
     },
     "packages/provider-google": {
-      "name": "@fred/provider-google",
+      "name": "@fancyrobot/fred-google",
       "version": "1.0.0",
       "devDependencies": {
         "@effect/ai": "^0.33.2",
         "@effect/ai-google": "^0.12.1",
         "@effect/platform": "^0.94.2",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.15",
       },
       "peerDependencies": {
         "@effect/ai": "^0.33.0",
         "@effect/ai-google": "^0.12.0",
         "@effect/platform": "^0.94.0",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.0",
       },
     },
     "packages/provider-groq": {
-      "name": "@fred/provider-groq",
+      "name": "@fancyrobot/fred-groq",
       "version": "1.0.0",
       "devDependencies": {
         "@effect/ai": "^0.33.2",
         "@effect/platform": "^0.94.2",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.15",
       },
       "peerDependencies": {
         "@effect/ai": "^0.33.0",
         "@effect/platform": "^0.94.0",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.0",
       },
     },
     "packages/provider-openai": {
-      "name": "@fred/provider-openai",
+      "name": "@fancyrobot/fred-openai",
       "version": "1.0.0",
       "devDependencies": {
         "@effect/ai": "^0.33.2",
         "@effect/ai-openai": "^0.37.2",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.15",
       },
       "peerDependencies": {
         "@effect/ai": "^0.33.0",
         "@effect/ai-openai": "^0.37.0",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.0",
       },
     },
     "packages/provider-openrouter": {
-      "name": "@fred/provider-openrouter",
+      "name": "@fancyrobot/fred-openrouter",
       "version": "1.0.0",
       "devDependencies": {
         "@effect/ai": "^0.33.2",
         "@effect/ai-openai": "^0.37.2",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.15",
       },
       "peerDependencies": {
         "@effect/ai": "^0.33.0",
         "@effect/ai-openai": "^0.37.0",
-        "@fred/core": "workspace:^",
+        "@fancyrobot/fred": "workspace:^",
         "effect": "^3.19.0",
       },
     },
@@ -242,21 +242,21 @@
 
     "@effect/workflow": ["@effect/workflow@0.16.0", "", { "peerDependencies": { "@effect/experimental": "^0.58.0", "@effect/platform": "^0.94.0", "@effect/rpc": "^0.73.0", "effect": "^3.19.13" } }, "sha512-MiAdlxx3TixkgHdbw+Yf1Z3tHAAE0rOQga12kIydJqj05Fnod+W/I+kQGRMY/XWRg+QUsVxhmh1qTr7Ype6lrw=="],
 
-    "@fred/cli": ["@fred/cli@workspace:packages/cli"],
+    "@fancyrobot/fred": ["@fancyrobot/fred@workspace:packages/core"],
 
-    "@fred/core": ["@fred/core@workspace:packages/core"],
+    "@fancyrobot/fred-anthropic": ["@fancyrobot/fred-anthropic@workspace:packages/provider-anthropic"],
 
-    "@fred/dev": ["@fred/dev@workspace:packages/dev"],
+    "@fancyrobot/fred-cli": ["@fancyrobot/fred-cli@workspace:packages/cli"],
 
-    "@fred/provider-anthropic": ["@fred/provider-anthropic@workspace:packages/provider-anthropic"],
+    "@fancyrobot/fred-dev": ["@fancyrobot/fred-dev@workspace:packages/dev"],
 
-    "@fred/provider-google": ["@fred/provider-google@workspace:packages/provider-google"],
+    "@fancyrobot/fred-google": ["@fancyrobot/fred-google@workspace:packages/provider-google"],
 
-    "@fred/provider-groq": ["@fred/provider-groq@workspace:packages/provider-groq"],
+    "@fancyrobot/fred-groq": ["@fancyrobot/fred-groq@workspace:packages/provider-groq"],
 
-    "@fred/provider-openai": ["@fred/provider-openai@workspace:packages/provider-openai"],
+    "@fancyrobot/fred-openai": ["@fancyrobot/fred-openai@workspace:packages/provider-openai"],
 
-    "@fred/provider-openrouter": ["@fred/provider-openrouter@workspace:packages/provider-openrouter"],
+    "@fancyrobot/fred-openrouter": ["@fancyrobot/fred-openrouter@workspace:packages/provider-openrouter"],
 
     "@inquirer/external-editor": ["@inquirer/external-editor@1.0.3", "", { "dependencies": { "chardet": "^2.1.1", "iconv-lite": "^0.7.0" }, "peerDependencies": { "@types/node": ">=18" }, "optionalPeers": ["@types/node"] }, "sha512-RWbSrDiYmO4LbejWY7ttpxczuwQyZLBUyygsA9Nsv95hpzUWwnNTVQmAq3xuh7vNwCp07UTmE5i11XAEExx4RA=="],
 
