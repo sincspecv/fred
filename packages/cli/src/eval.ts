@@ -270,12 +270,8 @@ export function createDefaultEvalCommandService(options: DefaultEvalCommandServi
       }
     },
     replay: async ({ traceId, fromStep, mode }) => {
+      // Config is optional for replay - only required if provided by user
       const configPath = resolveConfigPath(options.configPath);
-      if (!configPath) {
-        throw new Error(
-          'Replay requires a Fred config file. Provide --config, set FRED_CONFIG_PATH, or add fred.config.yaml/json in the project root.'
-        );
-      }
 
       const storage = await Effect.runPromise(
         Effect.provide(
@@ -289,7 +285,7 @@ export function createDefaultEvalCommandService(options: DefaultEvalCommandServi
       const orchestrator = createReplayOrchestratorFn({
         storage,
         runtime,
-        configPath: resolve(configPath),
+        configPath: configPath ? resolve(configPath) : undefined,
       });
 
       return orchestrator.replay(traceId, {

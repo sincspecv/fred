@@ -19,7 +19,7 @@ export interface ReplayOptions {
 export interface ReplayDependencies {
   storage: Pick<TraceStorageApi, 'get'>;
   runtime: ReplayRuntimeAdapter;
-  configPath: string;
+  configPath?: string;
 }
 
 export interface ReplayRuntimeAdapter {
@@ -139,9 +139,13 @@ export function createReplayOrchestrator(deps: ReplayDependencies) {
       const mode = options.mode ?? 'skip';
       const toolMocks = buildReplayToolMocks(artifact);
 
-      await deps.runtime.initializeFromConfig(deps.configPath, {
-        toolExecutors: toolMocks.toolExecutors,
-      });
+      // Only initialize from config if configPath is provided
+      // For config-less replay, we rely on artifact data and checkpoint resumption
+      if (deps.configPath) {
+        await deps.runtime.initializeFromConfig(deps.configPath, {
+          toolExecutors: toolMocks.toolExecutors,
+        });
+      }
 
       const clockAdjustments = buildClockAdjustments(artifact, checkpoint.step);
       const replayOutput = await runEffectWithTestClock(
