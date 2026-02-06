@@ -5,7 +5,7 @@ import type { StreamEvent } from '../stream/events';
 import { SpanKind } from '../tracing/types';
 import { validateMessageLength } from '../utils/validation';
 import { semanticMatch } from '../utils/semantic';
-import { createCorrelationContext, runWithCorrelationContext } from '../observability/context';
+import { createCorrelationContext, withCorrelationContext } from '../observability/context';
 import type { HookEvent } from '../hooks/types';
 import {
   createStreamIdGenerator,
@@ -449,14 +449,17 @@ export class MessageProcessor {
         conversationId,
       });
 
-      // Validate message input
-      yield* Effect.try({
-        try: () => validateMessageLength(message),
-        catch: (error) => new MessageValidationError({
-          message: 'Message validation failed',
-          details: error instanceof Error ? error.message : String(error),
-        }),
-      });
+      // Wrap entire processing in correlation context
+      return yield* withCorrelationContext(correlationContext)(
+        Effect.gen(function* () {
+          // Validate message input
+          yield* Effect.try({
+            try: () => validateMessageLength(message),
+            catch: (error) => new MessageValidationError({
+              message: 'Message validation failed',
+              details: error instanceof Error ? error.message : String(error),
+            }),
+          });
 
       // Create root span for message processing
       const rootSpan = tracer?.startSpan('processMessage', {
@@ -854,6 +857,8 @@ export class MessageProcessor {
           }
         }))
       );
+        })
+      );
     });
   }
 
@@ -907,6 +912,9 @@ export class MessageProcessor {
         memoryDefaults,
       } = self.deps;
 
+      // Generate runId for this stream
+      const runId = `run_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
       // Validate message input
       yield* Effect.try({
         try: () => validateMessageLength(message),
@@ -922,13 +930,23 @@ export class MessageProcessor {
         : requireConversationId
           ? undefined
           : contextManager.generateConversationId();
-      const useSemantic = options?.useSemanticMatching ?? true;
-      const threshold = options?.semanticThreshold ?? 0.6;
-      const sequentialVisibility = options?.sequentialVisibility ?? memoryDefaults.sequentialVisibility ?? true;
 
       if (!conversationId) {
         return yield* Effect.fail(new ConversationIdRequiredError({}));
       }
+
+      // Create correlation context
+      const correlationContext = createCorrelationContext({
+        runId,
+        conversationId,
+      });
+
+      // Wrap entire streaming in correlation context
+      return yield* withCorrelationContext(correlationContext)(
+        Effect.gen(function* () {
+          const useSemantic = options?.useSemanticMatching ?? true;
+          const threshold = options?.semanticThreshold ?? 0.6;
+          const sequentialVisibility = options?.sequentialVisibility ?? memoryDefaults.sequentialVisibility ?? true;
 
       const history = yield* Effect.promise(() => contextManager.getHistory(conversationId));
 
@@ -1009,6 +1027,8 @@ export class MessageProcessor {
         routeType: 'unknown',
         cause: new Error(`Unknown route type: ${route.type}`),
       }));
+        })
+      );
     });
   }
 
