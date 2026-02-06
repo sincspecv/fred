@@ -240,15 +240,18 @@ async function recordWithCoreEvaluationService(runId: string, traceDirectory: st
     return yield* service.record(runId);
   });
 
-  // Build base layer with dependencies before providing EvaluationServiceLive
-  const baseLayer = Layer.mergeAll(
+  // CORRECT: Build dependency layer first, then provide it to EvaluationServiceLive
+  const dependencyLayer = Layer.merge(
     FileTraceStorageLive({ directory: traceDirectory }),
     ObservabilityServiceLive
   );
 
+  // CORRECT: Provide dependencies TO EvaluationServiceLive
+  const serviceLayer = Layer.provide(EvaluationServiceLive, dependencyLayer);
+
   const providedProgram = Effect.provide(
     program as Effect.Effect<EvaluationArtifact, Error, EvaluationService>,
-    Layer.provide(EvaluationServiceLive, baseLayer)
+    serviceLayer
   ) as Effect.Effect<EvaluationArtifact, Error, never>;
 
   return Effect.runPromise(providedProgram);
