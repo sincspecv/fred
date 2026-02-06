@@ -10,7 +10,7 @@
 import { Effect, Context, Layer, Metric, Logger, LogLevel } from 'effect';
 import { createHash } from 'crypto';
 import type { CorrelationContext } from './context';
-import { getCurrentCorrelationContext, getCurrentSpanIds } from './context';
+import { getCurrentCorrelationContext, getCurrentSpanIds, getCorrelationContext, getSpanIds } from './context';
 
 /**
  * Observability service configuration.
@@ -297,7 +297,7 @@ export const ObservabilityServiceLive = Layer.effect(
     };
 
     return {
-      getContext: () => Effect.sync(() => getCurrentCorrelationContext()),
+      getContext: () => getCorrelationContext,
 
       shouldSampleRun: (options) =>
         Effect.sync(() => {
@@ -331,10 +331,10 @@ export const ObservabilityServiceLive = Layer.effect(
       logStructured: (options) =>
         Effect.gen(function* () {
           // Get correlation context
-          const ctx = getCurrentCorrelationContext();
+          const ctx = yield* getCorrelationContext;
 
           // Get current span IDs (may have changed since context was created)
-          const spanIds = getCurrentSpanIds();
+          const spanIds = yield* getSpanIds;
 
           // Merge correlation context, span IDs, and service metadata
           const logData = {
@@ -435,9 +435,9 @@ export const ObservabilityServiceLive = Layer.effect(
       hashPayload: (payload) => Effect.sync(() => hashValue(payload)),
 
       startRun: (runId) =>
-        Effect.sync(() => {
-          const ctx = getCurrentCorrelationContext();
-          const spanIds = getCurrentSpanIds();
+        Effect.gen(function* () {
+          const ctx = yield* getCorrelationContext;
+          const spanIds = yield* getSpanIds;
           runStore.set(runId, {
             runId,
             traceId: spanIds.traceId,
