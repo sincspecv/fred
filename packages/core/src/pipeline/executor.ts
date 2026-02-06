@@ -29,7 +29,7 @@ import { detectPauseSignal, type DetectedPause } from './pause';
 import { Effect } from 'effect';
 import { annotateSpan } from '../observability/otel';
 import { attachErrorToSpan } from '../observability/errors';
-import { getCurrentCorrelationContext, getCurrentSpanIds } from '../observability/context';
+import { getCurrentCorrelationContext, getCurrentSpanIds, getCorrelationContext } from '../observability/context';
 import { ObservabilityService } from '../observability/service';
 
 /**
@@ -398,6 +398,7 @@ async function executeStepWithHooks(
       if (runId) {
         const recordBranchEffect = Effect.gen(function* () {
           const service = yield* ObservabilityService;
+          const ctx = yield* getCorrelationContext;
           yield* service.logStructured({
             level: 'debug',
             message: 'Pipeline branch decision',
@@ -407,6 +408,7 @@ async function executeStepWithHooks(
               conditionResult,
               takenPath,
               notTakenPath,
+              ...ctx,
             },
           });
         });
@@ -425,6 +427,7 @@ async function executeStepWithHooks(
   if (runId) {
     const recordStepEffect = Effect.gen(function* () {
       const service = yield* ObservabilityService;
+      const ctx = yield* getCorrelationContext;
       yield* service.recordRunStepSpan(runId, {
         stepName: step.name,
         startTime: Date.now(), // Approximate - actual start was earlier
@@ -434,6 +437,7 @@ async function executeStepWithHooks(
           pipelineId: config.id,
           stepType: step.type,
           stepIndex: stepIndex,
+          ...ctx,
         },
       });
     });

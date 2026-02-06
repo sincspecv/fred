@@ -8,7 +8,7 @@
 import type { AgentMessage } from '../agent/agent';
 import type { PipelineContext } from './context';
 import { Effect } from 'effect';
-import { getCurrentCorrelationContext, getCurrentSpanIds } from '../observability/context';
+import { getCurrentCorrelationContext, getCurrentSpanIds, getCorrelationContext, getSpanIds } from '../observability/context';
 import { ObservabilityService } from '../observability/service';
 
 /**
@@ -85,15 +85,13 @@ export function validateHandoffTarget(
   request: HandoffRequest,
   config: HandoffConfig
 ): HandoffResult {
-  // Get correlation context for trace event
-  const correlationCtx = getCurrentCorrelationContext();
-  const spanIds = getCurrentSpanIds();
-
   const isAllowed = config.allowedTargets.includes(request.targetAgent);
 
   // Emit trace event for handoff validation (best-effort)
   const recordValidationEffect = Effect.gen(function* () {
     const service = yield* ObservabilityService;
+    const correlationCtx = yield* getCorrelationContext;
+    const spanIds = yield* getSpanIds;
     yield* service.logStructured({
       level: isAllowed ? 'debug' : 'warning',
       message: isAllowed ? 'Handoff validation passed' : 'Handoff validation failed',
@@ -147,10 +145,6 @@ export function prepareHandoffContext(
   pipelineContext: PipelineContext,
   config: HandoffConfig
 ): HandoffContext {
-  // Get correlation context for trace event
-  const correlationCtx = getCurrentCorrelationContext();
-  const spanIds = getCurrentSpanIds();
-
   // Preserve history based on config (default: true)
   const preserveHistory = config.preserveHistory !== false;
 
@@ -169,6 +163,8 @@ export function prepareHandoffContext(
   // Emit trace event for handoff context preparation (best-effort)
   const recordHandoffEffect = Effect.gen(function* () {
     const service = yield* ObservabilityService;
+    const correlationCtx = yield* getCorrelationContext;
+    const spanIds = yield* getSpanIds;
 
     // Hash message payload if needed
     const messageHash = pipelineContext.history.length > 0

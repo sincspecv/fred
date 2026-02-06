@@ -33,7 +33,7 @@ import { prepareHandoffContext } from './handoff';
 import type { AgentResponse } from '../agent/agent';
 import { Effect } from 'effect';
 import { annotateSpan } from '../observability/otel';
-import { getCurrentCorrelationContext, getCurrentSpanIds } from '../observability/context';
+import { getCurrentCorrelationContext, getCurrentSpanIds, getCorrelationContext } from '../observability/context';
 import { ObservabilityService } from '../observability/service';
 
 /**
@@ -316,6 +316,7 @@ export async function executeGraphWorkflow(
         if (runId) {
           const recordForkEffect = Effect.gen(function* () {
             const service = yield* ObservabilityService;
+            const ctx = yield* getCorrelationContext;
             yield* service.logStructured({
               level: 'debug',
               message: 'Graph fork execution',
@@ -323,6 +324,7 @@ export async function executeGraphWorkflow(
                 graphId: config.id,
                 forkNodeId: nodeId,
                 branches: forkNode.branches,
+                ...ctx,
               },
             });
           });
@@ -414,6 +416,7 @@ export async function executeGraphWorkflow(
         if (runId) {
           const recordJoinEffect = Effect.gen(function* () {
             const service = yield* ObservabilityService;
+            const ctx = yield* getCorrelationContext;
             yield* service.logStructured({
               level: 'debug',
               message: 'Graph join execution',
@@ -422,6 +425,7 @@ export async function executeGraphWorkflow(
                 joinNodeId: nodeId,
                 sources: joinNode.sources,
                 strategy: joinNode.mergeStrategy,
+                ...ctx,
               },
             });
           });
@@ -547,6 +551,7 @@ export async function executeGraphWorkflow(
           if (runId) {
             const recordBranchEffect = Effect.gen(function* () {
               const service = yield* ObservabilityService;
+              const ctx = yield* getCorrelationContext;
               yield* service.logStructured({
                 level: 'debug',
                 message: 'Graph branch decision',
@@ -555,6 +560,7 @@ export async function executeGraphWorkflow(
                   nodeId,
                   takenNodes: nextNodes,
                   notTakenNodes: notTakenEdges.map(e => e.to),
+                  ...ctx,
                 },
               });
             });
@@ -790,6 +796,7 @@ async function executeNode(
   if (runId) {
     const recordNodeEffect = Effect.gen(function* () {
       const service = yield* ObservabilityService;
+      const ctx = yield* getCorrelationContext;
       yield* service.recordRunStepSpan(runId, {
         stepName: node.name || node.id,
         startTime: Date.now(), // Approximate - actual start was earlier
@@ -799,6 +806,7 @@ async function executeNode(
           graphId: config.id,
           nodeType: node.type,
           nodeId: node.id,
+          ...ctx,
         },
       });
     });

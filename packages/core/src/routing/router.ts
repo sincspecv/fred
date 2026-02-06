@@ -22,7 +22,7 @@ import { AgentManager } from '../agent/manager';
 import { HookManager } from '../hooks/manager';
 import { Effect } from 'effect';
 import { RoutingMatcherError, NoAgentsAvailableError } from './errors';
-import { getCurrentCorrelationContext } from '../observability/context';
+import { getCurrentCorrelationContext, getCorrelationContext } from '../observability/context';
 import type { HookEvent } from '../hooks/types';
 
 /**
@@ -72,7 +72,7 @@ export class MessageRouter {
       const startTime = Date.now();
 
       // Get correlation context for hooks
-      const correlationContext = getCurrentCorrelationContext();
+      const correlationContext = yield* getCorrelationContext;
 
       // Emit beforeRouting hook (use Effect.tryPromise for async hook execution with error handling)
       if (self.hookManager) {
