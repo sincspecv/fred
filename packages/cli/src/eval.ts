@@ -1,6 +1,21 @@
 import { readFile } from 'fs/promises';
-import { isDeepStrictEqual } from 'util';
-import { type EvaluationArtifact, validateEvaluationArtifact } from '@fancyrobot/fred';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
+import {
+  EvaluationRunNotFoundError,
+  EvaluationService,
+  EvaluationServiceLive,
+  FileTraceStorageLive,
+  Fred,
+  ObservabilityServiceLive,
+  TraceStorageService,
+  compare,
+  createReplayOrchestrator,
+  type EvaluationArtifact,
+  type ReplayRuntimeAdapter,
+  validateEvaluationArtifact,
+} from '@fancyrobot/fred';
+import { Effect, Layer } from 'effect';
 
 export type EvalOutputFormat = 'text' | 'json';
 
@@ -48,6 +63,7 @@ export interface EvalCommandDependencies {
 }
 
 const DEFAULT_TRACE_DIR = '.fred/eval/traces';
+const DEFAULT_CONFIG_FILES = ['fred.config.yaml', 'fred.config.yml', 'fred.config.json'] as const;
 
 export interface EvalCompareResult {
   passed: boolean;
@@ -57,6 +73,15 @@ export interface EvalCompareResult {
     failedChecks: number;
     regressions: Array<{ check: string; path: string; message: string }>;
   };
+}
+
+export interface DefaultEvalCommandServiceOptions {
+  traceDirectory?: string;
+  configPath?: string;
+  createRuntime?: () => ReplayRuntimeAdapter;
+  compareArtifacts?: typeof compare;
+  createReplayOrchestratorFn?: typeof createReplayOrchestrator;
+  recordWithEvaluationService?: (runId: string, traceDirectory: string) => Promise<EvaluationArtifact>;
 }
 
 function getOption(options: Record<string, unknown>, ...keys: string[]): unknown {
@@ -173,45 +198,114 @@ async function loadArtifact(traceId: string, directory = DEFAULT_TRACE_DIR): Pro
   return parsed;
 }
 
-export function createDefaultEvalCommandService(): EvalCommandService {
+function resolveConfigPath(explicitConfigPath?: string): string | undefined {
+  if (explicitConfigPath && explicitConfigPath.trim().length > 0) {
+    return explicitConfigPath;
+  }
+
+  const envConfigPath = process.env.FRED_CONFIG_PATH;
+  if (envConfigPath && envConfigPath.trim().length > 0) {
+    return envConfigPath;
+  }
+
+  for (const candidate of DEFAULT_CONFIG_FILES) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function createFredReplayRuntime(): ReplayRuntimeAdapter {
+  const fred = new Fred();
+
+  return {
+    initializeFromConfig: async (configPath, options) => {
+      await fred.initializeFromConfig(configPath, options);
+    },
+    resumeFromCheckpoint: ({ runId, mode }) => fred.getPipelineManager().resume(runId, { mode }),
+  };
+}
+
+async function recordWithCoreEvaluationService(runId: string, traceDirectory: string): Promise<EvaluationArtifact> {
+  const program = Effect.gen(function* () {
+    const service = yield* EvaluationService;
+    return yield* service.record(runId);
+  });
+
+  const providedProgram = Effect.provide(
+    program as Effect.Effect<EvaluationArtifact, Error, EvaluationService>,
+    Layer.mergeAll(
+      FileTraceStorageLive({ directory: traceDirectory }),
+      ObservabilityServiceLive,
+      EvaluationServiceLive
+    )
+  ) as Effect.Effect<EvaluationArtifact, Error, never>;
+
+  return Effect.runPromise(providedProgram);
+}
+
+export function createDefaultEvalCommandService(options: DefaultEvalCommandServiceOptions = {}): EvalCommandService {
+  const traceDirectory = options.traceDirectory ?? DEFAULT_TRACE_DIR;
+  const compareArtifacts = options.compareArtifacts ?? compare;
+  const createReplayOrchestratorFn = options.createReplayOrchestratorFn ?? createReplayOrchestrator;
+  const recordViaEvaluationService = options.recordWithEvaluationService ?? recordWithCoreEvaluationService;
+
   return {
     record: async ({ runId }) => {
-      return {
-        runId,
-        message: 'Record execution requires a runtime-integrated EvaluationService adapter.',
-      };
+      try {
+        return await recordViaEvaluationService(runId, traceDirectory);
+      } catch (error) {
+        if (error instanceof EvaluationRunNotFoundError) {
+          throw new Error(
+            `Run "${runId}" was not found in the active observability store. ` +
+              'Record from the same running Fred process, or provide a host-integrated eval command service.'
+          );
+        }
+
+        throw error;
+      }
     },
     replay: async ({ traceId, fromStep, mode }) => {
-      return {
-        traceId,
-        fromStep,
-        mode: mode ?? 'skip',
-        message: 'Replay execution requires a runtime adapter configured by the host project.',
-      };
+      const configPath = resolveConfigPath(options.configPath);
+      if (!configPath) {
+        throw new Error(
+          'Replay requires a Fred config file. Provide --config, set FRED_CONFIG_PATH, or add fred.config.yaml/json in the project root.'
+        );
+      }
+
+      const storage = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            return yield* TraceStorageService;
+          }),
+          FileTraceStorageLive({ directory: traceDirectory })
+        )
+      );
+      const runtime = options.createRuntime ? options.createRuntime() : createFredReplayRuntime();
+      const orchestrator = createReplayOrchestratorFn({
+        storage,
+        runtime,
+        configPath: resolve(configPath),
+      });
+
+      return orchestrator.replay(traceId, {
+        fromCheckpoint: fromStep,
+        mode,
+      });
     },
     compare: async ({ baselineTraceId, candidateTraceId }) => {
       const [baseline, candidate] = await Promise.all([
-        loadArtifact(baselineTraceId),
-        loadArtifact(candidateTraceId),
+        loadArtifact(baselineTraceId, traceDirectory),
+        loadArtifact(candidateTraceId, traceDirectory),
       ]);
 
-      const passed = isDeepStrictEqual(baseline, candidate);
+      const result = compareArtifacts(baseline, candidate);
+
       return {
-        passed,
-        scorecard: {
-          totalChecks: 1,
-          passedChecks: passed ? 1 : 0,
-          failedChecks: passed ? 0 : 1,
-          regressions: passed
-            ? []
-            : [
-                {
-                  check: 'artifact',
-                  path: 'root',
-                  message: 'Evaluation artifacts differ',
-                },
-              ],
-        },
+        passed: result.passed,
+        scorecard: result.scorecard,
       };
     },
     suite: async ({ suitePath }) => {
