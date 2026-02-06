@@ -17,7 +17,7 @@ import { RoutingConfig } from '../routing/types';
  *       model: gpt-4
  *   - id: anthropic                  # Built-in
  *   - id: mistral                    # External pack
- *     package: '@fred/provider-mistral'
+ *     package: '@fancyrobot/fred-mistral'
  *     apiKeyEnvVar: MISTRAL_API_KEY
  */
 

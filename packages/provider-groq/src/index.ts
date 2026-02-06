@@ -11,8 +11,8 @@ import * as Prompt from '@effect/ai/Prompt';
 import * as Response from '@effect/ai/Response';
 import * as Tool from '@effect/ai/Tool';
 import { IdGenerator } from '@effect/ai/IdGenerator';
-import { registerBuiltinPack } from '@fred/core';
-import type { EffectProviderFactory, ProviderConfig, ProviderModelDefaults } from '@fred/core';
+import { registerBuiltinPack } from '@fancyrobot/fred';
+import type { EffectProviderFactory, ProviderConfig, ProviderModelDefaults } from '@fancyrobot/fred';
 
 /**
  * Groq Chat Completions API response types

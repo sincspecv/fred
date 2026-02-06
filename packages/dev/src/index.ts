@@ -1,5 +1,5 @@
 /**
- * @fred/dev - Fred AI framework development tools
+ * @fancyrobot/fred-dev - Fred AI framework development tools
  *
  * This package provides development tooling for Fred:
  * - dev-chat: Interactive development chat interface with hot reload

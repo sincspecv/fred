@@ -1,4 +1,4 @@
-import { sanitizeError } from '@fred/core';
+import { sanitizeError } from '@fancyrobot/fred';
 import { ServerHandlers, validateMessageRequest } from './handlers';
 import { ChatRoutes } from './chat/routes';
 

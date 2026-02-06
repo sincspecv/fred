@@ -455,6 +455,26 @@ Fred uses [Changesets](https://github.com/changesets/changesets) for version man
 3. **Version PR**: If changesets exist, a "Version Packages" PR is automatically created
 4. **Publish**: When the Version Packages PR merges, packages are automatically published to npm
 
+### GitHub Actions PR Permissions
+
+The release workflow uses the default `GITHUB_TOKEN` to open the Version Packages PR. Ensure the repository setting below is enabled:
+
+- Settings -> Actions -> General -> Workflow permissions -> **Allow GitHub Actions to create and approve pull requests**
+
+If your org policy disallows this, use a PAT with `repo` scope and set it as `RELEASE_GH_TOKEN`, then update the workflow to use it.
+
+### Manual Version PR (Fallback)
+
+If Actions cannot create the PR, you can generate it manually:
+
+1. Pull latest `main`
+2. Create a branch, e.g. `release/version-packages`
+3. Run `bun run ci:version`
+4. Commit the changes with message: `chore: version packages`
+5. Push the branch and open a PR titled: `chore: version packages`
+
+Once that PR merges, the release workflow will publish as usual.
+
 ### Setting Up NPM_TOKEN (Repository Maintainers)
 
 For automated publishing to work, the repository needs an `NPM_TOKEN` secret:
@@ -463,7 +483,7 @@ For automated publishing to work, the repository needs an `NPM_TOKEN` secret:
    - Click "Generate New Token" -> "Granular Access Token"
    - Token name: "GitHub Actions - Fred Publishing"
    - Expiration: 90 days (maximum allowed)
-   - Packages: Select `@fred` scope or all packages
+   - Packages: Select `@fancyrobot` scope or all packages
    - Permissions: Read and write
    - **Important**: Enable "Bypass 2FA" checkbox (required for CI/CD)
 

@@ -1,5 +1,5 @@
 {
-  "name": "@fred/provider-groq",
+  "name": "@fancyrobot/fred-groq",
   "version": "1.0.0",
   "description": "Groq provider for Fred AI framework",
   "type": "module",
@@ -16,13 +16,13 @@
     "build": "bun build src/index.ts --outdir dist --target bun --format esm"
   },
   "peerDependencies": {
-    "@fred/core": "workspace:^",
+    "@fancyrobot/fred": "workspace:^",
     "effect": "^3.19.0",
     "@effect/ai": "^0.33.0",
     "@effect/platform": "^0.94.0"
   },
   "devDependencies": {
-    "@fred/core": "workspace:^",
+    "@fancyrobot/fred": "workspace:^",
     "effect": "^3.19.15",
     "@effect/ai": "^0.33.2",
     "@effect/platform": "^0.94.2"

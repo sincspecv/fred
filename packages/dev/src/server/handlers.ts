@@ -1,5 +1,5 @@
 import { Schema } from 'effect';
-import { Fred, AgentResponse, sanitizeError } from '@fred/core';
+import { Fred, AgentResponse, sanitizeError } from '@fancyrobot/fred';
 
 /**
  * Request/response types

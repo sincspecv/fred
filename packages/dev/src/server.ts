@@ -2,7 +2,7 @@
 
 import { BunRuntime } from '@effect/platform-bun';
 import { Effect } from 'effect';
-import { Fred } from '@fred/core';
+import { Fred } from '@fancyrobot/fred';
 import { ServerApp } from './server/app';
 
 /**

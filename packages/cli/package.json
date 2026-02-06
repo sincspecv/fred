@@ -1,5 +1,5 @@
 {
-  "name": "@fred/cli",
+  "name": "@fancyrobot/fred-cli",
   "version": "0.2.0",
   "description": "Fred AI framework CLI",
   "type": "module",
@@ -12,8 +12,8 @@
     "build": "bun build src/index.ts --outdir dist --target bun --format esm"
   },
   "dependencies": {
-    "@fred/core": "workspace:^",
-    "@fred/dev": "workspace:^"
+    "@fancyrobot/fred": "workspace:^",
+    "@fancyrobot/fred-dev": "workspace:^"
   },
   "peerDependencies": {
     "effect": "^3.19.0"

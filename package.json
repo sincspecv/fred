@@ -51,11 +51,11 @@
     "docs:build": "mkdocs build",
     "docs:deploy": "mkdocs gh-deploy",
     "ci:version": "changeset version && bun update",
-    "ci:publish": "for dir in packages/*; do (cd \"$dir\" && bun publish || true); done && changeset tag"
+    "ci:publish": "for dir in packages/*; do if [ -f \"$dir/package.json\" ] && grep -q '\"private\"[[:space:]]*:[[:space:]]*true' \"$dir/package.json\"; then echo \"Skipping private package $dir\"; continue; fi; (cd \"$dir\" && bun publish --tolerate-republish); done && changeset tag"
   },
   "type": "module",
   "workspaces": ["packages/*"],
   "dependencies": {
-    "@fred/provider-groq": "workspace:*"
+    "@fancyrobot/fred-groq": "workspace:*"
   }
 }
