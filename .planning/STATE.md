@@ -13,16 +13,16 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 ## Current Position
 
 **Phase:** 23 — Evaluation Framework
-**Plan:** 8 of 8 plans complete
+**Plan:** 10 of 10 plans complete
 **Status:** Phase complete
-**Last activity:** 2026-02-06 — Completed 23-08-PLAN.md (suite default-path and diagnostics gap closure)
+**Last activity:** 2026-02-06 — Completed 23-10-PLAN.md (config-less replay mode gap closure)
 
-**Progress:** ██████████░ 99% (102/102 plans complete)
+**Progress:** ████████████ 100% (103/103 plans complete)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
 | 22 | Observability Foundation | 8 | 8/8 | ✅ Complete |
-| 23 | Evaluation Framework | 8 | 8/8 | ✅ Complete |
+| 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
 | 24 | Tool Access Control | 8 | — | ⚪ Not started |
 | 25 | MCP Integration | 10 | — | ⚪ Not started |
 | 26 | Routing Explainability | 3 | — | ⚪ Not started |
@@ -120,6 +120,8 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Use Layer.provide chain instead of Layer.mergeAll for explicit dependency composition (Phase 23-07)
 - Make configPath optional in replay dependencies to support artifact-only replay (Phase 23-07)
 - Conditional runtime initialization in replay - only call initializeFromConfig when configPath is provided (Phase 23-07)
+- Layer composition pattern: Use Layer.merge to combine dependencies, then Layer.provide(service, deps) to wire into service (Phase 23-09)
+- Config-less replay mode: CLI replay works without Fred config file using artifact-only runtime (Phase 23-10)
 
 **Safety Decisions:**
 - Gate tools at discovery time (LLM never sees disallowed tools)
@@ -134,12 +136,12 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-06T20:02:43Z
-Stopped at: Completed 23-08-PLAN.md
+Last session: 2026-02-06T21:58:37Z
+Stopped at: Completed 23-10-PLAN.md
 Resume: Execute .planning/phases/24-tool-access-control/24-01-PLAN.md
 
 ---
 
 *State file tracks current milestone progress*
 *Archives in .planning/milestones/ contain historical data*
-*Last updated: 2026-02-06 — Phase 23 complete (7/7 plans complete)*
+*Last updated: 2026-02-06 — Phase 23 complete (10/10 plans complete)*

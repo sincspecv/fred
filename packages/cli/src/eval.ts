@@ -13,6 +13,7 @@ import {
   createReplayOrchestrator,
   evaluation,
   type EvaluationArtifact,
+  type GoldenTrace,
   type ReplayRuntimeAdapter,
   type SuiteCaseExecutionResult,
   type SuiteManifest,
@@ -376,7 +377,6 @@ export function createDefaultEvalCommandService(options: DefaultEvalCommandServi
         manifest,
         async (testCase, index) => {
           const id = testCase.id ?? `${index + 1}`;
-          const result: SuiteCaseExecutionResult = {};
 
           try {
             // If baseline trace is specified in case, load it
@@ -386,45 +386,59 @@ export function createDefaultEvalCommandService(options: DefaultEvalCommandServi
             }
 
             // Execute replay for the case to generate candidate trace
-            const replayResult = await orchestrator.replay(`${id}-candidate`, {
-              fromCheckpoint: testCase.replay?.fromCheckpoint,
-              mode: testCase.replay?.enabled ? undefined : 'skip',
-            });
+            // Replay is enabled by default (when undefined) or when explicitly true
+            const replayEnabled = testCase.replay?.enabled !== false;
+            let candidate: EvaluationArtifact | undefined;
+            let trace: GoldenTrace | undefined;
+            let latencyMs = 0;
+            let tokenUsage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+            let predictedIntent: string | undefined;
 
-            // The replay output contains trace data - extract it
-            // The output can be any type but for our purposes contains the execution trace
-            const candidateTrace = replayResult.output as any;
-            const candidateArtifact = candidateTrace?.artifact ?? candidateTrace;
+            if (replayEnabled) {
+              const replayResult = await orchestrator.replay(`${id}-candidate`, {
+                fromCheckpoint: testCase.replay?.fromCheckpoint,
+                mode: 'skip',
+              });
 
-            // Extract latency and token usage from replay result
-            const latencyMs = replayResult.checkpointStep ? 0 : undefined;
+              // The replay output contains trace data - extract it
+              const candidateOutput = replayResult.output as any;
+              candidate = candidateOutput?.artifact ?? candidateOutput;
+              
+              // Extract the trace from candidate - trace property expects GoldenTrace specifically
+              trace = candidateOutput?.trace ?? (candidate as unknown as GoldenTrace | undefined);
 
-            // Normalize candidate to GoldenTrace format if needed
-            const candidateAsGolden = candidateArtifact as any;
+              // Extract latency and token usage from replay result
+              latencyMs = replayResult.checkpointStep ? 0 : (candidateOutput?.trace?.metrics?.latencyMs ?? 0);
 
-            result.trace = candidateAsGolden;
-            result.baseline = baseline;
-            result.candidate = candidateArtifact;
-            result.latencyMs = latencyMs;
+              // Extract token usage from candidate output's trace if available
+              const candidateTrace = candidateOutput?.trace;
+              if (candidateTrace?.metrics?.tokenUsage) {
+                tokenUsage = candidateTrace.metrics.tokenUsage;
+              }
 
-            // Extract token usage from trace if available
-            if (candidateAsGolden?.trace?.metrics?.tokenUsage) {
-              result.tokenUsage = candidateAsGolden.trace.metrics.tokenUsage;
-            } else if (candidateArtifact?.trace?.metrics?.tokenUsage) {
-              result.tokenUsage = candidateArtifact.trace.metrics.tokenUsage;
+              // Extract predicted intent from routing
+              predictedIntent = candidateTrace?.routing?.intentId;
+            } else {
+              // Replay disabled - use baseline as trace
+              candidate = baseline;
+              // Baseline loaded from loadArtifact is EvaluationArtifact, not GoldenTrace
+              // Cast to GoldenTrace for type compatibility (they have compatible shapes)
+              trace = baseline as unknown as GoldenTrace | undefined;
             }
 
-            // Extract predicted intent from routing
-            if (candidateAsGolden?.trace?.routing?.intentId) {
-              result.predictedIntent = candidateAsGolden.trace.routing.intentId;
-            } else if (candidateArtifact?.trace?.routing?.intentId) {
-              result.predictedIntent = candidateArtifact.trace.routing.intentId;
-            }
+            return {
+              trace,
+              baseline,
+              candidate,
+              latencyMs,
+              tokenUsage,
+              predictedIntent,
+            };
           } catch (error) {
-            result.error = error instanceof Error ? error.message : String(error);
+            return {
+              error: error instanceof Error ? error.message : String(error),
+            };
           }
-
-          return result;
         }
       );
     },
