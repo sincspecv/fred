@@ -127,13 +127,13 @@ class HookManagerServiceImpl implements HookManagerService {
           // Otherwise, resolve from runId
           let traceId = traceIdOverride;
           if (!traceId && event.runId) {
-            traceId = yield* self.observability!.getTraceIdByRunId(event.runId);
+            traceId = await Effect.runPromise(self.observability!.getTraceIdByRunId(event.runId));
           }
           if (!traceId) {
             return undefined;
           }
           // For now, exportTrace uses runId as the lookup key
-          return yield* self.observability!.exportTrace(event.runId!);
+          return Effect.runPromise(self.observability!.exportTrace(event.runId!));
         };
 
         event.correlation = {
