@@ -97,7 +97,8 @@ Commands:
   eval replay --trace-id <id>         Replay run from checkpoint (config optional; uses artifact data when no config)
                                     Optional: --from-step <n> --mode retry|skip|restart --config <file>
   eval compare --baseline <id> --candidate <id>  Compare two evaluation traces
-  eval suite --suite <file>           Run evaluation suite manifest with aggregate metrics and intent diagnostics
+  eval suite --suite <file>           Run evaluation suite manifest
+                                    Outputs: pass/fail totals, latency/token metrics, intent confusion matrix
 
 Options:
   --config <file>          Path to Fred config file
