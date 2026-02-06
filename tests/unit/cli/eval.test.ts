@@ -236,6 +236,60 @@ describe('cli eval command', () => {
     expect(parsed.data.scorecard.failedChecks).toBe(2);
   });
 
+  test('default suite path does not return placeholder message', async () => {
+    const traceDirectory = await mkdtemp(join(tmpdir(), 'fred-eval-'));
+    await mkdir(traceDirectory, { recursive: true });
+
+    // Create simple suite manifest
+    const suitePath = join(traceDirectory, 'suite.yaml');
+    await writeFile(suitePath, 'name: simple-suite\ncases:\n  - name: Test case\n    assertions: []', 'utf-8');
+
+    const ioHarness = createIoHarness();
+    const service = createDefaultEvalCommandService({ traceDirectory });
+
+    const exitCode = await handleEvalCommand(
+      ['suite'],
+      { suite: suitePath, output: 'json' },
+      { service, io: ioHarness.io }
+    );
+
+    // Verify suite did NOT return placeholder message
+    const outputText = ioHarness.stdout.join('\n');
+    expect(outputText).not.toContain('host-provided case execution wiring');
+    expect(outputText).not.toContain('requires host integration');
+  });
+
+  test('default suite path includes aggregate metrics in output', async () => {
+    const traceDirectory = await mkdtemp(join(tmpdir(), 'fred-eval-'));
+    await mkdir(traceDirectory, { recursive: true });
+
+    // Create suite with mock that returns metrics
+    const harness = createHarness({
+      suite: async () => ({
+        suite: { name: 'metrics-suite' },
+        totals: { totalCases: 2, passedCases: 2, failedCases: 0, passRate: 1 },
+        latency: { minMs: 10, maxMs: 20, avgMs: 15, totalMs: 30 },
+        tokenUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150, avgTokensPerCase: 75 },
+      }),
+    });
+
+    const exitCode = await handleEvalCommand(
+      ['suite'],
+      { suite: './eval/suite.yaml', output: 'json' },
+      { service: harness.deps.service, io: harness.deps.io }
+    );
+
+    const outputStr = harness.stdout.join('');
+    const output = outputStr ? JSON.parse(outputStr) : {};
+
+    // Verify aggregate metrics are present
+    expect(output.data.totals).toBeDefined();
+    expect(output.data.totals.totalCases).toBe(2);
+    expect(output.data.totals.passedCases).toBe(2);
+    expect(output.data.latency).toBeDefined();
+    expect(output.data.tokenUsage).toBeDefined();
+  });
+
   test('returns non-zero exit code when suite aggregate has failures', async () => {
     const harness = createHarness({
       suite: async () => ({
