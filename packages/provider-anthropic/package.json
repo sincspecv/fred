@@ -1,6 +1,6 @@
 {
   "name": "@fred/provider-anthropic",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Anthropic provider for Fred AI framework",
   "type": "module",
   "main": "./src/index.ts",
@@ -30,6 +30,12 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["fred", "anthropic", "claude", "ai", "provider"],
+  "keywords": [
+    "fred",
+    "anthropic",
+    "claude",
+    "ai",
+    "provider"
+  ],
   "license": "MIT"
 }

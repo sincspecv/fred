@@ -1,6 +1,6 @@
 {
   "name": "@fred/provider-openrouter",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "OpenRouter provider for Fred AI framework",
   "type": "module",
   "main": "./src/index.ts",
@@ -30,6 +30,11 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["fred", "openrouter", "ai", "provider"],
+  "keywords": [
+    "fred",
+    "openrouter",
+    "ai",
+    "provider"
+  ],
   "license": "MIT"
 }
