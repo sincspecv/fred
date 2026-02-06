@@ -49,7 +49,9 @@ export function createHandoffTool(
       type: Schema.Literal('handoff'),
       agentId: Schema.String,
       message: Schema.String,
-      context: Schema.optional(Schema.String), // JSON-stringified context
+      // Context is parsed from JSON string to object in execute(), so success
+      // schema must accept an object. Input schema uses String for OpenAI compat.
+      context: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
     }) as Schema.Schema<HandoffResult>,
     metadata: {
       type: 'object',
