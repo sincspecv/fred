@@ -114,6 +114,16 @@ export interface PersistenceConfig {
  *     serviceName: 'fred',
  *     serviceVersion: '0.1.2',
  *     environment: 'production'
+ *   },
+ *   sampling: {
+ *     successSampleRate: 0.01,
+ *     slowThresholdMs: 5000,
+ *     debugMode: false
+ *   },
+ *   metrics: {
+ *     pricing: {
+ *       'openai:gpt-4': { input: 0.03, output: 0.06 }
+ *     }
  *   }
  * }
  *
@@ -146,6 +156,22 @@ export interface ObservabilityConfig {
 
   /** Enable console exporter as fallback when OTLP is not configured (defaults to true in dev) */
   enableConsoleFallback?: boolean;
+
+  /** Sampling configuration for controlling observability data volume */
+  sampling?: {
+    /** Success sampling rate (0.0 to 1.0). Default: 0.01 (1%). Errors always sampled. */
+    successSampleRate?: number;
+    /** Slow threshold in milliseconds. Runs exceeding this are always sampled. Default: 5000 */
+    slowThresholdMs?: number;
+    /** Debug mode: force all runs to be sampled. Default: false */
+    debugMode?: boolean;
+  };
+
+  /** Metrics configuration for token usage and cost tracking */
+  metrics?: {
+    /** Pricing table for cost calculation (model key -> price per 1000 tokens) */
+    pricing?: Record<string, { input: number; output: number }>;
+  };
 }
 
 // =============================================================================

@@ -522,6 +522,9 @@ function getNestedValue(obj: any, path: string): any {
  * - FRED_OTEL_ENDPOINT: OTLP endpoint URL
  * - FRED_OTEL_HEADERS: JSON object of headers (e.g., '{"Authorization":"Bearer token"}')
  * - FRED_LOG_LEVEL: Minimum log level (trace|debug|info|warning|error|fatal)
+ * - FRED_SAMPLE_RATE: Success sampling rate (0.0 to 1.0)
+ * - FRED_SLOW_THRESHOLD_MS: Slow threshold in milliseconds
+ * - FRED_DEBUG: Debug mode (true/false)
  *
  * @param config - Framework configuration
  * @returns Observability configuration with environment overrides applied
@@ -529,7 +532,7 @@ function getNestedValue(obj: any, path: string): any {
 export function extractObservability(config: FrameworkConfig): import('./types').ObservabilityConfig {
   const base = config.observability ?? {};
 
-  // Apply environment variable overrides
+  // Apply environment variable overrides for OTLP
   const otlpEndpoint = process.env.FRED_OTEL_ENDPOINT ?? base.otlp?.endpoint;
   const otlpHeadersJson = process.env.FRED_OTEL_HEADERS;
   const otlpHeaders = otlpHeadersJson
@@ -537,6 +540,17 @@ export function extractObservability(config: FrameworkConfig): import('./types')
     : base.otlp?.headers;
 
   const logLevel = (process.env.FRED_LOG_LEVEL as any) ?? base.logLevel;
+
+  // Apply environment variable overrides for sampling
+  const successSampleRate = process.env.FRED_SAMPLE_RATE
+    ? Number(process.env.FRED_SAMPLE_RATE)
+    : base.sampling?.successSampleRate;
+  const slowThresholdMs = process.env.FRED_SLOW_THRESHOLD_MS
+    ? Number(process.env.FRED_SLOW_THRESHOLD_MS)
+    : base.sampling?.slowThresholdMs;
+  const debugMode = process.env.FRED_DEBUG
+    ? process.env.FRED_DEBUG === 'true'
+    : base.sampling?.debugMode;
 
   return {
     otlp: otlpEndpoint
@@ -548,5 +562,11 @@ export function extractObservability(config: FrameworkConfig): import('./types')
     logLevel,
     resource: base.resource,
     enableConsoleFallback: base.enableConsoleFallback,
+    sampling: {
+      successSampleRate,
+      slowThresholdMs,
+      debugMode,
+    },
+    metrics: base.metrics,
   };
 }
