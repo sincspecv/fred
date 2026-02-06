@@ -4,6 +4,7 @@ import type { EvaluationArtifact } from './artifact';
 import { runAssertions, type TestResult } from './assertion-runner';
 import { compare, type CompareOptions, type CompareResult } from './comparator';
 import type { GoldenTrace } from './golden-trace';
+import { calculateIntentMetrics, type IntentMetricsReport } from './metrics';
 
 const SuiteCompareConfigSchema = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
@@ -108,6 +109,7 @@ export interface SuiteReport {
     failedCases: number;
     totalRegressions: number;
   };
+  intentQuality: IntentMetricsReport;
   cases: SuiteCaseReport[];
 }
 
@@ -262,6 +264,12 @@ export async function runSuite(
   const comparePassed = compared.filter((report) => report.compare?.passed).length;
   const compareFailed = compared.length - comparePassed;
   const totalRegressions = compared.reduce((sum, report) => sum + (report.compare?.regressions ?? 0), 0);
+  const intentQuality = calculateIntentMetrics(
+    reports.map((report) => ({
+      expectedIntent: report.expectedIntent,
+      predictedIntent: report.predictedIntent,
+    }))
+  );
 
   return {
     suite: {
@@ -292,6 +300,7 @@ export async function runSuite(
       failedCases: compareFailed,
       totalRegressions,
     },
+    intentQuality,
     cases: reports,
   };
 }
