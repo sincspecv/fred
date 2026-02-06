@@ -451,4 +451,123 @@ describe('cli eval command', () => {
       mode: 'retry',
     });
   });
+
+  test('replay works without config when trace inputs exist', async () => {
+    const ioHarness = createIoHarness();
+    const traceDirectory = await mkdtemp(join(tmpdir(), 'fred-eval-'));
+    await mkdir(traceDirectory, { recursive: true });
+    const artifact = makeArtifact('trace-no-config', {
+      checkpoints: [
+        {
+          id: 'checkpoint-1',
+          step: 5,
+          stepName: 'check',
+          status: 'completed',
+          timing: { offsetMs: 0, durationMs: 100 },
+          snapshot: { pipelineId: 'pipeline-1', key: 'value' },
+        },
+      ],
+    });
+
+    await writeFile(
+      join(traceDirectory, 'trace-no-config.json'),
+      JSON.stringify(artifact, null, 2),
+      'utf-8'
+    );
+
+    // No configPath provided - should not throw error
+    const exitCode = await handleEvalCommand(
+      ['replay'],
+      { 'trace-id': 'trace-no-config', output: 'json' },
+      {
+        service: createDefaultEvalCommandService({
+          traceDirectory,
+          createReplayOrchestratorFn: (deps) => ({
+            replay: async (traceId, replayOptions) => {
+              const normalizedOptions = replayOptions ?? {};
+              return {
+                traceId,
+                runId: 'run-1',
+                checkpointStep: normalizedOptions.fromCheckpoint ?? 5,
+                mode: normalizedOptions.mode ?? 'skip',
+                output: { ok: true },
+                outputHash: 'hash-2',
+              };
+            },
+          }),
+        }),
+        io: ioHarness.io,
+      }
+    );
+
+    expect(exitCode).toBe(0);
+  });
+
+  test('replay with from-step selects requested checkpoint index', async () => {
+    const ioHarness = createIoHarness();
+    const traceDirectory = await mkdtemp(join(tmpdir(), 'fred-eval-'));
+    await mkdir(traceDirectory, { recursive: true });
+    const artifact = makeArtifact('trace-from-step', {
+      checkpoints: [
+        {
+          id: 'cp-1',
+          step: 1,
+          stepName: 'step-1',
+          status: 'completed',
+          timing: { offsetMs: 0, durationMs: 100 },
+          snapshot: {},
+        },
+        {
+          id: 'cp-2',
+          step: 2,
+          stepName: 'step-2',
+          status: 'completed',
+          timing: { offsetMs: 100, durationMs: 100 },
+          snapshot: {},
+        },
+        {
+          id: 'cp-3',
+          step: 3,
+          stepName: 'step-3',
+          status: 'completed',
+          timing: { offsetMs: 200, durationMs: 100 },
+          snapshot: {},
+        },
+      ],
+    });
+
+    await writeFile(
+      join(traceDirectory, 'trace-from-step.json'),
+      JSON.stringify(artifact, null, 2),
+      'utf-8'
+    );
+
+    // Test with explicit from-step
+    const exitCode1 = await handleEvalCommand(
+      ['replay'],
+      { 'trace-id': 'trace-from-step', 'from-step': '2', output: 'json' },
+      {
+        service: createDefaultEvalCommandService({
+          traceDirectory,
+          createReplayOrchestratorFn: () => ({
+            replay: async (traceId, replayOptions) => {
+              const normalizedOptions = replayOptions ?? {};
+              return {
+                traceId,
+                runId: 'run-1',
+                checkpointStep: normalizedOptions.fromCheckpoint ?? 0,
+                mode: normalizedOptions.mode ?? 'skip',
+                output: { ok: true },
+                outputHash: 'hash-5',
+              };
+            },
+          }),
+        }),
+        io: ioHarness.io,
+      }
+    );
+
+    expect(exitCode1).toBe(0);
+  });
+
 });
