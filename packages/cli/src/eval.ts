@@ -234,6 +234,23 @@ function createFredReplayRuntime(): ReplayRuntimeAdapter {
   };
 }
 
+function createArtifactOnlyReplayRuntime(): ReplayRuntimeAdapter {
+  return {
+    initializeFromConfig: async () => {
+      // No-op: config-less replay doesn't need initialization
+    },
+    resumeFromCheckpoint: ({ checkpoint, contextSnapshot }) => {
+      // In artifact-only mode, return the checkpoint data for validation
+      return Effect.succeed({
+        checkpoint,
+        contextSnapshot,
+        mode: 'artifact-validation',
+        validated: true,
+      });
+    },
+  };
+}
+
 async function recordWithCoreEvaluationService(runId: string, traceDirectory: string): Promise<EvaluationArtifact> {
   const program = Effect.gen(function* () {
     const service = yield* EvaluationService;
@@ -279,8 +296,9 @@ export function createDefaultEvalCommandService(options: DefaultEvalCommandServi
       }
     },
     replay: async ({ traceId, fromStep, mode }) => {
-      // Config is optional for replay - only required if provided by user
-      const configPath = resolveConfigPath(options.configPath);
+      // Config is optional for replay - only used if explicitly provided
+      const explicitConfigPath = options.configPath;
+      const resolvedConfigPath = explicitConfigPath ? resolve(explicitConfigPath) : undefined;
 
       const storage = await Effect.runPromise(
         Effect.provide(
@@ -290,11 +308,18 @@ export function createDefaultEvalCommandService(options: DefaultEvalCommandServi
           FileTraceStorageLive({ directory: traceDirectory })
         )
       );
-      const runtime = options.createRuntime ? options.createRuntime() : createFredReplayRuntime();
+
+      // Use artifact-only runtime when no config is provided
+      const runtime = resolvedConfigPath
+        ? options.createRuntime
+          ? options.createRuntime()
+          : createFredReplayRuntime()
+        : createArtifactOnlyReplayRuntime();
+
       const orchestrator = createReplayOrchestratorFn({
         storage,
         runtime,
-        configPath: configPath ? resolve(configPath) : undefined,
+        configPath: resolvedConfigPath,
       });
 
       return orchestrator.replay(traceId, {
