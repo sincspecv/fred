@@ -134,6 +134,7 @@ export class AgentFactory {
   };
   private mcpClients: Map<string, MCPClientImpl> = new Map();
   private tracer?: Tracer;
+  private observabilityService?: any; // ObservabilityService type from observability/service
   private defaultSystemMessage?: string;
   private metrics: MCPClientMetrics = {
     totalConnections: 0,
@@ -160,6 +161,10 @@ export class AgentFactory {
 
   setTracer(tracer?: Tracer): void {
     this.tracer = tracer;
+  }
+
+  setObservabilityService(observabilityService?: any): void {
+    this.observabilityService = observabilityService;
   }
 
   setHandoffHandler(handler: { getAgent: (id: string) => any; getAvailableAgents: () => string[] }): void {
@@ -706,6 +711,45 @@ export class AgentFactory {
           totalTokens: result.usage?.totalTokens ?? 0,
         };
 
+        // Annotate model span with token counts
+        if (modelSpan && usage.totalTokens > 0) {
+          modelSpan.setAttributes({
+            'token.input': usage.inputTokens,
+            'token.output': usage.outputTokens,
+            'token.total': usage.totalTokens,
+          });
+        }
+
+        // Record token usage and cost metrics if observability is available
+        if (this.observabilityService && usage.totalTokens > 0) {
+          try {
+            // Record token usage
+            await Effect.runPromise(
+              this.observabilityService.recordTokenUsage({
+                provider: config.platform,
+                model: config.model,
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+              })
+            );
+
+            // Record model cost if pricing is configured
+            await Effect.runPromise(
+              this.observabilityService.recordModelCost({
+                provider: config.platform,
+                model: config.model,
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+              })
+            );
+          } catch (error) {
+            // Silently fail - observability should not break agent execution
+            if (process.env.NODE_ENV !== 'production') {
+              console.debug('Failed to record token usage metrics:', error);
+            }
+          }
+        }
+
         // Check for handoff
         const handoffCall = allToolCalls.find((call: any) => call.toolId === 'handoff_to_agent');
         if (handoffCall && handoffCall.result && typeof handoffCall.result === 'object' && 'type' in handoffCall.result) {
@@ -910,8 +954,46 @@ export class AgentFactory {
 
       // Generate run-end event after stream completes
       const runEndEvent = Stream.fromEffect(
-        Effect.sync(() => {
+        Effect.gen(function* () {
           const finishedAt = Date.now();
+
+          // Annotate model span with token counts from streaming usage
+          if (streamState.usage && streamState.usage.totalTokens && streamState.usage.totalTokens > 0) {
+            const modelSpan = this.tracer?.getActiveSpan();
+            if (modelSpan) {
+              modelSpan.setAttributes({
+                'token.input': streamState.usage.inputTokens ?? 0,
+                'token.output': streamState.usage.outputTokens ?? 0,
+                'token.total': streamState.usage.totalTokens ?? 0,
+              });
+            }
+
+            // Record token usage and cost metrics if observability is available
+            if (this.observabilityService) {
+              try {
+                // Record token usage
+                yield* this.observabilityService.recordTokenUsage({
+                  provider: config.platform,
+                  model: config.model,
+                  inputTokens: streamState.usage.inputTokens ?? 0,
+                  outputTokens: streamState.usage.outputTokens ?? 0,
+                });
+
+                // Record model cost if pricing is configured
+                yield* this.observabilityService.recordModelCost({
+                  provider: config.platform,
+                  model: config.model,
+                  inputTokens: streamState.usage.inputTokens ?? 0,
+                  outputTokens: streamState.usage.outputTokens ?? 0,
+                });
+              } catch (error) {
+                // Silently fail - observability should not break agent execution
+                if (process.env.NODE_ENV !== 'production') {
+                  console.debug('Failed to record streaming token usage metrics:', error);
+                }
+              }
+            }
+          }
 
           // Check for handoff tool result
           const handoffCall = streamState.toolCalls.find(
@@ -934,7 +1016,7 @@ export class AgentFactory {
               usage: streamState.usage,
             },
           };
-        })
+        }.bind(this))
       );
 
       return Stream.fromIterable(initialEvents).pipe(
