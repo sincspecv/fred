@@ -68,10 +68,18 @@ export * from './eval/assertion-runner';
 export { buildObservabilityLayers, annotateSpan, withFredSpan } from './observability/otel';
 export type { ObservabilityLayers } from './observability/otel';
 export {
+  // FiberRef-based API (preferred)
+  CorrelationContextRef,
+  getCorrelationContext,
+  getSpanIds,
+  withCorrelationContext,
+  runWithCorrelationBridge,
+  // Backward-compatible sync API
   createCorrelationContext,
   getCurrentCorrelationContext,
-  runWithCorrelationContext,
   getCurrentSpanIds,
+  // Legacy (deprecated, delegates to bridge)
+  runWithCorrelationContext,
 } from './observability/context';
 export type { CorrelationContext } from './observability/context';
 export { ObservabilityService, ObservabilityServiceLive } from './observability/service';
