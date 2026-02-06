@@ -92,9 +92,13 @@ export class MessageProcessor {
       const conversationId = options?.conversationId;
       const sequentialVisibility = options?.sequentialVisibility ?? true;
 
-      // Create span for routing
+      // Create span for routing with correlation context
       const routingSpan = tracer?.startSpan('routing', {
         kind: SpanKind.INTERNAL,
+        attributes: runId ? {
+          'run.id': runId,
+          'conversation.id': conversationId || 'unknown',
+        } : undefined,
       });
 
       if (routingSpan) {
@@ -268,7 +272,7 @@ export class MessageProcessor {
             }
 
             if (routingSpan) {
-              routingSpan.setAttributes({
+              const spanAttributes: Record<string, string | number> = {
                 'routing.method': 'intent.matching',
                 'routing.intentId': match.intent.id,
                 'routing.confidence': match.confidence,
@@ -276,6 +280,28 @@ export class MessageProcessor {
                 'intent.id': match.intent.id,
                 'intent.confidence': match.confidence,
                 'intent.matchType': match.matchType,
+              };
+
+              // Add matched pattern if available
+              if (match.matchedUtterance) {
+                spanAttributes['intent.matched_pattern'] = match.matchedUtterance;
+              }
+
+              routingSpan.setAttributes(spanAttributes);
+            }
+
+            // Log structured routing decision with intent metadata
+            if (observabilityService) {
+              yield* observabilityService.logStructured({
+                level: 'debug',
+                message: 'Intent-based routing decision',
+                metadata: {
+                  'routing.method': 'intent.matching',
+                  'intent.id': match.intent.id,
+                  'intent.confidence': match.confidence,
+                  'intent.matchType': match.matchType,
+                  'intent.matched_pattern': match.matchedUtterance,
+                },
               });
             }
 

@@ -22,6 +22,8 @@ import { AgentManager } from '../agent/manager';
 import { HookManager } from '../hooks/manager';
 import { Effect } from 'effect';
 import { RoutingMatcherError, NoAgentsAvailableError } from './errors';
+import { getCurrentCorrelationContext } from '../observability/context';
+import type { HookEvent } from '../hooks/types';
 
 /**
  * Specificity base scores by match type.
@@ -69,13 +71,18 @@ export class MessageRouter {
     return Effect.gen(function* () {
       const startTime = Date.now();
 
+      // Get correlation context for hooks
+      const correlationContext = getCurrentCorrelationContext();
+
       // Emit beforeRouting hook (use Effect.tryPromise for async hook execution with error handling)
       if (self.hookManager) {
+        const hookEvent: HookEvent = {
+          type: 'beforeRouting',
+          data: { message, metadata },
+          ...correlationContext,
+        };
         yield* Effect.tryPromise({
-          try: () => self.hookManager!.executeHooks('beforeRouting', {
-            type: 'beforeRouting',
-            data: { message, metadata },
-          }),
+          try: () => self.hookManager!.executeHooks('beforeRouting', hookEvent),
           catch: (error) => {
             // Log hook error but don't fail routing - hooks are optional
             console.warn('beforeRouting hook failed:', error);
@@ -105,27 +112,39 @@ export class MessageRouter {
 
       const durationMs = Date.now() - startTime;
 
-      // Debug logging using Effect.log
+      // Debug logging using Effect.log with intent metadata if available
       if (self.config.debug) {
+        const logAnnotations: Record<string, unknown> = {
+          agent: decision.agent,
+          fallback: decision.fallback,
+          durationMs,
+          matchType: match?.matchType,
+          ruleId: match?.rule.id,
+          specificity: match?.specificity,
+        };
+
+        // Add correlation context to logs
+        if (correlationContext) {
+          if (correlationContext.intentId) logAnnotations['intent.id'] = correlationContext.intentId;
+          if (correlationContext.runId) logAnnotations['run.id'] = correlationContext.runId;
+          if (correlationContext.conversationId) logAnnotations['conversation.id'] = correlationContext.conversationId;
+        }
+
         yield* Effect.logDebug('Routing decision').pipe(
-          Effect.annotateLogs({
-            agent: decision.agent,
-            fallback: decision.fallback,
-            durationMs,
-            matchType: match?.matchType,
-            ruleId: match?.rule.id,
-            specificity: match?.specificity,
-          })
+          Effect.annotateLogs(logAnnotations)
         );
       }
 
       // Emit afterRouting hook (use Effect.tryPromise with error handling)
       if (self.hookManager) {
+        const hookEvent: HookEvent = {
+          type: 'afterRouting',
+          data: { message, metadata, decision, durationMs },
+          ...correlationContext,
+          agentId: decision.agent,
+        };
         yield* Effect.tryPromise({
-          try: () => self.hookManager!.executeHooks('afterRouting', {
-            type: 'afterRouting',
-            data: { message, metadata, decision, durationMs },
-          }),
+          try: () => self.hookManager!.executeHooks('afterRouting', hookEvent),
           catch: (error) => {
             // Log hook error but don't fail routing - hooks are optional
             console.warn('afterRouting hook failed:', error);
