@@ -417,6 +417,13 @@ Plans:
 - Debug mode for routing decisions
 - `fred.routing.explain()` API
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 26-01-PLAN.md — Explainability types, calibration module, and explanation generator
+- [ ] 26-02-PLAN.md — Integrate calibration and explanations into MessageRouter and IntentMatcher
+- [ ] 26-03-PLAN.md — Conditional hooks, HITL clarification, conversation boost, explain() API, and exports
+
 **Research Flags:** None — builds on Phase 22, minimal new research needed
 
 ---
@@ -526,5 +533,5 @@ Fred v0.3.0 is complete when:
 ---
 
 *Roadmap tracking begins at v0.2.0 milestone*
-*Last updated: 2026-02-07 — Phase 25 complete (6/6 plans, verified)*
-*Next: `/gsd:plan-phase 26` to plan Routing Explainability*
+*Last updated: 2026-02-07 — Phase 26 planned (3 plans in 3 waves)*
+*Next: `/gsd:execute-phase 26` to execute Routing Explainability*

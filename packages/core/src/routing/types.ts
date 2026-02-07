@@ -106,4 +106,97 @@ export interface RoutingDecision {
 
   /** Specificity score of winning rule */
   specificity?: number;
+
+  /** Routing explanation with confidence and alternatives */
+  explanation?: RoutingExplanation;
+}
+
+/**
+ * Routing alternative candidate with confidence score.
+ * Represents a possible routing target that was considered.
+ */
+export interface RoutingAlternative {
+  /** Agent or intent identifier */
+  targetId: string;
+
+  /** Agent or intent display name */
+  targetName: string;
+
+  /** Calibrated confidence score (0.0-1.0) */
+  confidence: number;
+
+  /** How the match was made */
+  matchType?: MatchType;
+
+  /** Projected handoff path if applicable (e.g., ["calculator", "advanced-math"]) */
+  handoffChain?: string[];
+}
+
+/**
+ * Calibration metadata for debugging confidence scores.
+ * Provides transparency into how raw scores were transformed.
+ */
+export interface CalibrationMetadata {
+  /** Original uncalibrated score */
+  rawScore: number;
+
+  /** Score after temperature scaling */
+  calibratedScore: number;
+
+  /** Per-intent historical accuracy (0.0-1.0) */
+  historicalAccuracy?: number;
+
+  /** Adjustment from conversation context (-0.15 to +0.15) */
+  conversationBoost?: number;
+
+  /** Current calibration temperature parameter */
+  temperature?: number;
+
+  /** Whether enough observations exist for meaningful calibration */
+  calibrated: boolean;
+
+  /** Number of observations used for calibration */
+  observationCount?: number;
+}
+
+/**
+ * Routing concern detected during decision process.
+ * Indicates potential issues that may require attention.
+ */
+export interface RoutingConcern {
+  /** Type of concern */
+  type: 'low-confidence' | 'close-alternatives' | 'classification-conflict';
+
+  /** Severity level */
+  severity: 'warning' | 'error';
+
+  /** Human-readable description */
+  message: string;
+}
+
+/**
+ * Complete routing explanation with alternatives and confidence.
+ * Provides transparency into routing decision process.
+ */
+export interface RoutingExplanation {
+  /** The selected route */
+  winner: RoutingAlternative;
+
+  /** Top 3 runner-ups, sorted by confidence descending (never includes zero-confidence items) */
+  alternatives: RoutingAlternative[];
+
+  /** Final calibrated confidence of winner */
+  confidence: number;
+
+  /** How the winning match was made */
+  matchType: MatchType;
+
+  /** Debugging metadata */
+  calibrationMetadata: CalibrationMetadata;
+
+  /** Detected concerns (empty array if none) */
+  concerns: RoutingConcern[];
+
+  /** Human-readable explanation text */
+  narrative: string;
 }
