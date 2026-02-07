@@ -1,5 +1,22 @@
 import { Schema } from 'effect';
 
+export const BUILTIN_TOOL_CAPABILITIES = [
+  'read',
+  'write',
+  'admin',
+  'external',
+  'expensive',
+  'destructive',
+] as const;
+
+export type BuiltinToolCapability = (typeof BUILTIN_TOOL_CAPABILITIES)[number];
+export type ToolCapability = BuiltinToolCapability | (string & {});
+
+export interface ToolCapabilityMetadata {
+  inferred: ToolCapability[];
+  manual: ToolCapability[];
+}
+
 /**
  * Tool schema metadata compatible with config-defined tools.
  */
@@ -28,6 +45,8 @@ export interface Tool<Input = unknown, Output = unknown, Failure = unknown> {
   id: string;
   name: string;
   description: string;
+  capabilities?: ToolCapability[];
+  capabilityMetadata?: ToolCapabilityMetadata;
   schema?: ToolSchemaDefinition<Input, Output, Failure>;
   execute: (args: Input) => Promise<Output> | Output;
   strict?: boolean;
@@ -41,4 +60,3 @@ export interface ToolResult {
   result?: any;
   error?: string;
 }
-
