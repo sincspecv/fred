@@ -11,7 +11,7 @@ import { ToolRegistry } from '../tool/registry';
 import type { Tool as FredTool } from '../tool/tool';
 import { createHandoffTool, HandoffResult } from '../tool/handoff';
 import { loadPromptFile } from '../utils/prompt-loader';
-import { MCPClientImpl, convertMCPToolsToFredTools } from '../mcp';
+import { MCPClientImpl, convertMCPToolsToFredTools, MCPServerRegistry } from '../mcp';
 import { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
 import { wrapToolExecution } from '../tool/validation';
@@ -151,6 +151,7 @@ export class AgentFactory {
   private shutdownHooksRegistered = false;
   private globalVariablesResolver?: () => Record<string, string | number | boolean>;
   private toolGateService?: ToolGateServiceApi;
+  private mcpServerRegistry?: MCPServerRegistry;
 
   constructor(toolRegistry: ToolRegistry, tracer?: Tracer) {
     this.toolRegistry = toolRegistry;
@@ -175,6 +176,10 @@ export class AgentFactory {
 
   setToolGateService(toolGateService?: ToolGateServiceApi): void {
     this.toolGateService = toolGateService;
+  }
+
+  setMCPServerRegistry(registry: MCPServerRegistry): void {
+    this.mcpServerRegistry = registry;
   }
 
   setHandoffHandler(handler: { getAgent: (id: string) => any; getAvailableAgents: () => string[] }): void {
@@ -630,35 +635,43 @@ export class AgentFactory {
       );
     }
 
-    const mcpClientInstances: MCPClientImpl[] = [];
-    if (config.mcpServers && config.mcpServers.length > 0) {
-      for (const mcpConfig of config.mcpServers) {
-        if (mcpConfig.enabled === false) {
-          continue;
-        }
+    // MCP tool discovery from global registry
+    if (this.mcpServerRegistry && config.mcpServers && config.mcpServers.length > 0) {
+      for (const serverId of config.mcpServers) {
         try {
-          const mcpClient = new MCPClientImpl(mcpConfig);
-          await mcpClient.initialize();
-          mcpClientInstances.push(mcpClient);
+          // Discover tools from global registry for this server
+          const fredTools = await Effect.runPromise(
+            this.mcpServerRegistry.discoverTools(serverId)
+          );
 
-          const clientKey = `${config.id}-${mcpConfig.id}`;
-          this.mcpClients.set(clientKey, mcpClient);
+          // Apply ToolGateService filtering at discovery time
+          let filteredTools = fredTools;
+          if (this.toolGateService) {
+            const gateContext: ToolGateContext = {
+              agentId: config.id,
+            };
+            const filterResult = await Effect.runPromise(
+              this.toolGateService.filterTools(fredTools, gateContext)
+            );
+            filteredTools = filterResult.allowed;
 
-          this.metrics.totalConnections++;
-          this.metrics.activeConnections = this.mcpClients.size;
-          this.metrics.lastConnectionTime = new Date();
-          this.metrics.connectionsByAgent[config.id] = (this.metrics.connectionsByAgent[config.id] ?? 0) + 1;
+            // Log denied MCP tools
+            if (filterResult.denied.length > 0) {
+              console.warn(
+                `MCP tools denied by policy for agent "${config.id}" from server "${serverId}":`,
+                filterResult.denied.map((d) => d.toolId).join(', ')
+              );
+            }
+          }
 
-          const discoveredTools = await mcpClient.listTools();
-          const fredTools = convertMCPToolsToFredTools(discoveredTools, mcpClient, mcpConfig.id);
-          for (const fredTool of fredTools) {
+          // Register allowed MCP tools
+          for (const fredTool of filteredTools) {
             if (!this.toolRegistry.hasTool(fredTool.id)) {
               this.toolRegistry.registerTool(fredTool);
             }
             toolExecutors.set(fredTool.id, fredTool.execute);
             toolDefinitions.set(fredTool.id, fredTool);
-            // Type-assert input as Struct (Fred convention: all tool inputs are Structs)
-            // Use any cast since Schema types don't overlap sufficiently for direct assertion
+
             // Transform MCP tool fields for OpenAI strict-mode compatibility
             const mcpInputFields = transformFieldsForStrictMode(fredTool.schema?.input);
 
@@ -672,8 +685,11 @@ export class AgentFactory {
             );
           }
         } catch (error) {
-          this.metrics.failedConnections++;
-          console.error(`Failed to initialize MCP server "${mcpConfig.id}":`, error);
+          // Graceful degradation: server not found or discovery failed
+          console.warn(
+            `Failed to discover tools from MCP server "${serverId}" for agent "${config.id}":`,
+            error instanceof Error ? error.message : String(error)
+          );
         }
       }
     }
