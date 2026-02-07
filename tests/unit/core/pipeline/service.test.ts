@@ -7,6 +7,7 @@ import { CheckpointService, CheckpointServiceLive } from '../../../../packages/c
 import { PauseService, PauseServiceLive } from '../../../../packages/core/src/pipeline/pause/service';
 import { ToolRegistryService, ToolRegistryServiceLive } from '../../../../packages/core/src/tool/service';
 import { ProviderRegistryService, ProviderRegistryServiceLive } from '../../../../packages/core/src/platform/service';
+import { ToolGateServiceLive } from '../../../../packages/core/src/tool-gate/service';
 import type { CheckpointStorage, Checkpoint, CheckpointStatus } from '../../../../packages/core/src/pipeline/checkpoint/types';
 
 /**
@@ -71,6 +72,10 @@ function createMockStorage(): CheckpointStorage {
     async listByStatus(status: CheckpointStatus): Promise<Checkpoint[]> {
       return checkpoints.filter(c => c.status === status);
     },
+
+    async close(): Promise<void> {
+      checkpoints.length = 0;
+    },
   };
 }
 
@@ -80,6 +85,7 @@ const TestLayer = PipelineServiceLive.pipe(
   Layer.provide(HookManagerServiceLive),
   Layer.provide(PauseServiceLive),
   Layer.provide(CheckpointServiceLive({ storage: createMockStorage() })),
+  Layer.provide(ToolGateServiceLive),
   Layer.provide(ToolRegistryServiceLive),
   Layer.provide(ProviderRegistryServiceLive)
 );

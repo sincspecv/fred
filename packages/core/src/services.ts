@@ -242,6 +242,7 @@ const pauseLayer = PauseServiceLive.pipe(
  */
 const agentLayer = AgentServiceLive.pipe(
   Layer.provide(baseLayer),
+  Layer.provide(toolGateLayer),
   Layer.provide(ProviderRegistryServiceLive)
 );
 
