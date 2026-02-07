@@ -55,9 +55,9 @@ Requirements for v0.3.0 milestone. Each maps to roadmap phases.
 
 ### Routing Explainability (ROUT)
 
-- [ ] **ROUT-04**: Routing decisions include match scores and classification rationale
-- [ ] **ROUT-05**: Routing metadata is accessible via observability hooks
-- [ ] **ROUT-06**: Developer can query why a specific agent was selected for a message
+- [x] **ROUT-04**: Routing decisions include match scores and classification rationale
+- [x] **ROUT-05**: Routing metadata is accessible via observability hooks
+- [x] **ROUT-06**: Developer can query why a specific agent was selected for a message
 
 ## v2 Requirements
 
@@ -138,9 +138,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INTG-08 | Phase 25 | Complete |
 | INTG-09 | Phase 25 | Complete |
 | INTG-10 | Phase 25 | Complete |
-| ROUT-04 | Phase 26 | Pending |
-| ROUT-05 | Phase 26 | Pending |
-| ROUT-06 | Phase 26 | Pending |
+| ROUT-04 | Phase 26 | Complete |
+| ROUT-05 | Phase 26 | Complete |
+| ROUT-06 | Phase 26 | Complete |
 
 **Coverage:**
 - v1 requirements: 35 total
@@ -149,4 +149,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-06*
-*Last updated: 2026-02-07 — Phase 25 requirements marked complete*
+*Last updated: 2026-02-07 — Phase 26 requirements marked complete, v0.3.0 all 35/35 requirements complete*

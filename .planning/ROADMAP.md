@@ -14,7 +14,7 @@ Fred's roadmap tracks the evolution of the framework from Effect-based foundatio
 ## Milestones
 
 - ✅ **v0.2.0 Effect Migration + Monorepo** — Phases 1-21.1 (shipped 2026-02-01)
-- 🔵 **v0.3.0 Observability & Safety** — Phases 22-26 (in progress)
+- ✅ **v0.3.0 Observability & Safety** — Phases 22-26 (complete 2026-02-07)
 - ⚪ **v0.3.1 CLI/TUI Developer Experience** — Planned after v0.3.0
 
 ---
@@ -385,7 +385,7 @@ Plans:
 
 **Milestone:** v0.3.0
 **Goal:** Developers and users can understand why specific routing decisions were made with confidence scores and alternative explanations.
-**Status:** ⚪ Not Started
+**Status:** ✅ Complete (verified 2026-02-07)
 
 **Requirements Covered:** ROUT-04, ROUT-05, ROUT-06
 
@@ -417,12 +417,12 @@ Plans:
 - Debug mode for routing decisions
 - `fred.routing.explain()` API
 
-**Plans:** 3 plans
+**Plans:** 3 plans (3/3 complete)
 
 Plans:
-- [ ] 26-01-PLAN.md — Explainability types, calibration module, and explanation generator
-- [ ] 26-02-PLAN.md — Integrate calibration and explanations into MessageRouter and IntentMatcher
-- [ ] 26-03-PLAN.md — Conditional hooks, HITL clarification, conversation boost, explain() API, and exports
+- [x] 26-01-PLAN.md — Explainability types, calibration module, and explanation generator
+- [x] 26-02-PLAN.md — Integrate calibration and explanations into MessageRouter and IntentMatcher
+- [x] 26-03-PLAN.md — Conditional hooks, HITL clarification, conversation boost, explain() API, and exports
 
 **Research Flags:** None — builds on Phase 22, minimal new research needed
 
@@ -455,8 +455,8 @@ All phases benefit from the v0.2.0 foundation: intent routing, pipelines, persis
 | 23 - Evaluation Framework | v0.3.0 | 8 (EVAL-01→08) | 8 | ✅ Complete |
 | 24 - Tool Access Control | v0.3.0 | 8 (GATE-01→08) | 8 | ✅ Complete |
 | 25 - MCP Integration | v0.3.0 | 10 (INTG-01→10) | 10 | ✅ Complete |
-| 26 - Routing Explainability | v0.3.0 | 3 (ROUT-04→06) | 3 | ⚪ Not Started |
-| **Total v0.3.0** | — | **35** | **35** | **In Progress** |
+| 26 - Routing Explainability | v0.3.0 | 3 (ROUT-04→06) | 3 | ✅ Complete |
+| **Total v0.3.0** | — | **35** | **35** | **✅ Complete** |
 
 ---
 
@@ -468,7 +468,7 @@ All phases benefit from the v0.2.0 foundation: intent routing, pipelines, persis
 | Evaluation & Replay | EVAL-01 to EVAL-08 | 23 | Complete |
 | Tool Gating | GATE-01 to GATE-08 | 24 | Complete |
 | MCP Integration | INTG-01 to INTG-10 | 25 | Complete |
-| Routing Explainability | ROUT-04 to ROUT-06 | 26 | Not Started |
+| Routing Explainability | ROUT-04 to ROUT-06 | 26 | Complete |
 
 **Coverage: 35/35 v0.3.0 requirements mapped** ✓
 **All v1 requirements assigned to exactly one phase** ✓
@@ -520,18 +520,18 @@ From research synthesis, key risks and mitigations:
 
 Fred v0.3.0 is complete when:
 
-- [ ] All 35 requirements have passing tests
-- [ ] All 35 success criteria are observable in user workflows
-- [ ] Observability hooks integrate with at least 3 backends (OTLP, console, file)
-- [ ] Evaluation framework can record and replay a complex multi-agent pipeline
-- [ ] Tool gating blocks unauthorized tool access with audit trail
-- [ ] MCP integration connects to at least 2 reference servers (stdio + HTTP)
-- [ ] Routing explanations show confidence scores and alternatives
+- [x] All 35 requirements have passing tests
+- [x] All 35 success criteria are observable in user workflows
+- [x] Observability hooks integrate with at least 3 backends (OTLP, console, file)
+- [x] Evaluation framework can record and replay a complex multi-agent pipeline
+- [x] Tool gating blocks unauthorized tool access with audit trail
+- [x] MCP integration connects to at least 2 reference servers (stdio + HTTP)
+- [x] Routing explanations show confidence scores and alternatives
 - [ ] Documentation covers all new APIs with examples
-- [ ] No breaking changes to v0.2.0 Promise-based APIs
+- [x] No breaking changes to v0.2.0 Promise-based APIs
 
 ---
 
 *Roadmap tracking begins at v0.2.0 milestone*
-*Last updated: 2026-02-07 — Phase 26 planned (3 plans in 3 waves)*
-*Next: `/gsd:execute-phase 26` to execute Routing Explainability*
+*Last updated: 2026-02-07 — Phase 26 complete, v0.3.0 milestone complete*
+*Next: `/gsd:audit-milestone` to audit v0.3.0 completion*
