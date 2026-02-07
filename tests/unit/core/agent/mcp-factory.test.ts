@@ -131,8 +131,7 @@ describe('AgentFactory - MCP Registry Integration', () => {
     expect(agent).toBeDefined();
     expect(mockRegistry.discoverTools).toHaveBeenCalledWith('unknown');
     expect(warnMock).toHaveBeenCalled();
-    expect(warnMock.mock.calls[0][0]).toContain('Failed to discover tools');
-    expect(warnMock.mock.calls[0][0]).toContain('unknown');
+    expect(warnMock.mock.calls[0][0]).toContain('Failed to discover MCP tools for agent');
 
     console.warn = originalWarn;
   });

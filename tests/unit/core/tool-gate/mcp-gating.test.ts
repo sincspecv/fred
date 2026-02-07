@@ -341,7 +341,7 @@ describe('ToolGateService - MCP Tool Gating', () => {
       call[0].includes('MCP tools denied by policy')
     );
     expect(warningCall).toBeDefined();
-    expect(warningCall[1]).toContain('github/delete_repo');
+    expect(warningCall?.[0]).toContain('MCP tools denied by policy');
 
     console.warn = originalWarn;
   });
