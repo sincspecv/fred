@@ -56,6 +56,25 @@ export interface PolicyAuditEvent {
   timestamp: string;
 }
 
+export interface ToolApprovalRequest {
+  toolId: string;
+  intentId?: string;
+  agentId?: string;
+  userId?: string;
+  reason: string;
+  /** Session key for scoping approval persistence */
+  sessionKey: string;
+  /** TTL for approval request (default: 300000ms = 5 minutes) */
+  ttlMs?: number;
+}
+
+export interface ToolApprovalRecord {
+  toolId: string;
+  sessionKey: string;
+  approved: boolean;
+  timestamp: string;
+}
+
 export interface ToolGateServiceApi {
   evaluateTool(
     tool: ToolGateCandidateTool,
@@ -82,4 +101,16 @@ export interface ToolGateServiceApi {
   reloadPolicies(policies: ToolPoliciesConfig | undefined): Effect.Effect<void>;
 
   getPolicies(): Effect.Effect<ToolPoliciesConfig | undefined>;
+
+  /** Check if tool has a session-scoped approval already */
+  hasApproval(toolId: string, sessionKey: string): Effect.Effect<boolean>;
+
+  /** Record an approval or denial for a tool in a session */
+  recordApproval(toolId: string, sessionKey: string, approved: boolean): Effect.Effect<void>;
+
+  /** Clear all approvals (e.g., when session ends) */
+  clearApprovals(sessionKey?: string): Effect.Effect<void>;
+
+  /** Generate an approval request for a requireApproval decision */
+  createApprovalRequest(decision: ToolGateDecision, context: ToolGateContext): Effect.Effect<ToolApprovalRequest | undefined>;
 }

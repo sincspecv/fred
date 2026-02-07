@@ -5,25 +5,25 @@
 See: .planning/PROJECT.md (updated 2026-02-06)
 
 **Core value:** Route any message to the right agent and execute multi-step pipelines with shared context, without developers stitching orchestration together themselves.
-**Current focus:** v0.3.0 milestone — Phase 24 queued after completing Phase 23 evaluation framework
+**Current focus:** v0.3.0 milestone — Phase 24 tool access control in progress
 **Milestone:** v0.3.0 Observability & Safety (Phases 22-26)
 
 ---
 
 ## Current Position
 
-**Phase:** 23 — Evaluation Framework
-**Plan:** 10 of 10 plans complete
+**Phase:** 24 — Tool Access Control
+**Plan:** 5 of 5 plans complete
 **Status:** Phase complete
-**Last activity:** 2026-02-06 — Completed 23-11-PLAN.md (suite CLI integration with aggregate metrics)
+**Last activity:** 2026-02-07 — Completed 24-05-PLAN.md (audit hook events)
 
-**Progress:** ████████████ 100% (103/103 plans complete)
+**Progress:** ████████████ 97% (110/113 plans complete)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
 | 22 | Observability Foundation | 8 | 8/8 | ✅ Complete |
 | 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
-| 24 | Tool Access Control | 8 | — | ⚪ Not started |
+| 24 | Tool Access Control | 8 | 5/5 | ✅ Complete |
 | 25 | MCP Integration | 10 | — | ⚪ Not started |
 | 26 | Routing Explainability | 3 | — | ⚪ Not started |
 
@@ -36,7 +36,8 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - 35 requirements mapped
 - Phase 22: ✅ Complete (2026-02-06)
 - Phase 23: ✅ Complete (2026-02-06)
-- Next: Execute 24-01-PLAN.md
+- Phase 24: ✅ Complete (2026-02-07)
+- Next: Phase 25 (MCP Integration)
 
 **v0.3.1 — PLANNED**
 - CLI/TUI developer experience
@@ -127,6 +128,20 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Gate tools at discovery time (LLM never sees disallowed tools)
 - All MCP tools pass through ToolGateService before being offered to LLM
 - Audit logging via observability hooks for all policy decisions
+- Policy DSL uses explicit default -> intent -> agent layering with override blocks for deterministic inheritance (Phase 24-01)
+- Policy overrides must target explicit scopes and references must resolve at config load time (Phase 24-01)
+- Contradictory allow/deny and deny/requireApproval declarations fail fast during config validation (Phase 24-01)
+- Tool capability inference is deterministic with stable ordering across built-in and custom tags (Phase 24-02)
+- Capability metadata preserves inferred vs manual tags while allowing additive manual extensions only (Phase 24-02)
+- Matching tool policy overrides replace inherited default/intent/agent rule chains at runtime (Phase 24-03)
+- Tool gate decisions evaluate deny precedence across layered scopes with matched-rule metadata for auditability (Phase 24-03)
+- Tool policy updates are Ref-backed and applied immediately via setPolicies/reloadPolicies without cached stale decisions (Phase 24-03)
+- Policy context from message processing is threaded into agent execution (intent/agent/conversation/user/role metadata) for runtime tool gating (Phase 24-04)
+- AgentFactory applies per-invocation ToolGate filtering and returns explicit POLICY_DENIED records on blocked tool bypass attempts (Phase 24-04)
+- Config initialization now applies extracted tool policies into ToolGateService for init/reload parity (Phase 24-04)
+- Audit events emitted via hooks after policy decisions (not inline) for decoupled observability (Phase 24-05)
+- Tool arguments hashed by default using ObservabilityService.hashPayload to prevent sensitive data leakage (Phase 24-05)
+- Hook emission failures caught with Effect.catchAll to ensure gate decisions never fail due to audit issues (Phase 24-05)
 
 ### Blockers/Concerns
 
@@ -134,14 +149,59 @@ None.
 
 ---
 
+## Phase 24: Tool Access Control — COMPLETE
+
+**Status:** ✅ Complete (5/5 plans executed)
+**Completed:** 2026-02-07
+
+**What was built:**
+- ToolPoliciesConfig schema with default/intent/agent layering and override blocks (24-01)
+- Deterministic tool capability inference with stable ordering and additive manual extensions (24-02)
+- ToolGateService with deny precedence evaluation and Ref-backed policy updates (24-03)
+- Runtime tool gating in AgentFactory with policy context propagation and POLICY_DENIED records (24-04)
+- Policy audit hook events (afterPolicyDecision) with hashed arguments and observability integration (24-05)
+
+**Key achievements:**
+- Tool policies are declarative, deterministic, and hot-reloadable without stale decision caches
+- Tool arguments never appear in raw form in audit logs (hashed via ObservabilityService)
+- Gate decisions never fail due to audit emission (Effect.catchAll for fault tolerance)
+- Backward compatible (works without HookManagerService/ObservabilityService)
+
+---
+
 ## Session Continuity
 
-Last session: 2026-02-06T21:58:37Z
-Stopped at: Completed 23-10-PLAN.md
-Resume: Execute .planning/phases/24-tool-access-control/24-01-PLAN.md
+Last session: 2026-02-07T01:23:41Z
+Stopped at: Completed 24-05-PLAN.md
+Resume file: None
+
+---
+
+## Phase 23: Evaluation Framework — COMPLETE
+
+**Verification:** PASSED (8/8 success criteria + 3/3 gap closures verified)
+**Report:** .planning/phases/23-evaluation-framework/23-VERIFICATION.md
+
+**What was built:**
+- Deterministic recording artifact pipeline with TraceStorageService abstraction
+- Typed assertions library (tool call, routing, response, presence/absence assertions)
+- Regression comparator with scorecard-first output and volatile-field filtering
+- Checkpoint replay with mocked tools and Effect TestClock for determinism
+- Batch suite runner with YAML/JSON manifest support and per-intent confusion matrices
+- CLI commands (record/replay/compare/suite) exposed with consistent core-backed flows
+- **Gap closure:** Layer composition bug fixed using proper Layer.provide chain
+- **Gap closure:** Config-less replay mode for artifact-only validation workflows
+- **Gap closure:** Suite CLI fully wired to core runner with complete SuiteReport (metrics, confusion matrix)
+
+**Gap Closure Summary:**
+| Plan | Issue | Fix |
+|------|-------|-----|
+| 23-09 | Record throws "ObservabilityService not found" | Fixed Layer.provide(EvaluationServiceLive, deps) pattern |
+| 23-10 | Replay requires config file | Artifact-only runtime without config dependency |
+| 23-11 | Suite doesn't return aggregate metrics | Full SuiteReport with totals, latency, tokenUsage, intentQuality |
 
 ---
 
 *State file tracks current milestone progress*
 *Archives in .planning/milestones/ contain historical data*
-*Last updated: 2026-02-06 — Phase 23 complete (10/10 plans complete)*
+*Last updated: 2026-02-07 — Phase 24 complete (5/5 plans)*

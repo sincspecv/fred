@@ -613,4 +613,166 @@ describe('ToolGateService', () => {
       ]);
     });
   });
+
+  describe('approval workflow', () => {
+    test('createApprovalRequest returns request for requireApproval decision', async () => {
+      const decision = {
+        toolId: 'test-tool',
+        allowed: true,
+        requireApproval: true,
+        matchedRules: [{ scope: 'default' as const, source: 'default', effect: 'requireApproval' as const }],
+      };
+
+      const context = {
+        intentId: 'test-intent',
+        agentId: 'test-agent',
+        userId: 'user-123',
+        metadata: { conversationId: 'conv-456' },
+      };
+
+      const request = await runWithToolGate(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          return yield* toolGate.createApprovalRequest(decision, context);
+        })
+      );
+
+      expect(request).toBeDefined();
+      expect(request?.toolId).toBe('test-tool');
+      expect(request?.intentId).toBe('test-intent');
+      expect(request?.agentId).toBe('test-agent');
+      expect(request?.userId).toBe('user-123');
+      expect(request?.sessionKey).toBe('conv-456');
+      expect(request?.ttlMs).toBe(300000);
+      expect(request?.reason).toBeDefined();
+    });
+
+    test('createApprovalRequest returns undefined for already-approved tool', async () => {
+      const decision = {
+        toolId: 'test-tool',
+        allowed: true,
+        requireApproval: true,
+        matchedRules: [{ scope: 'default' as const, source: 'default', effect: 'requireApproval' as const }],
+      };
+
+      const context = {
+        metadata: { conversationId: 'conv-456' },
+      };
+
+      const result = await runWithToolGate(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          // Record approval first
+          yield* toolGate.recordApproval('test-tool', 'conv-456', true);
+          // Now try to create approval request
+          return yield* toolGate.createApprovalRequest(decision, context);
+        })
+      );
+
+      expect(result).toBeUndefined();
+    });
+
+    test('hasApproval returns false for unapproved tool', async () => {
+      const hasApproval = await runWithToolGate(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          return yield* toolGate.hasApproval('test-tool', 'session-1');
+        })
+      );
+
+      expect(hasApproval).toBe(false);
+    });
+
+    test('hasApproval returns true after recordApproval(true)', async () => {
+      const hasApproval = await runWithToolGate(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.recordApproval('test-tool', 'session-1', true);
+          return yield* toolGate.hasApproval('test-tool', 'session-1');
+        })
+      );
+
+      expect(hasApproval).toBe(true);
+    });
+
+    test('hasApproval returns false after recordApproval(false)', async () => {
+      const hasApproval = await runWithToolGate(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.recordApproval('test-tool', 'session-1', false);
+          return yield* toolGate.hasApproval('test-tool', 'session-1');
+        })
+      );
+
+      expect(hasApproval).toBe(false);
+    });
+
+    test('clearApprovals removes session-scoped approvals', async () => {
+      const hasApproval = await runWithToolGate(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.recordApproval('test-tool', 'session-1', true);
+          yield* toolGate.clearApprovals('session-1');
+          return yield* toolGate.hasApproval('test-tool', 'session-1');
+        })
+      );
+
+      expect(hasApproval).toBe(false);
+    });
+
+    test('clearApprovals without sessionKey clears all', async () => {
+      const result = await runWithToolGate(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.recordApproval('tool-a', 'session-1', true);
+          yield* toolGate.recordApproval('tool-b', 'session-2', true);
+          yield* toolGate.clearApprovals();
+          const hasA = yield* toolGate.hasApproval('tool-a', 'session-1');
+          const hasB = yield* toolGate.hasApproval('tool-b', 'session-2');
+          return { hasA, hasB };
+        })
+      );
+
+      expect(result.hasA).toBe(false);
+      expect(result.hasB).toBe(false);
+    });
+
+    test('approval does not carry across sessions', async () => {
+      const result = await runWithToolGate(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.recordApproval('test-tool', 'session-A', true);
+          const hasInA = yield* toolGate.hasApproval('test-tool', 'session-A');
+          const hasInB = yield* toolGate.hasApproval('test-tool', 'session-B');
+          return { hasInA, hasInB };
+        })
+      );
+
+      expect(result.hasInA).toBe(true);
+      expect(result.hasInB).toBe(false);
+    });
+
+    test('recordApproval emits audit event', async () => {
+      const { mockService: mockHookManager, events } = createMockHookManager();
+      const hookLayer = Layer.succeed(HookManagerServiceTag, mockHookManager);
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, hookLayer))
+      );
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.recordApproval('test-tool', 'session-1', true);
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('afterPolicyDecision');
+      const eventData = events[0].data as any;
+      expect(eventData.toolId).toBe('test-tool');
+      expect(eventData.outcome).toBe('allow');
+      expect(eventData.metadata.approvalResponse).toBe(true);
+      expect(eventData.metadata.sessionKey).toBe('session-1');
+    });
+  });
 });

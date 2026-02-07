@@ -267,6 +267,7 @@ class ToolGateServiceImpl implements ToolGateServiceApi {
   constructor(
     private readonly policiesRef: Ref.Ref<ToolPoliciesConfig | undefined>,
     private readonly toolRegistry: ToolRegistryService,
+    private readonly approvalsRef: Ref.Ref<Map<string, import('./types').ToolApprovalRecord>>,
     private readonly hookManager?: HookManagerService,
     private readonly observability?: ObservabilityService
   ) {}
@@ -413,6 +414,110 @@ class ToolGateServiceImpl implements ToolGateServiceApi {
   getPolicies(): Effect.Effect<ToolPoliciesConfig | undefined> {
     return Ref.get(this.policiesRef).pipe(Effect.map((policies) => clonePolicies(policies)));
   }
+
+  hasApproval(toolId: string, sessionKey: string): Effect.Effect<boolean> {
+    const self = this;
+    return Effect.gen(function* () {
+      const approvals = yield* Ref.get(self.approvalsRef);
+      const key = `${sessionKey}:${toolId}`;
+      const record = approvals.get(key);
+      return record?.approved === true;
+    });
+  }
+
+  recordApproval(toolId: string, sessionKey: string, approved: boolean): Effect.Effect<void> {
+    const self = this;
+    return Effect.gen(function* () {
+      const key = `${sessionKey}:${toolId}`;
+      const record: import('./types').ToolApprovalRecord = {
+        toolId,
+        sessionKey,
+        approved,
+        timestamp: new Date().toISOString(),
+      };
+
+      yield* Ref.update(self.approvalsRef, (approvals) => {
+        const updated = new Map(approvals);
+        updated.set(key, record);
+        return updated;
+      });
+
+      // Emit audit hook event for approval response
+      if (self.hookManager) {
+        const auditEvent: import('./types').PolicyAuditEvent = {
+          toolId,
+          outcome: approved ? 'allow' : 'deny',
+          timestamp: record.timestamp,
+          matchedRules: [],
+        };
+
+        yield* self.hookManager.executeHooks('afterPolicyDecision', {
+          type: 'afterPolicyDecision',
+          data: {
+            ...auditEvent,
+            metadata: { approvalResponse: true, sessionKey },
+          },
+          timestamp: record.timestamp,
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      }
+    });
+  }
+
+  clearApprovals(sessionKey?: string): Effect.Effect<void> {
+    const self = this;
+    return Effect.gen(function* () {
+      if (sessionKey) {
+        // Remove only approvals for this session
+        yield* Ref.update(self.approvalsRef, (approvals) => {
+          const updated = new Map(approvals);
+          for (const [key] of approvals) {
+            if (key.startsWith(`${sessionKey}:`)) {
+              updated.delete(key);
+            }
+          }
+          return updated;
+        });
+      } else {
+        // Clear all approvals
+        yield* Ref.set(self.approvalsRef, new Map());
+      }
+    });
+  }
+
+  createApprovalRequest(
+    decision: import('./types').ToolGateDecision,
+    context: import('./types').ToolGateContext
+  ): Effect.Effect<import('./types').ToolApprovalRequest | undefined> {
+    const self = this;
+    return Effect.gen(function* () {
+      // Only create approval request for requireApproval decisions
+      if (!decision.requireApproval) {
+        return undefined;
+      }
+
+      // Derive session key from context
+      const sessionKey = (context.metadata?.conversationId as string | undefined) ?? context.userId ?? 'default';
+
+      // Check if already approved in this session
+      const alreadyApproved = yield* self.hasApproval(decision.toolId, sessionKey);
+      if (alreadyApproved) {
+        return undefined;
+      }
+
+      // Generate approval request
+      const request: import('./types').ToolApprovalRequest = {
+        toolId: decision.toolId,
+        intentId: context.intentId,
+        agentId: context.agentId,
+        userId: context.userId,
+        reason: 'Tool requires explicit approval',
+        sessionKey,
+        ttlMs: 300000, // 5 minutes default
+      };
+
+      return request;
+    });
+  }
 }
 
 export const ToolGateService = Context.GenericTag<ToolGateServiceApi>('ToolGateService');
@@ -422,6 +527,7 @@ export const ToolGateServiceLive = Layer.effect(
   Effect.gen(function* () {
     const toolRegistry = yield* ToolRegistryService;
     const policiesRef = yield* Ref.make<ToolPoliciesConfig | undefined>(undefined);
+    const approvalsRef = yield* Ref.make<Map<string, import('./types').ToolApprovalRecord>>(new Map());
 
     // Optionally resolve HookManagerService and ObservabilityService
     const hookManagerOption = yield* Effect.serviceOption(HookManagerServiceTag);
@@ -430,6 +536,6 @@ export const ToolGateServiceLive = Layer.effect(
     const hookManager = hookManagerOption._tag === 'Some' ? hookManagerOption.value : undefined;
     const observability = observabilityOption._tag === 'Some' ? observabilityOption.value : undefined;
 
-    return new ToolGateServiceImpl(policiesRef, toolRegistry, hookManager, observability);
+    return new ToolGateServiceImpl(policiesRef, toolRegistry, approvalsRef, hookManager, observability);
   })
 );
