@@ -1,14 +1,21 @@
-import { FrameworkConfig, ConfigStep, ConfigConditionalStep, ProviderPackConfig, PersistenceConfig } from './types';
+import type {
+  FrameworkConfig,
+  ConfigStep,
+  ConfigConditionalStep,
+  ProviderPackConfig,
+  ToolPoliciesConfig,
+  ToolPolicyRule,
+} from './types';
 import { parseConfigFile } from './parser';
-import { Intent } from '../intent/intent';
-import { AgentConfig } from '../agent/agent';
-import { PipelineConfig, PipelineConfigV2 } from '../pipeline/pipeline';
-import { PipelineStep } from '../pipeline/steps';
-import { Tool, ToolSchemaMetadata } from '../tool/tool';
+import type { Intent } from '../intent/intent';
+import type { AgentConfig } from '../agent/agent';
+import type { PipelineConfig, PipelineConfigV2 } from '../pipeline/pipeline';
+import type { PipelineStep } from '../pipeline/steps';
+import type { Tool, ToolSchemaMetadata } from '../tool/tool';
 import { loadPromptFile } from '../utils/prompt-loader';
 import { validateId, validatePipelineAgentCount } from '../utils/validation';
-import { Workflow } from '../workflow/types';
-import { ProviderConfig } from '../platform/provider';
+import type { Workflow } from '../workflow/types';
+import type { ProviderConfig } from '../platform/provider';
 import { Schema, ParseResult } from 'effect';
 
 // =============================================================================
@@ -48,6 +55,7 @@ export function loadConfig(filePath: string): FrameworkConfig {
  */
 export function validateConfig(config: FrameworkConfig): void {
   const hasDefaultSystemMessage = Boolean(config.defaultSystemMessage);
+  const policies = getPolicyConfig(config);
 
   if (config.intents) {
     for (const intent of config.intents) {
@@ -210,6 +218,14 @@ export function validateConfig(config: FrameworkConfig): void {
       );
     }
   }
+
+  if (policies) {
+    const toolIds = new Set((config.tools ?? []).map((tool) => tool.id));
+    const intentIds = new Set((config.intents ?? []).map((intent) => intent.id));
+    const agentIds = new Set((config.agents ?? []).map((agent) => agent.id));
+
+    validateToolPolicies(policies, toolIds, intentIds, agentIds);
+  }
 }
 
 /**
@@ -276,6 +292,31 @@ export function extractTools(config: FrameworkConfig): Omit<Tool, 'execute'>[] {
 }
 
 /**
+ * Extract tool access policies from config.
+ */
+export function extractToolPolicies(config: FrameworkConfig): ToolPoliciesConfig | undefined {
+  const policies = getPolicyConfig(config);
+  if (!policies) {
+    return undefined;
+  }
+
+  return {
+    default: cloneToolPolicyRule(policies.default),
+    intents: cloneScopedPolicyRules(policies.intents),
+    agents: cloneScopedPolicyRules(policies.agents),
+    overrides: policies.overrides?.map((override) => ({
+      ...cloneToolPolicyRule(override),
+      id: override.id,
+      override: true,
+      target: {
+        intentId: override.target.intentId,
+        agentId: override.target.agentId,
+      },
+    })),
+  };
+}
+
+/**
  * Extract pipelines from config
  * @param config - Framework configuration
  * @param basePath - Optional base path for resolving relative prompt file paths (usually config file path)
@@ -321,6 +362,147 @@ function validateSchemaMetadata(toolId: string, metadata: ToolSchemaMetadata): v
   if (!metadata.properties || typeof metadata.properties !== 'object') {
     throw new Error(`Tool "${toolId}" schema metadata must include properties`);
   }
+}
+
+function getPolicyConfig(config: FrameworkConfig): ToolPoliciesConfig | undefined {
+  if (config.policies && config.toolPolicies) {
+    throw new Error('Config cannot define both "policies" and "toolPolicies". Use only one policy section');
+  }
+
+  return config.policies ?? config.toolPolicies;
+}
+
+function validateToolPolicies(
+  policies: ToolPoliciesConfig,
+  toolIds: Set<string>,
+  intentIds: Set<string>,
+  agentIds: Set<string>
+): void {
+  validatePolicyRule(policies.default, 'Default tool policy', toolIds);
+
+  for (const [intentId, policy] of Object.entries(policies.intents ?? {})) {
+    if (!intentIds.has(intentId)) {
+      throw new Error(`Tool policy references unknown intent "${intentId}"`);
+    }
+    validatePolicyRule(policy, `Tool policy for intent "${intentId}"`, toolIds);
+  }
+
+  for (const [agentId, policy] of Object.entries(policies.agents ?? {})) {
+    if (!agentIds.has(agentId)) {
+      throw new Error(`Tool policy references unknown agent "${agentId}"`);
+    }
+    validatePolicyRule(policy, `Tool policy for agent "${agentId}"`, toolIds);
+  }
+
+  const seenOverrideIds = new Set<string>();
+  for (const override of policies.overrides ?? []) {
+    if (seenOverrideIds.has(override.id)) {
+      throw new Error(`Duplicate tool policy override id "${override.id}"`);
+    }
+    seenOverrideIds.add(override.id);
+
+    if (!override.target || (!override.target.intentId && !override.target.agentId)) {
+      throw new Error(`Tool policy override "${override.id}" must declare a target scope (intentId and/or agentId)`);
+    }
+
+    if (override.target.intentId && !intentIds.has(override.target.intentId)) {
+      throw new Error(
+        `Tool policy override "${override.id}" references unknown intent "${override.target.intentId}"`
+      );
+    }
+
+    if (override.target.agentId && !agentIds.has(override.target.agentId)) {
+      throw new Error(
+        `Tool policy override "${override.id}" references unknown agent "${override.target.agentId}"`
+      );
+    }
+
+    validatePolicyRule(override, `Tool policy override "${override.id}"`, toolIds);
+  }
+}
+
+function validatePolicyRule(rule: ToolPolicyRule | undefined, scope: string, toolIds: Set<string>): void {
+  if (!rule) {
+    return;
+  }
+
+  validatePolicyToolReferences(rule.allow, `${scope} allow`, toolIds);
+  validatePolicyToolReferences(rule.deny, `${scope} deny`, toolIds);
+  validatePolicyToolReferences(rule.requireApproval, `${scope} requireApproval`, toolIds);
+
+  const allowDenyConflicts = findConflicts(rule.allow, rule.deny);
+  if (allowDenyConflicts.length > 0) {
+    throw new Error(
+      `${scope} has conflicting allow/deny declarations for tool(s): ${allowDenyConflicts.map((id) => `"${id}"`).join(', ')}`
+    );
+  }
+
+  const denyApprovalConflicts = findConflicts(rule.deny, rule.requireApproval);
+  if (denyApprovalConflicts.length > 0) {
+    throw new Error(
+      `${scope} has conflicting deny/requireApproval declarations for tool(s): ${denyApprovalConflicts.map((id) => `"${id}"`).join(', ')}`
+    );
+  }
+}
+
+function validatePolicyToolReferences(toolRefs: string[] | undefined, scope: string, toolIds: Set<string>): void {
+  if (!toolRefs || toolRefs.length === 0) {
+    return;
+  }
+
+  const seen = new Set<string>();
+  for (const toolId of toolRefs) {
+    if (seen.has(toolId)) {
+      throw new Error(`${scope} contains duplicate tool reference "${toolId}"`);
+    }
+    seen.add(toolId);
+
+    if (!toolIds.has(toolId)) {
+      throw new Error(`${scope} references unknown tool "${toolId}"`);
+    }
+  }
+}
+
+function findConflicts(first: string[] | undefined, second: string[] | undefined): string[] {
+  if (!first || !second || first.length === 0 || second.length === 0) {
+    return [];
+  }
+
+  const right = new Set(second);
+  return [...new Set(first.filter((id) => right.has(id)))];
+}
+
+function cloneToolPolicyRule(rule: ToolPolicyRule | undefined): ToolPolicyRule | undefined {
+  if (!rule) {
+    return undefined;
+  }
+
+  return {
+    allow: rule.allow ? [...rule.allow] : undefined,
+    deny: rule.deny ? [...rule.deny] : undefined,
+    requireApproval: rule.requireApproval ? [...rule.requireApproval] : undefined,
+    requiredCategories: rule.requiredCategories ? [...rule.requiredCategories] : undefined,
+    conflictResolution: rule.conflictResolution,
+    conditions: rule.conditions
+      ? {
+          role: Array.isArray(rule.conditions.role) ? [...rule.conditions.role] : rule.conditions.role,
+          userId: Array.isArray(rule.conditions.userId) ? [...rule.conditions.userId] : rule.conditions.userId,
+          metadata: rule.conditions.metadata ? { ...rule.conditions.metadata } : undefined,
+        }
+      : undefined,
+  };
+}
+
+function cloneScopedPolicyRules(
+  scoped: Record<string, ToolPolicyRule> | undefined
+): Record<string, ToolPolicyRule> | undefined {
+  if (!scoped) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    Object.entries(scoped).map(([key, rule]) => [key, cloneToolPolicyRule(rule) as ToolPolicyRule])
+  );
 }
 
 /**
