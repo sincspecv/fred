@@ -13,18 +13,18 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 ## Current Position
 
 **Phase:** 25 — MCP Integration
-**Plan:** 3 of 6 plans complete
-**Status:** In progress
-**Last activity:** 2026-02-07 — Completed 25-03-PLAN.md (MCP health checks, auto-restart, and lifecycle management)
+**Plan:** 6 of 6 plans complete
+**Status:** Phase complete
+**Last activity:** 2026-02-07 — Completed 25-06-PLAN.md (Fred class integration and public API wiring)
 
-**Progress:** ████████████ 99% (113/115 plans complete)
+**Progress:** ████████████ 100% (115/115 plans complete)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
 | 22 | Observability Foundation | 8 | 8/8 | ✅ Complete |
 | 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
 | 24 | Tool Access Control | 8 | 6/6 | ✅ Complete |
-| 25 | MCP Integration | 10 | 3/6 | 🔵 In progress |
+| 25 | MCP Integration | 10 | 6/6 | ✅ Complete |
 | 26 | Routing Explainability | 3 | — | ⚪ Not started |
 
 ---
@@ -142,6 +142,13 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Graceful shutdown order: stop health checks, close clients, clear registry (Phase 25-03)
 - Startup failures don't throw - warn and continue without that server (Phase 25-03)
 - Failed servers NOT added to registry (getClient returns undefined, not null) (Phase 25-03)
+- Resource service returns empty array + warning for disconnected servers (listResources) (Phase 25-04)
+- Tool execution returns formatted error string instead of throwing for disconnected servers (Phase 25-04)
+- discoverAllTools uses Effect.either to isolate per-server errors gracefully (Phase 25-04)
+- AgentFactory uses MCPServerRegistry for MCP tool resolution, not inline clients (Phase 25-05)
+- MCP tools pass through ToolGateService.filterTools at discovery time (Phase 25-05)
+- Denied MCP tools never added to effectTools - LLM never sees them (Phase 25-05)
+- Unknown server IDs log warning but don't crash agent creation (Phase 25-05)
 
 **Safety Decisions:**
 - Gate tools at discovery time (LLM never sees disallowed tools)
@@ -172,10 +179,10 @@ None.
 
 ---
 
-## Phase 25: MCP Integration — IN PROGRESS
+## Phase 25: MCP Integration — COMPLETE
 
-**Status:** 🔵 In progress (3/6 plans complete)
-**Started:** 2026-02-07
+**Status:** ✅ Complete (6/6 plans executed)
+**Completed:** 2026-02-07
 
 **What was built:**
 - MCPGlobalServerConfig type with all transport fields (stdio, http, sse) (25-01)
@@ -188,6 +195,16 @@ None.
 - Lazy server startup pattern with on-demand connection (25-03)
 - Graceful shutdown with health check cleanup (25-03)
 - Graceful startup failure handling (warn-only, no throw) (25-03)
+- MCPResourceService for listing and reading resources from MCP servers (25-04)
+- Enhanced tool discovery with graceful error handling (Effect.either per server) (25-04)
+- Mid-conversation server failure resilience in tool execution (25-04)
+- AgentFactory using MCPServerRegistry for MCP tool resolution (25-05)
+- ToolGateService integration for MCP tool filtering at discovery time (25-05)
+- Comprehensive MCP factory and gating tests (25-05)
+- Fred class MCPServerRegistry and MCPResourceService integration (25-06)
+- ConfigInitializer MCP server extraction and registration flow (25-06)
+- Public API exports for MCP modules (registry, resource service, health manager) (25-06)
+- Comprehensive integration test suite (15 tests covering config → registry → agent → tools flow) (25-06)
 
 **Key achievements:**
 - Environment variables resolve at config load time with fallback to literal values
@@ -199,8 +216,12 @@ None.
 - Exponential backoff (1s, 2s, 4s) balances recovery speed with resource usage
 - Tool re-discovery after reconnection keeps agent tools fresh
 - Lazy servers reduce startup time and resource usage
-
-**Next:** 25-04 — MCP resource service and tool discovery
+- Resource access gracefully handles disconnected servers
+- MCP tools subject to same policy enforcement as native tools
+- Denied MCP tools never reach the LLM
+- Fred.initializeFromConfig automatically registers MCP servers from config
+- Graceful shutdown order (MCP cleanup → agent cleanup → runtime cleanup)
+- Public API exposes getMCPServerRegistry() and getMCPResourceService() for runtime management
 
 ---
 
@@ -229,8 +250,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-07T03:13:53Z
-Stopped at: Completed 25-03-PLAN.md (MCP health checks, auto-restart, and lifecycle management - 3/6 plans)
+Last session: 2026-02-07T03:30:57Z
+Stopped at: Completed 25-06-PLAN.md (Fred class integration and public API wiring - Phase 25 complete)
 Resume file: None
 
 ---
@@ -262,4 +283,4 @@ Resume file: None
 
 *State file tracks current milestone progress*
 *Archives in .planning/milestones/ contain historical data*
-*Last updated: 2026-02-07 — Phase 25 in progress (2/6 plans)*
+*Last updated: 2026-02-07 — Phase 25 complete (6/6 plans)*
