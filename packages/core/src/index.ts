@@ -57,6 +57,8 @@ import { compare } from './eval/comparator';
 import { createReplayOrchestrator, replay, replayWithStorage } from './eval/replay';
 import { runSuite, parseSuiteManifest, decodeSuiteManifest } from './eval/suite';
 import { calculateIntentMetrics } from './eval/metrics';
+import { MCPServerRegistry, MCPResourceService } from './mcp';
+import type { MCPGlobalServerConfig } from './config/types';
 
 /**
  * Fred - Main class for building AI agents
@@ -98,6 +100,10 @@ export class Fred implements FredLike {
   private providerService: ProviderService;
   private messageProcessor: MessageProcessor;
   private configInitializer: ConfigInitializer;
+
+  // MCP integration
+  private mcpServerRegistry: MCPServerRegistry;
+  private mcpResourceService: MCPResourceService;
 
   // Effect runtime for service execution (lazy initialized)
   private runtime: FredRuntime | null = null;
@@ -148,6 +154,13 @@ export class Fred implements FredLike {
       observabilityService: undefined, // Will be set via configureObservability if needed
     });
     this.configInitializer = new ConfigInitializer();
+
+    // Initialize MCP registry and resource service
+    this.mcpServerRegistry = new MCPServerRegistry();
+    this.mcpResourceService = new MCPResourceService(this.mcpServerRegistry);
+
+    // Wire MCP registry into agent factory
+    this.agentManager.getAgentFactory().setMCPServerRegistry(this.mcpServerRegistry);
 
     // Set tracer on hook manager if provided
     if (this.tracer) {
@@ -564,6 +577,55 @@ export class Fred implements FredLike {
     return this.providerService;
   }
 
+  getMCPServerRegistry(): MCPServerRegistry {
+    return this.mcpServerRegistry;
+  }
+
+  getMCPResourceService(): MCPResourceService {
+    return this.mcpResourceService;
+  }
+
+  /**
+   * Configure MCP servers from config.
+   *
+   * Registers servers in the global registry and starts health checks.
+   *
+   * @param configs - Array of MCP server configurations with IDs
+   */
+  async configureMCPServers(
+    configs: Array<MCPGlobalServerConfig & { id: string }>
+  ): Promise<void> {
+    for (const config of configs) {
+      // Convert MCPGlobalServerConfig to MCPServerConfig format
+      const serverConfig = {
+        id: config.id,
+        transport: config.transport,
+        command: config.command,
+        args: config.args,
+        env: config.env,
+        url: config.url,
+        headers: config.headers,
+        timeout: config.timeout,
+        enabled: config.enabled,
+        lazy: config.lazy,
+        retry: config.retry,
+      };
+
+      if (config.lazy) {
+        // Register lazy server (deferred connection)
+        this.mcpServerRegistry.registerLazyServer(config.id, serverConfig);
+      } else {
+        // Register and connect immediately (graceful failure handling)
+        await Effect.runPromise(
+          this.mcpServerRegistry.registerAndConnect(config.id, serverConfig)
+        );
+      }
+    }
+
+    // Start health checks for connected servers
+    this.mcpServerRegistry.startHealthChecks();
+  }
+
   /**
    * Shutdown Fred and release all resources.
    *
@@ -578,7 +640,10 @@ export class Fred implements FredLike {
    * ```
    */
   async shutdown(): Promise<void> {
-    // Cleanup existing class-based resources
+    // Cleanup MCP connections first
+    await Effect.runPromise(this.mcpServerRegistry.shutdown());
+
+    // Cleanup existing class-based resources (includes legacy MCP clients)
     await this.agentManager.clear();
 
     // Runtime cleanup happens automatically via Effect.scoped

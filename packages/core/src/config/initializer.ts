@@ -11,6 +11,7 @@ import {
   extractProviders,
   extractObservability,
   extractToolPolicies,
+  extractMCPServers,
 } from './loader';
 import { loadPromptFile } from '../utils/prompt-loader';
 import type { ToolPoliciesConfig } from './types';
@@ -41,6 +42,7 @@ export interface FredLike {
   configureWorkflows(workflows: import('../workflow/types').Workflow[]): void;
   configureObservability(config: import('./types').ObservabilityConfig): void;
   setToolPolicies?(policies: ToolPoliciesConfig | undefined): Promise<void> | void;
+  configureMCPServers?(configs: Array<import('./types').MCPGlobalServerConfig & { id: string }>): Promise<void>;
 }
 
 /**
@@ -118,6 +120,12 @@ export class ConfigInitializer {
       await providerService.loadDefaultProviders();
       providerRegistry.markInitialized();
       providerService.syncProviderRegistry();
+    }
+
+    // Configure MCP servers (before agent creation so agents can reference them)
+    const mcpConfigs = extractMCPServers(config);
+    if (mcpConfigs.length > 0 && fred.configureMCPServers) {
+      await fred.configureMCPServers(mcpConfigs);
     }
 
     // Register tools (need execute functions)
