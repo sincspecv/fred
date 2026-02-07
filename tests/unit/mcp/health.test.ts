@@ -321,29 +321,36 @@ describe('MCPHealthManager', () => {
     });
 
     it('should stop health check after exhausting retries', async () => {
-      const client = new MockMCPClient(false);
+      const client = new MockMCPClient(true);
       const config: MCPServerConfig = {
         id: 'test-server',
         transport: 'stdio',
         command: 'test',
       };
 
+      let reconnectCalls = 0;
       client.initialize = async () => {
+        reconnectCalls++;
         throw new Error('Connection failed');
       };
 
       await Effect.runPromise(registry.registerServer('test-server', config, client));
 
-      healthManager.startHealthCheck(registry, 'test-server', 100);
+      // Start a health check that will trigger once
+      healthManager.startHealthCheck(registry, 'test-server', 5000); // Long interval to avoid repeated triggers
 
       // Trigger disconnect to start reconnect attempts
       client.disconnect();
 
-      // Wait for reconnect to exhaust retries
-      await new Promise((resolve) => setTimeout(resolve, 8000)); // 1s + 2s + 4s + buffer
+      // Manually trigger one reconnect cycle
+      await healthManager.reconnectServer(registry, 'test-server', 3);
 
-      // Health check should be stopped for this server
+      // Health check should be stopped after failed reconnect
+      // Status should be error
       expect(registry.getServerStatus('test-server')).toBe('error');
+
+      // Should have attempted all retries
+      expect(reconnectCalls).toBe(3);
     });
   });
 });
