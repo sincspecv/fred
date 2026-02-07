@@ -364,6 +364,16 @@ Plans:
 - Configuration schema for YAML/JSON MCP server definitions
 - Integration with tool gating policies
 
+**Plans:** 6 plans
+
+Plans:
+- [ ] 25-01-PLAN.md — MCP config schema, extraction, env var resolution, and validation
+- [ ] 25-02-PLAN.md — Global MCPServerRegistry with Effect lifecycle and namespaced adapter
+- [ ] 25-03-PLAN.md — Health checks, auto-restart with exponential backoff, lazy startup
+- [ ] 25-04-PLAN.md — MCPResourceService and namespaced tool discovery with error resilience
+- [ ] 25-05-PLAN.md — Agent config migration and AgentFactory refactor with ToolGate integration
+- [ ] 25-06-PLAN.md — Fred initialization wiring, public API exports, and integration tests
+
 **Research Flags:**
 - MCP ecosystem is evolving rapidly; may need research on specific server behaviors
 - Test against multiple real MCP servers during implementation
