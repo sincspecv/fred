@@ -17,8 +17,12 @@ describe('ToolRegistry', () => {
       id,
       name: name || `tool-${id}`,
       description: `Description for ${id}`,
-      execute: async (args: { input: string }) => {
-        return { result: `executed ${id} with ${args.input}` };
+      execute: async (args: unknown) => {
+        const input =
+          typeof args === 'object' && args !== null && 'input' in args
+            ? String((args as { input?: unknown }).input ?? '')
+            : '';
+        return { result: `executed ${id} with ${input}` };
       },
     };
   }
@@ -271,6 +275,95 @@ describe('ToolRegistry', () => {
       expect(sdkTools['tool-1']).toBeDefined();
       expect(sdkTools['tool-3']).toBeDefined();
       expect(sdkTools['tool-2']).toBeUndefined();
+    });
+  });
+
+  describe('capability inference', () => {
+    test('should infer read capability from tool id/name patterns', () => {
+      const tool = createMockTool('get-user-profile', 'Get User Profile');
+      registry.registerTool(tool);
+
+      const registered = registry.getTool('get-user-profile');
+      expect(registered?.capabilities).toEqual(['read']);
+      expect(registered?.capabilityMetadata?.inferred).toEqual(['read']);
+      expect(registered?.capabilityMetadata?.manual).toEqual([]);
+    });
+
+    test('should infer destructive capability from tool id/name patterns', () => {
+      const tool = createMockTool('delete-user-account', 'Delete User Account');
+      registry.registerTool(tool);
+
+      const registered = registry.getTool('delete-user-account');
+      expect(registered?.capabilities).toEqual(['destructive']);
+      expect(registered?.capabilityMetadata?.inferred).toEqual(['destructive']);
+    });
+
+    test('should infer external capability from schema metadata hints', () => {
+      const tool: Tool = {
+        ...createMockTool('lookup-weather'),
+        schema: {
+          metadata: {
+            type: 'object',
+            properties: {
+              endpoint: {
+                type: 'string',
+                description: 'Remote API URL',
+              },
+            },
+            description: 'Calls an external API endpoint',
+          },
+        } as any,
+      };
+
+      registry.registerTool(tool);
+
+      const registered = registry.getTool('lookup-weather');
+      expect(registered?.capabilities).toContain('external');
+      expect(registered?.capabilityMetadata?.inferred).toContain('external');
+    });
+
+    test('should keep manual tags additive without removing inferred tags', () => {
+      const tool: Tool = {
+        ...createMockTool('delete-card-data', 'Delete Card Data'),
+        capabilities: ['pci-sensitive'],
+      };
+
+      registry.registerTool(tool);
+
+      const registered = registry.getTool('delete-card-data');
+      expect(registered?.capabilities).toEqual(['destructive', 'pci-sensitive']);
+      expect(registered?.capabilityMetadata?.inferred).toEqual(['destructive']);
+      expect(registered?.capabilityMetadata?.manual).toEqual(['pci-sensitive']);
+    });
+
+    test('should produce deterministic capability output across repeated registrations', () => {
+      const buildTool = (): Tool => ({
+        ...createMockTool('delete-remote-user', 'Delete Remote User'),
+        capabilities: ['tenant-critical'],
+        schema: {
+          metadata: {
+            type: 'object',
+            properties: {
+              callbackUrl: {
+                type: 'string',
+              },
+            },
+            description: 'Calls remote API endpoint',
+          },
+        } as any,
+      });
+
+      const registryA = new ToolRegistry();
+      const registryB = new ToolRegistry();
+
+      registryA.registerTool(buildTool());
+      registryB.registerTool(buildTool());
+
+      const registeredA = registryA.getTool('delete-remote-user');
+      const registeredB = registryB.getTool('delete-remote-user');
+
+      expect(registeredA?.capabilities).toEqual(registeredB?.capabilities);
+      expect(registeredA?.capabilityMetadata).toEqual(registeredB?.capabilityMetadata);
     });
   });
 
