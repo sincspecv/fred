@@ -372,179 +372,245 @@ export class AgentFactory {
     const buildToolHandler = (
       toolId: string,
       execute?: (args: Record<string, any>) => Promise<any> | any,
-      allowedToolIds?: Set<string>
+      allowedToolIds?: Set<string>,
+      runtimeOptions?: AgentRuntimeOptions
     ) => {
       return (input: unknown) => {
-        const startTime = Date.now();
-        const toolSpan = this.tracer?.startSpan('tool.execute', {
-          kind: SpanKind.CLIENT,
-          attributes: {
-            'tool.id': toolId,
-            'tool.timeout': toolTimeout,
-            'tool.retry.maxRetries': retryPolicy.maxRetries,
-          },
-        });
+        const self = this;
 
-        const previousActiveSpan = this.tracer?.getActiveSpan();
-        if (toolSpan) {
-          this.tracer?.setActiveSpan(toolSpan);
-        }
+        // Check for requireApproval gate BEFORE starting execution
+        if (self.toolGateService && runtimeOptions?.policyContext) {
+          const checkApproval = Effect.gen(function* () {
+            const gateContext: ToolGateContext = {
+              intentId: runtimeOptions.policyContext?.intentId,
+              agentId: runtimeOptions.policyContext?.agentId ?? config.id,
+              userId: runtimeOptions.policyContext?.userId,
+              role: runtimeOptions.policyContext?.role,
+              metadata: runtimeOptions.policyContext?.metadata,
+            };
 
-        if (allowedToolIds && !allowedToolIds.has(toolId)) {
-          const deniedError = new Error(`Tool "${toolId}" denied by policy`);
-          deniedError.name = 'ToolPolicyDeniedError';
-          return Effect.fail(deniedError);
-        }
+            const decision = yield* self.toolGateService!.evaluateToolById(toolId, gateContext);
 
-        // Annotate tool span with Fred identifiers (best effort)
-        const toolAnnotation = annotateSpan({
-          toolId,
-          agentId: config.id,
-        });
-        Effect.runPromise(toolAnnotation).catch(() => {});
+            // If tool requires approval, check for existing approval
+            if (decision.requireApproval) {
+              const sessionKey = (gateContext.metadata?.conversationId as string | undefined) ?? gateContext.userId ?? 'default';
+              const hasApproval = yield* self.toolGateService!.hasApproval(toolId, sessionKey);
 
-        const toolDefinition = toolDefinitions.get(toolId);
-        const executor = execute ?? toolDefinition?.execute;
-        // Cast toolDefinition to satisfy wrapToolExecution type requirements
-        const validatedExecute = toolDefinition && executor
-          ? wrapToolExecution(toolDefinition as any, executor)
-          : executor;
+              if (!hasApproval) {
+                // Generate approval request and return pause signal
+                const approvalRequest = yield* self.toolGateService!.createApprovalRequest(decision, gateContext);
 
-        // Execute tool with timeout
-        const executeWithTimeout = async (): Promise<any> => {
-          let timeoutId: ReturnType<typeof setTimeout> | undefined;
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-              const timeoutError = new Error(`Tool "${toolId}" execution timed out after ${toolTimeout}ms`);
-              timeoutError.name = 'ToolTimeoutError';
-              reject(timeoutError);
-            }, toolTimeout);
+                if (approvalRequest) {
+                  // Return PauseSignal to trigger HITL checkpoint
+                  return {
+                    __pause: true,
+                    prompt: `Tool '${toolId}' requires approval. Intent: ${gateContext.intentId ?? 'N/A'}, Agent: ${gateContext.agentId ?? 'N/A'}.`,
+                    metadata: {
+                      toolId,
+                      intentId: gateContext.intentId,
+                      agentId: gateContext.agentId,
+                      approvalRequest: true,
+                    },
+                    ttlMs: approvalRequest.ttlMs ?? 300000,
+                  };
+                }
+              }
+            }
+
+            // No pause needed - return null to continue
+            return null;
           });
 
-          try {
-            const result = await Promise.race([
-              Promise.resolve(validatedExecute ? validatedExecute(input as Record<string, any>) : undefined),
-              timeoutPromise,
-            ]);
-            return result;
-          } finally {
-            if (timeoutId) {
-              clearTimeout(timeoutId);
-            }
+          // Run approval check first
+          const approvalCheckEffect = checkApproval.pipe(
+            Effect.flatMap((pauseSignal) => {
+              if (pauseSignal) {
+                // Return pause signal immediately
+                return Effect.succeed(pauseSignal);
+              }
+              // Continue with normal tool execution
+              return executeToolLogic();
+            })
+          );
+
+          return approvalCheckEffect;
+        }
+
+        // No approval check needed, execute directly
+        return executeToolLogic();
+
+        function executeToolLogic() {
+          const startTime = Date.now();
+          const toolSpan = self.tracer?.startSpan('tool.execute', {
+            kind: SpanKind.CLIENT,
+            attributes: {
+              'tool.id': toolId,
+              'tool.timeout': toolTimeout,
+              'tool.retry.maxRetries': retryPolicy.maxRetries,
+            },
+          });
+
+          const previousActiveSpan = self.tracer?.getActiveSpan();
+          if (toolSpan) {
+            self.tracer?.setActiveSpan(toolSpan);
           }
-        };
 
-        // Execute with retry logic for retryable errors only
-        const executeWithRetry = async (): Promise<any> => {
-          let lastError: Error | undefined;
-          let attempt = 0;
+          if (allowedToolIds && !allowedToolIds.has(toolId)) {
+            const deniedError = new Error(`Tool "${toolId}" denied by policy`);
+            deniedError.name = 'ToolPolicyDeniedError';
+            return Effect.fail(deniedError);
+          }
 
-          while (attempt <= retryPolicy.maxRetries) {
+          // Annotate tool span with Fred identifiers (best effort)
+          const toolAnnotation = annotateSpan({
+            toolId,
+            agentId: config.id,
+          });
+          Effect.runPromise(toolAnnotation).catch(() => {});
+
+          const toolDefinition = toolDefinitions.get(toolId);
+          const executor = execute ?? toolDefinition?.execute;
+          // Cast toolDefinition to satisfy wrapToolExecution type requirements
+          const validatedExecute = toolDefinition && executor
+            ? wrapToolExecution(toolDefinition as any, executor)
+            : executor;
+
+          // Execute tool with timeout
+          const executeWithTimeout = async (): Promise<any> => {
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => {
+                const timeoutError = new Error(`Tool "${toolId}" execution timed out after ${toolTimeout}ms`);
+                timeoutError.name = 'ToolTimeoutError';
+                reject(timeoutError);
+              }, toolTimeout);
+            });
+
             try {
-              const result = await executeWithTimeout();
-              // On successful retry, annotate the span
-              if (attempt > 0 && toolSpan) {
-                toolSpan.addEvent('retry.success', {
-                  'retry.attempt': attempt,
-                  'retry.totalAttempts': attempt + 1,
-                });
-              }
+              const result = await Promise.race([
+                Promise.resolve(validatedExecute ? validatedExecute(input as Record<string, any>) : undefined),
+                timeoutPromise,
+              ]);
               return result;
-            } catch (error) {
-              const err = error instanceof Error ? error : new Error(String(error));
-              lastError = err;
-
-              // Classify error to determine if retryable
-              const errorClass = classifyError(err);
-              const isRetryable = errorClass === ErrorClass.RETRYABLE;
-
-              // Annotate retry attempt on span
-              if (toolSpan) {
-                toolSpan.addEvent('retry.attempt', {
-                  'retry.attempt': attempt,
-                  'retry.errorClass': errorClass,
-                  'retry.isRetryable': isRetryable,
-                  'retry.errorMessage': err.message,
-                });
+            } finally {
+              if (timeoutId) {
+                clearTimeout(timeoutId);
               }
+            }
+          };
 
-              // Only retry if error is retryable and we haven't exhausted attempts
-              if (!isRetryable || attempt >= retryPolicy.maxRetries) {
-                if (toolSpan) {
-                  toolSpan.setAttribute('tool.retry.totalAttempts', attempt + 1);
-                  toolSpan.setAttribute('tool.retry.exhausted', attempt >= retryPolicy.maxRetries);
-                  toolSpan.addEvent('retry.error', {
-                    'retry.finalAttempt': attempt,
-                    'retry.exhausted': attempt >= retryPolicy.maxRetries,
-                    'retry.errorClass': errorClass,
+          // Execute with retry logic for retryable errors only
+          const executeWithRetry = async (): Promise<any> => {
+            let lastError: Error | undefined;
+            let attempt = 0;
+
+            while (attempt <= retryPolicy.maxRetries) {
+              try {
+                const result = await executeWithTimeout();
+                // On successful retry, annotate the span
+                if (attempt > 0 && toolSpan) {
+                  toolSpan.addEvent('retry.success', {
+                    'retry.attempt': attempt,
+                    'retry.totalAttempts': attempt + 1,
                   });
                 }
-                throw err;
+                return result;
+              } catch (error) {
+                const err = error instanceof Error ? error : new Error(String(error));
+                lastError = err;
+
+                // Classify error to determine if retryable
+                const errorClass = classifyError(err);
+                const isRetryable = errorClass === ErrorClass.RETRYABLE;
+
+                // Annotate retry attempt on span
+                if (toolSpan) {
+                  toolSpan.addEvent('retry.attempt', {
+                    'retry.attempt': attempt,
+                    'retry.errorClass': errorClass,
+                    'retry.isRetryable': isRetryable,
+                    'retry.errorMessage': err.message,
+                  });
+                }
+
+                // Only retry if error is retryable and we haven't exhausted attempts
+                if (!isRetryable || attempt >= retryPolicy.maxRetries) {
+                  if (toolSpan) {
+                    toolSpan.setAttribute('tool.retry.totalAttempts', attempt + 1);
+                    toolSpan.setAttribute('tool.retry.exhausted', attempt >= retryPolicy.maxRetries);
+                    toolSpan.addEvent('retry.error', {
+                      'retry.finalAttempt': attempt,
+                      'retry.exhausted': attempt >= retryPolicy.maxRetries,
+                      'retry.errorClass': errorClass,
+                    });
+                  }
+                  throw err;
+                }
+
+                // Wait before retrying
+                const backoffMs = computeBackoff(attempt);
+                if (toolSpan) {
+                  toolSpan.addEvent('retry.backoff', {
+                    'retry.attempt': attempt,
+                    'retry.backoffMs': backoffMs,
+                  });
+                }
+                await sleep(backoffMs);
+                attempt++;
               }
-
-              // Wait before retrying
-              const backoffMs = computeBackoff(attempt);
-              if (toolSpan) {
-                toolSpan.addEvent('retry.backoff', {
-                  'retry.attempt': attempt,
-                  'retry.backoffMs': backoffMs,
-                });
-              }
-              await sleep(backoffMs);
-              attempt++;
-            }
-          }
-
-          // Should never reach here, but throw last error just in case
-          throw lastError ?? new Error(`Tool "${toolId}" failed after ${retryPolicy.maxRetries} retries`);
-        };
-
-        return Effect.tryPromise({
-          try: executeWithRetry,
-          catch: (error) => {
-            const executionTime = Date.now() - startTime;
-            const err = error instanceof Error ? error : new Error(String(error));
-
-            if (toolSpan) {
-              toolSpan.setAttribute('tool.executionTime', executionTime);
-              // Use error taxonomy for span status/classification
-              attachErrorToSpan(toolSpan, err, {
-                includeStack: false,
-              });
             }
 
-            if (err.name === 'ToolTimeoutError') {
-              return new Error(`Tool "${toolId}" execution timed out. Please try again or use a different approach.`);
-            }
+            // Should never reach here, but throw last error just in case
+            throw lastError ?? new Error(`Tool "${toolId}" failed after ${retryPolicy.maxRetries} retries`);
+          };
 
-            return new Error(getSafeToolErrorMessage(toolId, error));
-          },
-        }).pipe(
-          Effect.tap((result) =>
-            Effect.sync(() => {
+          return Effect.tryPromise({
+            try: executeWithRetry,
+            catch: (error) => {
               const executionTime = Date.now() - startTime;
+              const err = error instanceof Error ? error : new Error(String(error));
+
               if (toolSpan) {
-                toolSpan.setAttributes({
-                  'tool.executionTime': executionTime,
-                  'tool.result.hasValue': result !== undefined && result !== null,
+                toolSpan.setAttribute('tool.executionTime', executionTime);
+                // Use error taxonomy for span status/classification
+                attachErrorToSpan(toolSpan, err, {
+                  includeStack: false,
                 });
-                toolSpan.setStatus('ok');
               }
-            })
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              if (toolSpan) {
-                toolSpan.end();
+
+              if (err.name === 'ToolTimeoutError') {
+                return new Error(`Tool "${toolId}" execution timed out. Please try again or use a different approach.`);
               }
-              if (previousActiveSpan) {
-                this.tracer?.setActiveSpan(previousActiveSpan);
-              } else {
-                this.tracer?.setActiveSpan(undefined);
-              }
-            })
-          )
-        );
+
+              return new Error(getSafeToolErrorMessage(toolId, error));
+            },
+          }).pipe(
+            Effect.tap((result) =>
+              Effect.sync(() => {
+                const executionTime = Date.now() - startTime;
+                if (toolSpan) {
+                  toolSpan.setAttributes({
+                    'tool.executionTime': executionTime,
+                    'tool.result.hasValue': result !== undefined && result !== null,
+                  });
+                  toolSpan.setStatus('ok');
+                }
+              })
+            ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (toolSpan) {
+                  toolSpan.end();
+                }
+                if (previousActiveSpan) {
+                  self.tracer?.setActiveSpan(previousActiveSpan);
+                } else {
+                  self.tracer?.setActiveSpan(undefined);
+                }
+              })
+            )
+          );
+        }
       };
     };
 
@@ -708,7 +774,7 @@ export class AgentFactory {
         const runtimeToolHandlers = Object.fromEntries(
           allowedEffectTools.map((tool) => [
             tool.name,
-            buildToolHandler(tool.name, toolExecutors.get(tool.name), allowedToolIds),
+            buildToolHandler(tool.name, toolExecutors.get(tool.name), allowedToolIds, runtimeOptions),
           ])
         );
         const runtimeToolLayer = runtimeToolkit ? runtimeToolkit.toLayer(runtimeToolHandlers as any) : Layer.empty;
