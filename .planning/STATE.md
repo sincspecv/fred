@@ -13,17 +13,17 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 ## Current Position
 
 **Phase:** 24 — Tool Access Control
-**Plan:** 5 of 5 plans complete
+**Plan:** 6 of 6 plans complete
 **Status:** Phase complete
-**Last activity:** 2026-02-07 — Completed 24-05-PLAN.md (audit hook events)
+**Last activity:** 2026-02-07 — Completed 24-06-PLAN.md (HITL approval workflow)
 
-**Progress:** ████████████ 97% (110/113 plans complete)
+**Progress:** ████████████ 98% (111/113 plans complete)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
 | 22 | Observability Foundation | 8 | 8/8 | ✅ Complete |
 | 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
-| 24 | Tool Access Control | 8 | 5/5 | ✅ Complete |
+| 24 | Tool Access Control | 8 | 6/6 | ✅ Complete |
 | 25 | MCP Integration | 10 | — | ⚪ Not started |
 | 26 | Routing Explainability | 3 | — | ⚪ Not started |
 
@@ -142,6 +142,10 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Audit events emitted via hooks after policy decisions (not inline) for decoupled observability (Phase 24-05)
 - Tool arguments hashed by default using ObservabilityService.hashPayload to prevent sensitive data leakage (Phase 24-05)
 - Hook emission failures caught with Effect.catchAll to ensure gate decisions never fail due to audit issues (Phase 24-05)
+- Approval is session-scoped (conversationId → userId → 'default') with no cross-conversation leakage (Phase 24-06)
+- HITL trigger ONLY from explicit requireApproval policy flag, NOT automatic from capability tags (Phase 24-06)
+- Deny-on-timeout with 5 minute default TTL for security-first approval requests (Phase 24-06)
+- Approval/denial outcomes emit audit events via afterPolicyDecision hooks (Phase 24-06)
 
 ### Blockers/Concerns
 
@@ -151,7 +155,7 @@ None.
 
 ## Phase 24: Tool Access Control — COMPLETE
 
-**Status:** ✅ Complete (5/5 plans executed)
+**Status:** ✅ Complete (6/6 plans executed)
 **Completed:** 2026-02-07
 
 **What was built:**
@@ -160,19 +164,22 @@ None.
 - ToolGateService with deny precedence evaluation and Ref-backed policy updates (24-03)
 - Runtime tool gating in AgentFactory with policy context propagation and POLICY_DENIED records (24-04)
 - Policy audit hook events (afterPolicyDecision) with hashed arguments and observability integration (24-05)
+- HITL approval workflow with session-scoped tracking and deny-on-timeout pause signals (24-06)
 
 **Key achievements:**
 - Tool policies are declarative, deterministic, and hot-reloadable without stale decision caches
 - Tool arguments never appear in raw form in audit logs (hashed via ObservabilityService)
 - Gate decisions never fail due to audit emission (Effect.catchAll for fault tolerance)
 - Backward compatible (works without HookManagerService/ObservabilityService)
+- Session-scoped approval tracking prevents cross-conversation approval leakage
+- requireApproval tools trigger HITL pause with security-first deny-on-timeout (5min TTL)
 
 ---
 
 ## Session Continuity
 
-Last session: 2026-02-07T01:23:41Z
-Stopped at: Completed 24-05-PLAN.md
+Last session: 2026-02-07T01:35:45Z
+Stopped at: Completed 24-06-PLAN.md (Phase 24 complete - 6/6 plans)
 Resume file: None
 
 ---
@@ -204,4 +211,4 @@ Resume file: None
 
 *State file tracks current milestone progress*
 *Archives in .planning/milestones/ contain historical data*
-*Last updated: 2026-02-07 — Phase 24 complete (5/5 plans)*
+*Last updated: 2026-02-07 — Phase 24 complete (6/6 plans)*
