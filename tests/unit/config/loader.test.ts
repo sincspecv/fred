@@ -1,5 +1,12 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { validateConfig, extractIntents, extractAgents, extractTools, extractPipelines } from '../../../packages/core/src/config/loader';
+import {
+  validateConfig,
+  extractIntents,
+  extractAgents,
+  extractTools,
+  extractPipelines,
+  extractToolPolicies,
+} from '../../../packages/core/src/config/loader';
 import { FrameworkConfig } from '../../../packages/core/src/config/types';
 
 describe('Config Loader', () => {
@@ -515,6 +522,184 @@ describe('Config Loader', () => {
         expect(() => validateConfig(config)).not.toThrow();
       });
     });
+
+    describe('tool policy validation', () => {
+      const basePolicyConfig: FrameworkConfig = {
+        intents: [
+          {
+            id: 'billing-intent',
+            utterances: ['show my invoices'],
+            action: { type: 'agent', target: 'billing-agent' },
+          },
+        ],
+        agents: [
+          {
+            id: 'billing-agent',
+            systemMessage: 'Billing assistant',
+            platform: 'openai',
+            model: 'gpt-4o-mini',
+          },
+        ],
+        tools: [
+          {
+            id: 'list-invoices',
+            name: 'List Invoices',
+            description: 'Returns account invoices',
+          },
+          {
+            id: 'issue-refund',
+            name: 'Issue Refund',
+            description: 'Creates a refund',
+          },
+        ],
+      };
+
+      test('should validate layered policies across default intent and agent scopes', () => {
+        const config: FrameworkConfig = {
+          ...basePolicyConfig,
+          policies: {
+            default: {
+              allow: ['list-invoices'],
+              deny: ['issue-refund'],
+              conflictResolution: 'deny-overrides',
+            },
+            intents: {
+              'billing-intent': {
+                requireApproval: ['issue-refund'],
+                conditions: {
+                  role: ['admin'],
+                  metadata: {
+                    tenantTier: { in: ['pro', 'enterprise'] },
+                  },
+                },
+              },
+            },
+            agents: {
+              'billing-agent': {
+                allow: ['list-invoices', 'issue-refund'],
+              },
+            },
+            overrides: [
+              {
+                id: 'billing-intent-hard-lock',
+                override: true,
+                target: {
+                  intentId: 'billing-intent',
+                },
+                deny: ['issue-refund'],
+              },
+            ],
+          },
+        };
+
+        expect(() => validateConfig(config)).not.toThrow();
+      });
+
+      test('should fail when policy references unknown tools intents or agents', () => {
+        const unknownTool: FrameworkConfig = {
+          ...basePolicyConfig,
+          policies: {
+            default: {
+              allow: ['missing-tool'],
+            },
+          },
+        };
+
+        expect(() => validateConfig(unknownTool)).toThrow('Default tool policy allow references unknown tool "missing-tool"');
+
+        const unknownIntent: FrameworkConfig = {
+          ...basePolicyConfig,
+          policies: {
+            intents: {
+              'missing-intent': {
+                allow: ['list-invoices'],
+              },
+            },
+          },
+        };
+
+        expect(() => validateConfig(unknownIntent)).toThrow('Tool policy references unknown intent "missing-intent"');
+
+        const unknownAgent: FrameworkConfig = {
+          ...basePolicyConfig,
+          policies: {
+            overrides: [
+              {
+                id: 'missing-agent-override',
+                override: true,
+                target: {
+                  agentId: 'missing-agent',
+                },
+                allow: ['list-invoices'],
+              },
+            ],
+          },
+        };
+
+        expect(() => validateConfig(unknownAgent)).toThrow(
+          'Tool policy override "missing-agent-override" references unknown agent "missing-agent"'
+        );
+      });
+
+      test('should reject conflicting deny precedence declarations', () => {
+        const config: FrameworkConfig = {
+          ...basePolicyConfig,
+          policies: {
+            default: {
+              allow: ['issue-refund'],
+              deny: ['issue-refund'],
+              conflictResolution: 'deny-overrides',
+            },
+          },
+        };
+
+        expect(() => validateConfig(config)).toThrow(
+          'Default tool policy has conflicting allow/deny declarations for tool(s): "issue-refund"'
+        );
+      });
+
+      test('should reject malformed override blocks', () => {
+        const missingTarget: FrameworkConfig = {
+          ...basePolicyConfig,
+          policies: {
+            overrides: [
+              {
+                id: 'missing-target',
+                override: true,
+                target: {},
+                allow: ['list-invoices'],
+              },
+            ],
+          },
+        };
+
+        expect(() => validateConfig(missingTarget)).toThrow(
+          'Tool policy override "missing-target" must declare a target scope (intentId and/or agentId)'
+        );
+
+        const duplicateOverrideIds: FrameworkConfig = {
+          ...basePolicyConfig,
+          policies: {
+            overrides: [
+              {
+                id: 'duplicate-id',
+                override: true,
+                target: { intentId: 'billing-intent' },
+                allow: ['list-invoices'],
+              },
+              {
+                id: 'duplicate-id',
+                override: true,
+                target: { agentId: 'billing-agent' },
+                deny: ['issue-refund'],
+              },
+            ],
+          },
+        };
+
+        expect(() => validateConfig(duplicateOverrideIds)).toThrow('Duplicate tool policy override id "duplicate-id"');
+      });
+    });
   });
 
   describe('extractIntents', () => {
@@ -631,6 +816,55 @@ describe('Config Loader', () => {
       const config: FrameworkConfig = {};
       const tools = extractTools(config);
       expect(tools).toEqual([]);
+    });
+  });
+
+  describe('extractToolPolicies', () => {
+    test('should extract policy declarations for runtime use', () => {
+      const config: FrameworkConfig = {
+        intents: [
+          {
+            id: 'support-intent',
+            utterances: ['help me'],
+            action: { type: 'agent', target: 'support-agent' },
+          },
+        ],
+        agents: [
+          {
+            id: 'support-agent',
+            systemMessage: 'Support helper',
+            platform: 'openai',
+            model: 'gpt-4o-mini',
+          },
+        ],
+        tools: [
+          {
+            id: 'lookup-ticket',
+            name: 'Lookup Ticket',
+            description: 'Finds ticket information',
+          },
+        ],
+        policies: {
+          default: {
+            allow: ['lookup-ticket'],
+          },
+          overrides: [
+            {
+              id: 'support-intent-override',
+              override: true,
+              target: { intentId: 'support-intent' },
+              requireApproval: ['lookup-ticket'],
+            },
+          ],
+        },
+      };
+
+      validateConfig(config);
+      const extracted = extractToolPolicies(config);
+
+      expect(extracted?.default?.allow).toEqual(['lookup-ticket']);
+      expect(extracted?.overrides?.[0].id).toBe('support-intent-override');
+      expect(extracted).not.toBe(config.policies);
     });
   });
 
