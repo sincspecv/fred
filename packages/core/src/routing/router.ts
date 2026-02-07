@@ -17,6 +17,9 @@ import {
   RouteMatch,
   RoutingDecision,
   MatchType,
+  RoutingAlternative,
+  CalibrationMetadata,
+  RoutingExplanation,
 } from './types';
 import { AgentManager } from '../agent/manager';
 import { HookManager } from '../hooks/manager';
@@ -24,6 +27,9 @@ import { Effect } from 'effect';
 import { RoutingMatcherError, NoAgentsAvailableError } from './errors';
 import { getCurrentCorrelationContext, getCorrelationContext } from '../observability/context';
 import type { HookEvent } from '../hooks/types';
+import { generateRoutingExplanation } from './explainer';
+import type { AdaptiveCalibrationCoordinator } from './calibration/adaptive';
+import type { HistoricalAccuracyTracker } from './calibration/history';
 
 /**
  * Specificity base scores by match type.
@@ -44,15 +50,21 @@ export class MessageRouter {
   private readonly config: RoutingConfig;
   private readonly agentManager: AgentManager;
   private readonly hookManager?: HookManager;
+  private readonly calibrationCoordinator?: AdaptiveCalibrationCoordinator;
+  private readonly historyTracker?: HistoricalAccuracyTracker;
 
   constructor(
     agentManager: AgentManager,
     hookManager: HookManager | undefined,
-    config: RoutingConfig
+    config: RoutingConfig,
+    calibrationCoordinator?: AdaptiveCalibrationCoordinator,
+    historyTracker?: HistoricalAccuracyTracker
   ) {
     this.agentManager = agentManager;
     this.hookManager = hookManager;
     this.config = config;
+    this.calibrationCoordinator = calibrationCoordinator;
+    this.historyTracker = historyTracker;
   }
 
   /**
@@ -91,22 +103,99 @@ export class MessageRouter {
         }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       }
 
-      const match = yield* self.findBestMatch(message, metadata);
+      const { best: match, allMatches } = yield* self.findBestMatch(message, metadata);
       let decision: RoutingDecision;
 
       if (match) {
+        // Build routing alternatives from all matches
+        const alternatives: RoutingAlternative[] = allMatches.map((m) => ({
+          targetId: m.rule.agent,
+          targetName: m.rule.agent,
+          confidence: m.confidence,
+          matchType: m.matchType,
+        }));
+
+        // Calibrate winner confidence if coordinator is available
+        let calibratedConfidence = match.confidence;
+        let calibrationMetadata: CalibrationMetadata = {
+          rawScore: match.confidence,
+          calibratedScore: match.confidence,
+          calibrated: false,
+        };
+
+        if (self.calibrationCoordinator) {
+          calibratedConfidence = yield* self.calibrationCoordinator.calibrate(
+            match.confidence,
+            'rule'
+          );
+
+          // Get historical accuracy if tracker is available
+          let historicalAccuracy: number | undefined;
+          let observationCount = 0;
+          if (self.historyTracker) {
+            historicalAccuracy = yield* self.historyTracker.getAccuracy(match.rule.agent);
+            observationCount = yield* self.historyTracker.getObservationCount(match.rule.agent);
+          }
+
+          calibrationMetadata = {
+            rawScore: match.confidence,
+            calibratedScore: calibratedConfidence,
+            historicalAccuracy,
+            calibrated: observationCount >= 100,
+            observationCount,
+          };
+        }
+
+        // Generate explanation
+        const winner: RoutingAlternative = {
+          targetId: match.rule.agent,
+          targetName: match.rule.agent,
+          confidence: calibratedConfidence,
+          matchType: match.matchType,
+        };
+
+        const explanation = generateRoutingExplanation(
+          winner,
+          alternatives,
+          calibrationMetadata,
+          match.matchType
+        );
+
         decision = {
           agent: match.rule.agent,
           rule: match.rule,
           matchType: match.matchType,
           fallback: false,
           specificity: match.specificity,
+          explanation,
         };
       } else {
         const fallbackAgent = yield* self.getFallbackAgentEffect();
+
+        // Generate fallback explanation
+        const winner: RoutingAlternative = {
+          targetId: fallbackAgent,
+          targetName: fallbackAgent,
+          confidence: 0.5,
+        };
+
+        const calibrationMetadata: CalibrationMetadata = {
+          rawScore: 0.5,
+          calibratedScore: 0.5,
+          calibrated: false,
+        };
+
+        const explanation = generateRoutingExplanation(
+          winner,
+          [],
+          calibrationMetadata,
+          'metadata-only'
+        );
+
         decision = {
           agent: fallbackAgent,
           fallback: true,
+          explanation,
         };
       }
 
@@ -171,22 +260,99 @@ export class MessageRouter {
   ): Effect.Effect<RoutingDecision, NoAgentsAvailableError> {
     const self = this;
     return Effect.gen(function* () {
-      const match = yield* self.findBestMatch(message, metadata);
+      const { best: match, allMatches } = yield* self.findBestMatch(message, metadata);
 
       if (match) {
+        // Build routing alternatives from all matches
+        const alternatives: RoutingAlternative[] = allMatches.map((m) => ({
+          targetId: m.rule.agent,
+          targetName: m.rule.agent,
+          confidence: m.confidence,
+          matchType: m.matchType,
+        }));
+
+        // Calibrate winner confidence if coordinator is available
+        let calibratedConfidence = match.confidence;
+        let calibrationMetadata: CalibrationMetadata = {
+          rawScore: match.confidence,
+          calibratedScore: match.confidence,
+          calibrated: false,
+        };
+
+        if (self.calibrationCoordinator) {
+          calibratedConfidence = yield* self.calibrationCoordinator.calibrate(
+            match.confidence,
+            'rule'
+          );
+
+          // Get historical accuracy if tracker is available
+          let historicalAccuracy: number | undefined;
+          let observationCount = 0;
+          if (self.historyTracker) {
+            historicalAccuracy = yield* self.historyTracker.getAccuracy(match.rule.agent);
+            observationCount = yield* self.historyTracker.getObservationCount(match.rule.agent);
+          }
+
+          calibrationMetadata = {
+            rawScore: match.confidence,
+            calibratedScore: calibratedConfidence,
+            historicalAccuracy,
+            calibrated: observationCount >= 100,
+            observationCount,
+          };
+        }
+
+        // Generate explanation
+        const winner: RoutingAlternative = {
+          targetId: match.rule.agent,
+          targetName: match.rule.agent,
+          confidence: calibratedConfidence,
+          matchType: match.matchType,
+        };
+
+        const explanation = generateRoutingExplanation(
+          winner,
+          alternatives,
+          calibrationMetadata,
+          match.matchType
+        );
+
         return {
           agent: match.rule.agent,
           rule: match.rule,
           matchType: match.matchType,
           fallback: false,
           specificity: match.specificity,
+          explanation,
         };
       }
 
       const fallbackAgent = yield* self.getFallbackAgentSilentEffect();
+
+      // Generate fallback explanation
+      const winner: RoutingAlternative = {
+        targetId: fallbackAgent,
+        targetName: fallbackAgent,
+        confidence: 0.5,
+      };
+
+      const calibrationMetadata: CalibrationMetadata = {
+        rawScore: 0.5,
+        calibratedScore: 0.5,
+        calibrated: false,
+      };
+
+      const explanation = generateRoutingExplanation(
+        winner,
+        [],
+        calibrationMetadata,
+        'metadata-only'
+      );
+
       return {
         agent: fallbackAgent,
         fallback: true,
+        explanation,
       };
     });
   }
@@ -323,12 +489,12 @@ export class MessageRouter {
    *
    * @param message - The message to match
    * @param metadata - Message metadata for filtering
-   * @returns Best match or null if no rules match
+   * @returns Best match and all matches for explanation generation
    */
   findBestMatch(
     message: string,
     metadata: Record<string, unknown>
-  ): Effect.Effect<RouteMatch | null> {
+  ): Effect.Effect<{ best: RouteMatch | null; allMatches: RouteMatch[] }> {
     const self = this;
     return Effect.gen(function* () {
       const matches: RouteMatch[] = [];
@@ -346,13 +512,13 @@ export class MessageRouter {
       }
 
       if (matches.length === 0) {
-        return null;
+        return { best: null, allMatches: [] };
       }
 
       // Sort by specificity descending
       matches.sort((a, b) => b.specificity - a.specificity);
 
-      return matches[0];
+      return { best: matches[0], allMatches: matches };
     });
   }
 
