@@ -13,11 +13,11 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 ## Current Position
 
 **Phase:** 26 — Routing Explainability
-**Plan:** 2 of 3 plans complete
-**Status:** In progress
-**Last activity:** 2026-02-07 — Completed 26-02-PLAN.md (Router + intent matcher integration)
+**Plan:** 3 of 3 plans complete
+**Status:** ✅ Phase complete
+**Last activity:** 2026-02-07 — Completed 26-03-PLAN.md (Hook emission + public API)
 
-**Progress:** ████████████░ 101.7% (117/115 plans complete)
+**Progress:** ████████████ 102.6% (118/115 plans complete)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
@@ -25,20 +25,20 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 | 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
 | 24 | Tool Access Control | 8 | 6/6 | ✅ Complete |
 | 25 | MCP Integration | 10 | 6/6 | ✅ Complete |
-| 26 | Routing Explainability | 3 | 2/3 | 🔄 In progress |
+| 26 | Routing Explainability | 3 | 3/3 | ✅ Complete |
 
 ---
 
 ## Milestone History
 
-**v0.3.0 — IN PROGRESS**
+**v0.3.0 — COMPLETE**
 - Target: 5 phases (22-26)
 - 35 requirements mapped
 - Phase 22: ✅ Complete (2026-02-06)
 - Phase 23: ✅ Complete (2026-02-06)
 - Phase 24: ✅ Complete (2026-02-07)
 - Phase 25: ✅ Complete (2026-02-07)
-- Next: Phase 26 Plan 02 (Router Integration)
+- Phase 26: ✅ Complete (2026-02-07)
 
 **v0.3.1 — PLANNED**
 - CLI/TUI developer experience
@@ -76,8 +76,9 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Average: 3.9 min/plan
 
 **v0.3.0 Velocity:**
-- Total plans completed: 5 (Phase 22)
-- Timeline: Feb 6, 2026
+- Total plans completed: 32 (Phases 22-26)
+- Timeline: Feb 6-7, 2026 (2 days)
+- Average: 4.2 min/plan
 - Average: ~4.5 min/plan
 
 ---
@@ -162,6 +163,10 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - findBestMatch() returns { best, allMatches } to enable explanation generation (Phase 26-02)
 - Match type priority preserved in IntentMatcher: exact > regex > semantic (Phase 26-02)
 - Generate explanations even without calibration (use raw scores, set calibrated=false) (Phase 26-02)
+- afterRoutingDecision hook emits only when concerns detected (concerns.length > 0 gates emission) (Phase 26-03)
+- HITL clarification thresholds: confidence < 0.6 OR alternative gap < 0.1 (Phase 26-03)
+- Conversation boost clamped to [-0.15, +0.15] to prevent overwhelming raw scores (Phase 26-03)
+- Use filtered alternatives from explanation for HITL check to avoid false positives (Phase 26-03)
 
 **Safety Decisions:**
 - Gate tools at discovery time (LLM never sees disallowed tools)
@@ -238,10 +243,10 @@ None.
 
 ---
 
-## Phase 26: Routing Explainability — IN PROGRESS
+## Phase 26: Routing Explainability — COMPLETE
 
-**Status:** 2/3 plans complete
-**Started:** 2026-02-07
+**Status:** ✅ Complete (3/3 plans executed)
+**Completed:** 2026-02-07
 
 **What was built (26-01)**:
 - RoutingExplanation, RoutingAlternative, CalibrationMetadata, RoutingConcern types
@@ -260,14 +265,28 @@ None.
 - Fallback decision explanation generation with 0.5 confidence
 - 12 new tests (6 router + 6 intent matcher) all passing
 
-**Key achievements**:
-- Every routing decision now produces complete explanation (winner, alternatives, confidence, narrative)
-- Calibration is optional - backward compatible with existing code
-- Multi-candidate collection across all matching rules/intents
-- Explanations generated even without calibration (uses raw scores)
-- Match type priority preserved in intent matching tier order
+**What was built (26-03)**:
+- afterRoutingDecision hook type (emits only when concerns.length > 0)
+- Conversation-aware confidence boost (+0.05 recurrence, -0.10 penalty, clamped [-0.15, +0.15])
+- HITL clarification PauseSignal (confidence < 0.6 OR gap < 0.1)
+- fred.routing.explain() API for dry-run routing explanation
+- AgentResponse.routingExplanation field populated with transparency metadata
+- All calibration, explainer, conversation modules exported from core
+- 25 new tests (7 hooks + 9 conversation + 9 explain API) all passing
 
-**Next**: 26-03 (Hook Emission)
+**Key achievements**:
+- Every routing decision produces complete explanation (winner, alternatives, confidence, narrative)
+- Conditional hook emission prevents spam (only fires on concerns)
+- Conversation history influences confidence (recurrence boost, correction penalty)
+- HITL clarification prompts on ambiguous routing
+- Public explain() API enables debugging without agent execution
+- Numeric confidence scores only (no qualitative labels HIGH/MEDIUM/LOW)
+- Backward compatible (calibration optional, explanation always present)
+
+**Requirements verification:**
+- ✅ ROUT-04: RoutingDecision.explanation complete (confidence numeric, alternatives sorted)
+- ✅ ROUT-05: afterRoutingDecision hook conditional on concerns
+- ✅ ROUT-06: fred.routing.explain() API functional
 
 ---
 
@@ -296,8 +315,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-07T05:57:04Z
-Stopped at: Completed 26-02-PLAN.md (Router + intent matcher explanation integration)
+Last session: 2026-02-07T06:06:40Z
+Stopped at: Completed 26-03-PLAN.md (Hook emission + public API) - Phase 26 complete
 Resume file: None
 
 ---
