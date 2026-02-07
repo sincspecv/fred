@@ -294,7 +294,7 @@ Plans:
 
 **Milestone:** v0.3.0
 **Goal:** Developers can discover and use tools from external MCP servers with automatic lifecycle management and safety policies applied.
-**Status:** ⚪ Not Started
+**Status:** ✅ Complete (verified 2026-02-07)
 
 **Requirements Covered:** INTG-01, INTG-02, INTG-03, INTG-04, INTG-05, INTG-06, INTG-07, INTG-08, INTG-09, INTG-10
 
@@ -364,15 +364,15 @@ Plans:
 - Configuration schema for YAML/JSON MCP server definitions
 - Integration with tool gating policies
 
-**Plans:** 6 plans
+**Plans:** 6 plans (6/6 complete)
 
 Plans:
-- [ ] 25-01-PLAN.md — MCP config schema, extraction, env var resolution, and validation
-- [ ] 25-02-PLAN.md — Global MCPServerRegistry with Effect lifecycle and namespaced adapter
-- [ ] 25-03-PLAN.md — Health checks, auto-restart with exponential backoff, lazy startup
-- [ ] 25-04-PLAN.md — MCPResourceService and namespaced tool discovery with error resilience
-- [ ] 25-05-PLAN.md — Agent config migration and AgentFactory refactor with ToolGate integration
-- [ ] 25-06-PLAN.md — Fred initialization wiring, public API exports, and integration tests
+- [x] 25-01-PLAN.md — MCP config schema, extraction, env var resolution, and validation
+- [x] 25-02-PLAN.md — Global MCPServerRegistry with Effect lifecycle and namespaced adapter
+- [x] 25-03-PLAN.md — Health checks, auto-restart with exponential backoff, lazy startup
+- [x] 25-04-PLAN.md — MCPResourceService and namespaced tool discovery with error resilience
+- [x] 25-05-PLAN.md — Agent config migration and AgentFactory refactor with ToolGate integration
+- [x] 25-06-PLAN.md — Fred initialization wiring, public API exports, and integration tests
 
 **Research Flags:**
 - MCP ecosystem is evolving rapidly; may need research on specific server behaviors
@@ -447,7 +447,7 @@ All phases benefit from the v0.2.0 foundation: intent routing, pipelines, persis
 | 22 - Observability Foundation | v0.3.0 | 8 (OBS-01→08) | 8 | ✅ Complete |
 | 23 - Evaluation Framework | v0.3.0 | 8 (EVAL-01→08) | 8 | ✅ Complete |
 | 24 - Tool Access Control | v0.3.0 | 8 (GATE-01→08) | 8 | ✅ Complete |
-| 25 - MCP Integration | v0.3.0 | 10 (INTG-01→10) | 10 | ⚪ Not Started |
+| 25 - MCP Integration | v0.3.0 | 10 (INTG-01→10) | 10 | ✅ Complete |
 | 26 - Routing Explainability | v0.3.0 | 3 (ROUT-04→06) | 3 | ⚪ Not Started |
 | **Total v0.3.0** | — | **35** | **35** | **In Progress** |
 
@@ -460,7 +460,7 @@ All phases benefit from the v0.2.0 foundation: intent routing, pipelines, persis
 | Observability | OBS-01 to OBS-08 | 22 | Complete |
 | Evaluation & Replay | EVAL-01 to EVAL-08 | 23 | Complete |
 | Tool Gating | GATE-01 to GATE-08 | 24 | Complete |
-| MCP Integration | INTG-01 to INTG-10 | 25 | Not Started |
+| MCP Integration | INTG-01 to INTG-10 | 25 | Complete |
 | Routing Explainability | ROUT-04 to ROUT-06 | 26 | Not Started |
 
 **Coverage: 35/35 v0.3.0 requirements mapped** ✓
@@ -526,5 +526,5 @@ Fred v0.3.0 is complete when:
 ---
 
 *Roadmap tracking begins at v0.2.0 milestone*
-*Last updated: 2026-02-07 — Phase 24 complete (6/6 plans, verified)*
-*Next: `/gsd:plan-phase 25` to plan MCP Integration*
+*Last updated: 2026-02-07 — Phase 25 complete (6/6 plans, verified)*
+*Next: `/gsd:plan-phase 26` to plan Routing Explainability*
