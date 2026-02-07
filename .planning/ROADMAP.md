@@ -133,7 +133,7 @@ Plans:
 
 **Milestone:** v0.3.0
 **Goal:** Developers can record, replay, and compare agent runs to detect regressions and validate behavior deterministically.
-**Status:** 🔵 In Progress (8/11 plans complete, 3 gap closure plans from UAT diagnosis)
+**Status:** ✅ Complete (11/11 plans complete, including 3 gap closure from UAT diagnosis)
 
 **Requirements Covered:** EVAL-01, EVAL-02, EVAL-03, EVAL-04, EVAL-05, EVAL-06, EVAL-07, EVAL-08
 
@@ -216,7 +216,7 @@ Plans:
 
 **Milestone:** v0.3.0
 **Goal:** Developers can define and enforce fine-grained tool access policies based on intent, user roles, and context with full audit trails.
-**Status:** ⚪ Not Started
+**Status:** 🟡 In Progress (4/6 plans complete, replanned)
 
 **Requirements Covered:** GATE-01, GATE-02, GATE-03, GATE-04, GATE-05, GATE-06, GATE-07, GATE-08
 
@@ -243,14 +243,14 @@ Plans:
    - Evaluation is deterministic and logged for audit
 
 4. **Sensitive tool calls trigger HITL pause** (GATE-04)
-   - Tools tagged `destructive` or `admin` trigger approval workflow
+   - Tools with explicit `requireApproval` policy flag trigger approval workflow
    - Pause includes context: which agent, which intent, what arguments
    - Human approver/denier identity is logged with decision
 
 5. **All policy decisions are logged via observability hooks** (GATE-05)
-   - Hook events include `policy.decision`, `policy.denied`, `policy.approved`
+   - Hook events include `afterPolicyDecision` with structured audit metadata
    - Logs include full context (user, intent, tool, rule that triggered)
-   - Audit trail is tamper-evident (immutable once written)
+   - Tool arguments hashed by default to prevent data leakage
 
 6. **Intent-aware policies apply different permissions** (GATE-06)
    - Same tool can have different policies per intent
@@ -269,10 +269,20 @@ Plans:
 
 **Deliverables:**
 - `ToolGateService` with access control logic
-- `IntentContextService` for context propagation
+- Policy context propagation through message processing
 - Data-driven policy DSL (YAML/JSON configurable)
 - Audit logging integration with observability hooks
 - HITL integration for approval workflows
+
+**Plans:** 6 plans
+
+Plans:
+- [x] 24-01-PLAN.md — Define policy DSL and config validation for default/intent/agent inheritance
+- [x] 24-02-PLAN.md — Add deterministic tool capability auto-tagging in registries
+- [x] 24-03-PLAN.md — Implement ToolGateService evaluator, layering, and hot-reload behavior
+- [x] 24-04-PLAN.md — Wire discovery-time gating + explicit runtime denial into agent execution paths
+- [ ] 24-05-PLAN.md — Emit audit hook events for all policy decisions with hashed payloads
+- [ ] 24-06-PLAN.md — Wire HITL approval workflow for requireApproval policies with session-scoped persistence
 
 **Research Flags:**
 - Start with simple allowlist/denylist; add context-aware rules based on real usage
@@ -426,7 +436,7 @@ All phases benefit from the v0.2.0 foundation: intent routing, pipelines, persis
 | 1-21.1 | v0.2.0 | 17 | 17 | ✅ Complete |
 | 22 - Observability Foundation | v0.3.0 | 8 (OBS-01→08) | 8 | ✅ Complete |
 | 23 - Evaluation Framework | v0.3.0 | 8 (EVAL-01→08) | 8 | ✅ Complete |
-| 24 - Tool Access Control | v0.3.0 | 8 (GATE-01→08) | 8 | ⚪ Not Started |
+| 24 - Tool Access Control | v0.3.0 | 8 (GATE-01→08) | 8 | 🟡 In Progress |
 | 25 - MCP Integration | v0.3.0 | 10 (INTG-01→10) | 10 | ⚪ Not Started |
 | 26 - Routing Explainability | v0.3.0 | 3 (ROUT-04→06) | 3 | ⚪ Not Started |
 | **Total v0.3.0** | — | **35** | **35** | **In Progress** |
@@ -439,7 +449,7 @@ All phases benefit from the v0.2.0 foundation: intent routing, pipelines, persis
 |----------|--------------|-------|--------|
 | Observability | OBS-01 to OBS-08 | 22 | Complete |
 | Evaluation & Replay | EVAL-01 to EVAL-08 | 23 | Complete |
-| Tool Gating | GATE-01 to GATE-08 | 24 | Not Started |
+| Tool Gating | GATE-01 to GATE-08 | 24 | In Progress |
 | MCP Integration | INTG-01 to INTG-10 | 25 | Not Started |
 | Routing Explainability | ROUT-04 to ROUT-06 | 26 | Not Started |
 
@@ -506,5 +516,5 @@ Fred v0.3.0 is complete when:
 ---
 
 *Roadmap tracking begins at v0.2.0 milestone*
-*Last updated: 2026-02-06 — Phase 23 gap closure plans added from diagnosed UAT*
-*Next: `/gsd/execute-phase 23 --gaps-only` to close diagnosed UAT gaps*
+*Last updated: 2026-02-06 — Phase 24 replanned with 6 plans (4 complete, 2 remaining)*
+*Next: `/gsd:execute-phase 24` to complete remaining plans*
