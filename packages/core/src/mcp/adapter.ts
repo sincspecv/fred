@@ -30,9 +30,20 @@ export function convertMCPToolToFredTool(
     description: mcpTool.description || '',
     schema,
     execute: async (args: Record<string, unknown>) => {
-      // Call MCP server's tools/call method
-      const result = await mcpClient.callTool(mcpTool.name, args as Record<string, any>);
-      return result;
+      try {
+        // Check if client is connected before calling
+        if (!mcpClient.isConnected()) {
+          return `Tool ${toolId} failed: server disconnected`;
+        }
+
+        // Call MCP server's tools/call method
+        const result = await mcpClient.callTool(mcpTool.name, args as Record<string, any>);
+        return result;
+      } catch (error) {
+        // Return error message instead of throwing
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return `Tool ${toolId} failed: ${errorMessage}`;
+      }
     },
   };
 }

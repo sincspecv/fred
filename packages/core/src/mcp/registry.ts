@@ -1,8 +1,10 @@
 import { Effect } from 'effect';
 import type { MCPClientImpl } from './client';
+import { MCPClientImpl as MCPClientImplClass } from './client';
 import type { MCPServerConfig } from './types';
 import { convertMCPToolsToFredTools } from './adapter';
 import type { Tool } from '../tool/tool';
+import { MCPHealthManager } from './health';
 
 /**
  * Server status states
@@ -26,10 +28,14 @@ interface ServerEntry {
  * - Client retrieval by server ID
  * - Namespaced tool discovery
  * - Status tracking
+ * - Lazy server startup
+ * - Health check management
  * - Graceful shutdown of all servers
  */
 export class MCPServerRegistry {
   private servers: Map<string, ServerEntry> = new Map();
+  private lazyConfigs: Map<string, MCPServerConfig> = new Map();
+  private healthManager: MCPHealthManager = new MCPHealthManager();
 
   /**
    * Register an MCP server with its client.
@@ -137,16 +143,29 @@ export class MCPServerRegistry {
   /**
    * Discover tools from all registered servers.
    *
+   * Skips disconnected or error servers with warning logs.
+   *
    * @returns Effect providing Map of server ID to tools array
    */
-  discoverAllTools(): Effect.Effect<Map<string, Tool[]>, Error> {
+  discoverAllTools(): Effect.Effect<Map<string, Tool[]>, never> {
     return Effect.gen(function* (this: MCPServerRegistry) {
       const serverIds = this.getRegisteredServers();
       const toolsMap = new Map<string, Tool[]>();
 
       for (const serverId of serverIds) {
-        const tools = yield* this.discoverTools(serverId);
-        toolsMap.set(serverId, tools);
+        // Use Effect.either to catch errors without failing the whole operation
+        const result = yield* Effect.either(this.discoverTools(serverId));
+
+        if (result._tag === 'Right') {
+          const tools = result.right;
+          toolsMap.set(serverId, tools);
+        } else {
+          // Log warning but continue with other servers
+          console.warn(
+            `Skipping server '${serverId}' in discoverAllTools:`,
+            result.left.message
+          );
+        }
       }
 
       return toolsMap;
@@ -179,23 +198,166 @@ export class MCPServerRegistry {
   }
 
   /**
+   * Register a lazy server (deferred connection).
+   *
+   * Server will not connect until first getClient/ensureConnected call.
+   *
+   * @param id - Unique server identifier
+   * @param config - Server configuration
+   */
+  registerLazyServer(id: string, config: MCPServerConfig): void {
+    this.lazyConfigs.set(id, config);
+  }
+
+  /**
+   * Ensure a lazy server is connected.
+   *
+   * If server is already connected, returns existing client.
+   * If server is lazy and not connected, connects it.
+   *
+   * @param serverId - Server identifier
+   * @returns Effect providing MCP client
+   * @throws Error if connection fails
+   */
+  ensureConnected(serverId: string): Effect.Effect<MCPClientImpl, Error> {
+    return Effect.gen(function* (this: MCPServerRegistry) {
+      // Check if already connected
+      const existingClient = this.getClient(serverId);
+      if (existingClient) {
+        return existingClient;
+      }
+
+      // Check if lazy config exists
+      const config = this.lazyConfigs.get(serverId);
+      if (!config) {
+        return yield* Effect.fail(
+          new Error(`Server '${serverId}' not found in lazy configs`)
+        );
+      }
+
+      // Create and initialize client
+      const client = new MCPClientImplClass(config);
+      yield* Effect.tryPromise({
+        try: () => client.initialize(),
+        catch: (error) => {
+          console.warn(
+            `Failed to connect lazy server '${serverId}':`,
+            error instanceof Error ? error.message : String(error)
+          );
+          return new Error(
+            `Failed to connect lazy server '${serverId}': ${error instanceof Error ? error.message : String(error)}`
+          );
+        },
+      });
+
+      // Register the connected client
+      yield* this.registerServer(serverId, config, client);
+
+      // Remove from lazy configs
+      this.lazyConfigs.delete(serverId);
+
+      return client;
+    }.bind(this));
+  }
+
+  /**
+   * Register and connect a server with graceful failure handling.
+   *
+   * On failure: logs warning, marks server as 'error', does not throw.
+   *
+   * @param id - Server identifier
+   * @param config - Server configuration
+   * @returns Effect that always succeeds (never throws)
+   */
+  registerAndConnect(
+    id: string,
+    config: MCPServerConfig
+  ): Effect.Effect<void, never> {
+    return Effect.gen(function* (this: MCPServerRegistry) {
+      try {
+        const client = new MCPClientImplClass(config);
+        yield* Effect.tryPromise({
+          try: () => client.initialize(),
+          catch: (error) => {
+            console.warn(
+              `MCP server '${id}' failed to initialize:`,
+              error instanceof Error ? error.message : String(error)
+            );
+            return new Error(
+              `MCP server '${id}' failed to initialize: ${error instanceof Error ? error.message : String(error)}`
+            );
+          },
+        });
+
+        // Register successfully initialized client
+        yield* this.registerServer(id, config, client);
+      } catch (error) {
+        // Graceful degradation - log warning but don't throw
+        console.warn(
+          `MCP server '${id}' initialization failed - continuing without this server:`,
+          error instanceof Error ? error.message : String(error)
+        );
+
+        // Mark as error in registry (without client)
+        this.servers.set(id, {
+          client: null as any, // Placeholder - won't be used since status is error
+          config,
+          status: 'error',
+        });
+      }
+    }.bind(this));
+  }
+
+  /**
+   * Start health checks for all registered servers.
+   *
+   * Uses healthCheckIntervalMs from config, or defaults:
+   * - 30000ms (30s) for stdio transport
+   * - 60000ms (60s) for http/sse transport
+   */
+  startHealthChecks(): void {
+    for (const [serverId, entry] of this.servers.entries()) {
+      if (entry.status === 'connected') {
+        // Determine interval from config or use defaults
+        const config = entry.config;
+        let intervalMs: number;
+
+        if (config.transport === 'stdio') {
+          intervalMs = 30000; // 30s for stdio
+        } else {
+          intervalMs = 60000; // 60s for http/sse
+        }
+
+        this.healthManager.startHealthCheck(this, serverId, intervalMs);
+      }
+    }
+  }
+
+  /**
    * Shutdown all servers and clear registry.
    *
-   * Closes all client connections and clears the internal registry.
+   * Order:
+   * 1. Stop all health checks
+   * 2. Close all client connections
+   * 3. Clear registry
    *
    * @returns Effect that completes when all servers are shutdown
    */
   shutdown(): Effect.Effect<void> {
     return Effect.gen(function* (this: MCPServerRegistry) {
+      // Step 1: Stop all health checks
+      this.healthManager.stopAll();
+
+      // Step 2: Close all clients
       const serverIds = Array.from(this.servers.keys());
 
-      // Close all clients
       for (const id of serverIds) {
         yield* this.removeServer(id);
       }
 
-      // Clear registry
+      // Step 3: Clear registry
       this.servers.clear();
+      this.lazyConfigs.clear();
     }.bind(this));
   }
 }

@@ -246,7 +246,8 @@ describe('MCP Tool Discovery', () => {
       const result = await tool.execute({ title: 'Test Issue' });
 
       expect(result).toBeDefined();
-      expect(result).toContain('called create_issue');
+      // Result is the object returned by MockMCPClient.callTool
+      expect(result.result).toContain('called create_issue');
     });
 
     it('should return error message when server disconnected during execution', async () => {

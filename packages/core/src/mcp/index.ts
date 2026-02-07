@@ -6,3 +6,6 @@ export * from './adapter';
 export { MCPServerRegistry } from './registry';
 export type { ServerStatus } from './registry';
 export { acquireMCPClient } from './lifecycle';
+export { MCPHealthManager } from './health';
+export { MCPResourceService } from './resources';
+export type { ResourceContent } from './resources';
