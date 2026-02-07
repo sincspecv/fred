@@ -22,6 +22,7 @@ import {
 import { AgentService } from '../../../../packages/core/src/agent/service';
 import { PipelineService } from '../../../../packages/core/src/pipeline/service';
 import { ContextStorageService } from '../../../../packages/core/src/context/service';
+import { IntentMatcherService, IntentRouterService } from '../../../../packages/core/src/intent/service';
 
 describe('MessageProcessorService Error Types', () => {
   test('MessageValidationError creates correct structure', () => {
@@ -371,5 +372,127 @@ describe('ToolFailure Record Type', () => {
 
     expect(mockToolResult.id).toBe('call_abc123');
     expect(isToolFailureRecord(mockToolResult.result)).toBe(true);
+  });
+});
+
+describe('MessageProcessorService policy context propagation', () => {
+  test('forwards intent/user policy context into agent execution', async () => {
+    let capturedPolicyContext: Record<string, unknown> | undefined;
+
+    const mockAgent = {
+      id: 'policy-agent',
+      config: { id: 'policy-agent', platform: 'openai', model: 'gpt-4', systemMessage: 'test' },
+      processMessage: async (_message: string, _messages: unknown[], runtimeOptions?: { policyContext?: Record<string, unknown> }) => {
+        capturedPolicyContext = runtimeOptions?.policyContext;
+        return { content: 'ok' };
+      },
+    } as any;
+
+    const mockAgentService: AgentService = {
+      createAgent: () => Effect.fail({ _tag: 'AgentCreationError' as const, message: 'Not implemented' }),
+      getAgent: () => Effect.fail({ _tag: 'AgentNotFoundError' as const, agentId: 'test' }),
+      getAgentOptional: (id: string) => Effect.succeed(id === 'policy-agent' ? mockAgent : undefined),
+      hasAgent: () => Effect.succeed(false),
+      removeAgent: () => Effect.succeed(false),
+      getAllAgents: () => Effect.succeed([]),
+      clear: () => Effect.void,
+      setTracer: () => Effect.void,
+      setDefaultSystemMessage: () => Effect.void,
+      setGlobalVariablesResolver: () => Effect.void,
+      matchAgentByUtterance: () => Effect.succeed(null),
+      getMCPMetrics: () => Effect.succeed({}),
+      registerShutdownHooks: () => Effect.void,
+    };
+
+    const mockPipelineService: PipelineService = {
+      createPipeline: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+      getPipeline: () => Effect.fail({ _tag: 'PipelineNotFoundError' as const, pipelineId: 'test' }),
+      getPipelineOptional: () => Effect.succeed(undefined),
+      hasPipeline: () => Effect.succeed(false),
+      removePipeline: () => Effect.succeed(false),
+      getAllPipelines: () => Effect.succeed([]),
+      clear: () => Effect.void,
+      executePipeline: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+      matchPipelineByUtterance: () => Effect.succeed(null),
+      createPipelineV2: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+      getPipelineV2: () => Effect.fail({ _tag: 'PipelineNotFoundError' as const, pipelineId: 'test' }),
+      executePipelineV2: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+      streamPipelineV2: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+      resumePipelineV2: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+      createGraphWorkflow: () => Effect.fail({ _tag: 'GraphValidationError' as const, errors: [] }),
+      getGraphWorkflow: () => Effect.fail({ _tag: 'PipelineNotFoundError' as const, pipelineId: 'test' }),
+      executeGraph: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+      executeGraphFromYaml: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+      executeGraphFromBuilder: () => Effect.fail({ _tag: 'PipelineExecutionError' as const, message: 'Not implemented' }),
+    } as PipelineService;
+
+    const mockContextStorage: ContextStorageService = {
+      generateConversationId: () => Effect.succeed('conv-123'),
+      getContext: () => Effect.fail({ _tag: 'ContextNotFoundError' as const, conversationId: 'test' }),
+      getContextById: () => Effect.succeed(null),
+      addMessage: () => Effect.void,
+      addMessages: () => Effect.void,
+      getHistory: () => Effect.succeed([]),
+      updateMetadata: () => Effect.void,
+      clearContext: () => Effect.void,
+      resetContext: () => Effect.succeed(false),
+      clearAll: () => Effect.void,
+      setDefaultPolicy: () => Effect.void,
+      setStorage: () => Effect.void,
+    };
+
+    const mockIntentMatcher: IntentMatcherService = {
+      matchIntent: () =>
+        Effect.succeed({
+          intent: {
+            id: 'finance-intent',
+            utterances: ['finance'],
+            action: { type: 'agent', target: 'policy-agent' },
+          },
+          confidence: 1,
+          matchType: 'exact',
+        } as any),
+      registerIntents: () => Effect.void,
+      getIntents: () => Effect.succeed([]),
+      clear: () => Effect.void,
+    };
+
+    const mockIntentRouter: IntentRouterService = {
+      routeIntent: () => Effect.fail({ _tag: 'IntentRouteError' as const, message: 'unused' }),
+      routeToDefaultAgent: () => Effect.fail({ _tag: 'IntentRouteError' as const, message: 'unused' }),
+      setDefaultAgent: () => Effect.void,
+    };
+
+    const testLayer = Layer.mergeAll(
+      Layer.succeed(AgentService, mockAgentService),
+      Layer.succeed(PipelineService, mockPipelineService),
+      Layer.succeed(ContextStorageService, mockContextStorage),
+      Layer.succeed(IntentMatcherService, mockIntentMatcher),
+      Layer.succeed(IntentRouterService, mockIntentRouter)
+    );
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* MessageProcessorService;
+        yield* service.processMessage('help with budget', {
+          conversationId: 'conv-123',
+          userId: 'user-1',
+          role: 'analyst',
+          policyMetadata: { region: 'eu' },
+        });
+      }).pipe(
+        Effect.provide(MessageProcessorServiceLive),
+        Effect.provide(testLayer)
+      )
+    );
+
+    expect(capturedPolicyContext).toEqual({
+      intentId: 'finance-intent',
+      agentId: 'policy-agent',
+      conversationId: 'conv-123',
+      userId: 'user-1',
+      role: 'analyst',
+      metadata: { region: 'eu' },
+    });
   });
 });

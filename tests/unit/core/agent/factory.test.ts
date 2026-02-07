@@ -1,4 +1,6 @@
 import { describe, test, expect, beforeEach, mock, spyOn } from 'bun:test';
+import { Effect, Layer } from 'effect';
+import { LanguageModel } from '@effect/ai';
 import { AgentFactory } from '../../../../packages/core/src/agent/factory';
 import { ToolRegistry } from '../../../../packages/core/src/tool/registry';
 import { AgentConfig } from '../../../../packages/core/src/agent/agent';
@@ -510,6 +512,131 @@ describe('AgentFactory', () => {
 
       const agent = await factory.createAgent(config, mockProvider);
       expect(agent).toBeDefined();
+    });
+  });
+
+  describe('Tool Gate Integration', () => {
+    test('filters tools by intent context before model invocation', async () => {
+      toolRegistry.registerTool({
+        id: 'safe_tool',
+        name: 'Safe Tool',
+        description: 'Allowed tool',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({ ok: true }),
+      } as any);
+
+      toolRegistry.registerTool({
+        id: 'admin_tool',
+        name: 'Admin Tool',
+        description: 'Sensitive tool',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({ ok: true }),
+      } as any);
+
+      factory.setToolGateService({
+        evaluateTool: () => Effect.die(new Error('unused')),
+        evaluateToolById: () => Effect.die(new Error('unused')),
+        getAllowedTools: () => Effect.die(new Error('unused')),
+        getPolicies: () => Effect.succeed(undefined),
+        reloadPolicies: () => Effect.void,
+        setPolicies: () => Effect.void,
+        filterTools: (tools, context) =>
+          Effect.succeed({
+            allowed: context.intentId === 'safe-intent'
+              ? tools.filter((tool) => tool.id === 'safe_tool')
+              : tools,
+            denied: [],
+          }),
+      });
+
+      let toolkitTools: string[] = [];
+      const generateSpy = spyOn(LanguageModel, 'generateText').mockImplementation((options: any) => {
+        const tools = options.toolkit?.tools;
+        toolkitTools = Array.isArray(tools) ? tools : Object.keys(tools ?? {});
+        return Effect.succeed({ text: 'ok', toolCalls: [], usage: {} } as any) as any;
+      });
+
+      const testProvider = {
+        ...mockProvider,
+        getModel: () => Effect.succeed(Layer.empty as any),
+      };
+
+      const agent = await factory.createAgent({
+        id: 'gated-agent',
+        systemMessage: 'Tool gate test',
+        platform: 'openai',
+        model: 'gpt-4',
+        tools: ['safe_tool', 'admin_tool'],
+      }, testProvider as any);
+
+      await agent.processMessage('hello', [], {
+        policyContext: { intentId: 'safe-intent', agentId: 'gated-agent' },
+      });
+
+      expect(toolkitTools).toEqual(['safe_tool']);
+      generateSpy.mockRestore();
+    });
+
+    test('returns explicit policy denial when blocked tool is requested', async () => {
+      toolRegistry.registerTool({
+        id: 'safe_tool',
+        name: 'Safe Tool',
+        description: 'Allowed tool',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({ ok: true }),
+      } as any);
+
+      toolRegistry.registerTool({
+        id: 'admin_tool',
+        name: 'Admin Tool',
+        description: 'Sensitive tool',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({ ok: true }),
+      } as any);
+
+      factory.setToolGateService({
+        evaluateTool: () => Effect.die(new Error('unused')),
+        evaluateToolById: () => Effect.die(new Error('unused')),
+        getAllowedTools: () => Effect.die(new Error('unused')),
+        getPolicies: () => Effect.succeed(undefined),
+        reloadPolicies: () => Effect.void,
+        setPolicies: () => Effect.void,
+        filterTools: (tools) =>
+          Effect.succeed({
+            allowed: tools.filter((tool) => tool.id === 'safe_tool'),
+            denied: [],
+          }),
+      });
+
+      const generateSpy = spyOn(LanguageModel, 'generateText').mockImplementation(() => {
+        return Effect.succeed({
+          text: 'attempted blocked tool',
+          toolCalls: [{ name: 'admin_tool', params: { action: 'delete' } }],
+          usage: {},
+        } as any) as any;
+      });
+
+      const testProvider = {
+        ...mockProvider,
+        getModel: () => Effect.succeed(Layer.empty as any),
+      };
+
+      const agent = await factory.createAgent({
+        id: 'deny-agent',
+        systemMessage: 'Tool deny test',
+        platform: 'openai',
+        model: 'gpt-4',
+        tools: ['safe_tool', 'admin_tool'],
+      }, testProvider as any);
+
+      const response = await agent.processMessage('run admin tool', [], {
+        policyContext: { intentId: 'safe-intent', agentId: 'deny-agent' },
+      });
+
+      expect(response.toolCalls?.[0]?.toolId).toBe('admin_tool');
+      expect(response.toolCalls?.[0]?.error?.code).toBe('POLICY_DENIED');
+      expect(response.toolCalls?.[0]?.result).toContain('denied by policy');
+      generateSpy.mockRestore();
     });
   });
 });

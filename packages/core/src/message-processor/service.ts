@@ -342,6 +342,7 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
                   type: 'agent',
                   agent,
                   agentId: match.intent.action.target,
+                  intentId: match.intent.id,
                 } as RouteResult;
               }
             } else {
@@ -516,10 +517,21 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
 
           try {
             response = yield* Effect.tryPromise({
-              try: () => route.agent!.processMessage(
-                message,
-                sequentialVisibility ? previousMessages : []
-              ),
+              try: () =>
+                (route.agent!.processMessage as any)(
+                  message,
+                  sequentialVisibility ? previousMessages : [],
+                  {
+                    policyContext: {
+                      intentId: route.intentId,
+                      agentId: route.agentId,
+                      conversationId,
+                      userId: options?.userId,
+                      role: options?.role,
+                      metadata: options?.policyMetadata,
+                    },
+                  }
+                ) as Promise<AgentResponse>,
               catch: (error) =>
                 new RouteExecutionError({ routeType: 'agent', cause: error instanceof Error ? error : new Error(String(error)) }),
             });
@@ -1270,6 +1282,9 @@ class MessageProcessorServiceImpl implements MessageProcessorService {
         semanticThreshold: options?.semanticThreshold,
         requireConversationId: options?.requireConversationId,
         sequentialVisibility: options?.sequentialVisibility,
+        userId: options?.userId,
+        role: options?.role,
+        policyMetadata: options?.policyMetadata,
       });
     });
   }
