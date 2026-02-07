@@ -48,6 +48,8 @@ export interface RouteResult {
   intentId?: string;
   pipelineId?: string;
   response?: AgentResponse;
+  /** Routing decision (when MessageRouter is used) */
+  routingDecision?: import('../routing/types').RoutingDecision;
 }
 
 /**

@@ -449,6 +449,32 @@ export class Fred implements FredLike {
     return Effect.runPromise(this.messageRouter.testRoute(message, metadata ?? {}));
   }
 
+  /**
+   * Routing API namespace for explainability and debugging.
+   */
+  get routing() {
+    return {
+      /**
+       * Get routing explanation for a message without executing the agent.
+       * Useful for debugging and understanding routing decisions.
+       *
+       * @param message - The message to route
+       * @param metadata - Optional message metadata
+       * @returns Routing explanation or null if no router configured
+       */
+      explain: async (
+        message: string,
+        metadata?: Record<string, unknown>
+      ): Promise<import('./routing/types').RoutingExplanation | null> => {
+        if (!this.messageRouter) return null;
+        const decision = await Effect.runPromise(
+          this.messageRouter.testRoute(message, metadata ?? {})
+        );
+        return decision?.explanation ?? null;
+      },
+    };
+  }
+
   // --- Workflow Configuration ---
 
   configureWorkflows(workflows: Workflow[]): void {

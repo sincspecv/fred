@@ -115,4 +115,6 @@ export interface AgentResponse {
     message: string;
     context?: Record<string, any>;
   };
+  /** Routing explanation (populated when routing explainability is enabled) */
+  routingExplanation?: import('../routing/types').RoutingExplanation;
 }

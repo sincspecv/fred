@@ -54,6 +54,30 @@ export { HookManager } from './hooks/manager';
 export * from './hooks/types';
 export { MessageRouter } from './routing/router';
 export * from './routing/types';
+export {
+  generateRoutingExplanation,
+  buildNarrative,
+  detectConcerns,
+} from './routing/explainer';
+export {
+  calculateConversationBoost,
+  createConversationRoutingHistory,
+  type ConversationRoutingHistory,
+} from './routing/conversation';
+export {
+  type TemperatureScalingCalibrator,
+  createTemperatureScalingCalibrator,
+} from './routing/calibration/temperature';
+export {
+  type HistoricalAccuracyTracker,
+  createHistoricalAccuracyTracker,
+} from './routing/calibration/history';
+export {
+  type AdaptiveCalibrationCoordinator,
+  createAdaptiveCalibrationCoordinator,
+  type CalibrationState,
+  type RoutingSource,
+} from './routing/calibration/adaptive';
 export { WorkflowManager } from './workflow/manager';
 export { WorkflowContext } from './workflow/context';
 export * from './workflow/types';

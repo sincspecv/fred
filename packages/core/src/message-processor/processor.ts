@@ -138,6 +138,7 @@ export class MessageProcessor {
               type: decision.fallback ? 'default' : 'agent',
               agent,
               agentId: decision.agent,
+              routingDecision: decision,
             } as RouteResult;
           } else {
             if (routingSpan) {
@@ -747,6 +748,11 @@ export class MessageProcessor {
           });
 
         const { response: finalResponse, agentId: finalAgentId } = yield* processHandoffs(response, 0, usedAgentId);
+
+        // Attach routing explanation if available
+        if (route.routingDecision?.explanation) {
+          finalResponse.routingExplanation = route.routingDecision.explanation;
+        }
 
         if (rootSpan) {
           rootSpan.setAttributes({
