@@ -239,6 +239,13 @@ function hashValue(value: unknown): string {
   return createHash('sha256').update(str).digest('hex').substring(0, 16);
 }
 
+function escapePrometheusLabelValue(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/"/g, '\\"');
+}
+
 /**
  * Deterministic sampling based on runId.
  * Uses hash of runId to determine if run should be sampled.
@@ -598,7 +605,9 @@ export const ObservabilityServiceLive = Layer.effect(
           lines.push('# HELP fred_hook_events_total Total hook events by type');
           lines.push('# TYPE fred_hook_events_total counter');
           for (const [hookType, count] of globalMetrics.hookEvents.entries()) {
-            lines.push(`fred_hook_events_total{hook_type="${hookType}"} ${count}`);
+            lines.push(
+              `fred_hook_events_total{hook_type="${escapePrometheusLabelValue(hookType)}"} ${count}`
+            );
           }
 
           // Token usage counter
@@ -606,11 +615,13 @@ export const ObservabilityServiceLive = Layer.effect(
           lines.push('# TYPE fred_tokens_usage_total counter');
           for (const [key, usage] of globalMetrics.tokenUsage.entries()) {
             const [provider, model] = key.split(':');
+            const escapedProvider = escapePrometheusLabelValue(provider ?? '');
+            const escapedModel = escapePrometheusLabelValue(model ?? '');
             lines.push(
-              `fred_tokens_usage_total{provider="${provider}",model="${model}",type="input"} ${usage.input}`
+              `fred_tokens_usage_total{provider="${escapedProvider}",model="${escapedModel}",type="input"} ${usage.input}`
             );
             lines.push(
-              `fred_tokens_usage_total{provider="${provider}",model="${model}",type="output"} ${usage.output}`
+              `fred_tokens_usage_total{provider="${escapedProvider}",model="${escapedModel}",type="output"} ${usage.output}`
             );
           }
 
@@ -619,7 +630,9 @@ export const ObservabilityServiceLive = Layer.effect(
           lines.push('# TYPE fred_model_cost_total counter');
           for (const [key, cost] of globalMetrics.modelCost.entries()) {
             const [provider, model] = key.split(':');
-            lines.push(`fred_model_cost_total{provider="${provider}",model="${model}"} ${cost}`);
+            lines.push(
+              `fred_model_cost_total{provider="${escapePrometheusLabelValue(provider ?? '')}",model="${escapePrometheusLabelValue(model ?? '')}"} ${cost}`
+            );
           }
 
           return lines.join('\n') + '\n';

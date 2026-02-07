@@ -27,6 +27,13 @@ export interface MCPServerConfig {
   // Optional configuration
   enabled?: boolean;             // Enable/disable this server (default: true)
   timeout?: number;              // Connection timeout in ms (default: 30000)
+  lazy?: boolean;                // Deferred connection (default: false)
+  retry?: {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+  };
+  healthCheckIntervalMs?: number; // Periodic health check interval
 }
 
 /**

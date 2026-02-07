@@ -319,15 +319,9 @@ export class MCPServerRegistry {
   startHealthChecks(): void {
     for (const [serverId, entry] of this.servers.entries()) {
       if (entry.status === 'connected') {
-        // Determine interval from config or use defaults
         const config = entry.config;
-        let intervalMs: number;
-
-        if (config.transport === 'stdio') {
-          intervalMs = 30000; // 30s for stdio
-        } else {
-          intervalMs = 60000; // 60s for http/sse
-        }
+        const defaultIntervalMs = config.transport === 'stdio' ? 30000 : 60000;
+        const intervalMs = config.healthCheckIntervalMs ?? defaultIntervalMs;
 
         this.healthManager.startHealthCheck(this, serverId, intervalMs);
       }

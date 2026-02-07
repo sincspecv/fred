@@ -849,22 +849,54 @@ export function extractMCPServers(
 export function extractObservability(config: FrameworkConfig): import('./types').ObservabilityConfig {
   const base = config.observability ?? {};
 
+  const parseSampleRateOverride = (value: string | undefined): number | undefined => {
+    if (value === undefined) {
+      return undefined;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      console.warn(`[Config] Invalid FRED_SAMPLE_RATE value "${value}". Using configured/default value.`);
+      return undefined;
+    }
+    return Math.max(0, Math.min(1, parsed));
+  };
+
+  const parseSlowThresholdOverride = (value: string | undefined): number | undefined => {
+    if (value === undefined) {
+      return undefined;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      console.warn(
+        `[Config] Invalid FRED_SLOW_THRESHOLD_MS value "${value}". Using configured/default value.`
+      );
+      return undefined;
+    }
+    return parsed;
+  };
+
   // Apply environment variable overrides for OTLP
   const otlpEndpoint = process.env.FRED_OTEL_ENDPOINT ?? base.otlp?.endpoint;
   const otlpHeadersJson = process.env.FRED_OTEL_HEADERS;
-  const otlpHeaders = otlpHeadersJson
-    ? { ...base.otlp?.headers, ...JSON.parse(otlpHeadersJson) }
-    : base.otlp?.headers;
+  const otlpHeaders = (() => {
+    if (!otlpHeadersJson) {
+      return base.otlp?.headers;
+    }
+    try {
+      return { ...base.otlp?.headers, ...JSON.parse(otlpHeadersJson) };
+    } catch {
+      console.warn('[Config] Invalid FRED_OTEL_HEADERS JSON. Using configured/default headers.');
+      return base.otlp?.headers;
+    }
+  })();
 
   const logLevel = (process.env.FRED_LOG_LEVEL as any) ?? base.logLevel;
 
   // Apply environment variable overrides for sampling
-  const successSampleRate = process.env.FRED_SAMPLE_RATE
-    ? Number(process.env.FRED_SAMPLE_RATE)
-    : base.sampling?.successSampleRate;
-  const slowThresholdMs = process.env.FRED_SLOW_THRESHOLD_MS
-    ? Number(process.env.FRED_SLOW_THRESHOLD_MS)
-    : base.sampling?.slowThresholdMs;
+  const successSampleRate =
+    parseSampleRateOverride(process.env.FRED_SAMPLE_RATE) ?? base.sampling?.successSampleRate;
+  const slowThresholdMs =
+    parseSlowThresholdOverride(process.env.FRED_SLOW_THRESHOLD_MS) ?? base.sampling?.slowThresholdMs;
   const debugMode = process.env.FRED_DEBUG
     ? process.env.FRED_DEBUG === 'true'
     : base.sampling?.debugMode;

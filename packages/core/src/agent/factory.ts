@@ -5,14 +5,15 @@ import { Tool as EffectTool, Toolkit, LanguageModel, Prompt } from '@effect/ai';
 import { BunContext } from '@effect/platform-bun';
 import { FetchHttpClient } from '@effect/platform';
 import type { StreamEvent } from '../stream/events';
-import { AgentConfig, AgentMessage, AgentResponse, ToolRetryPolicy } from './agent';
-import { ProviderDefinition } from '../platform/provider';
+import type { AgentConfig, AgentMessage, AgentResponse, ToolRetryPolicy } from './agent';
+import type { ProviderDefinition } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
 import type { Tool as FredTool } from '../tool/tool';
-import { createHandoffTool, HandoffResult } from '../tool/handoff';
+import { createHandoffTool } from '../tool/handoff';
+import type { HandoffResult } from '../tool/handoff';
 import { loadPromptFile } from '../utils/prompt-loader';
 import { MCPClientImpl, convertMCPToolsToFredTools, MCPServerRegistry } from '../mcp';
-import { Tracer } from '../tracing';
+import type { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
 import { wrapToolExecution } from '../tool/validation';
 import { annotateSpan } from '../observability/otel';
@@ -21,6 +22,26 @@ import { normalizeMessages, filterHistoryForAgent } from '../messages';
 import { streamMultiStep } from './streaming';
 import { resolveTemplate } from '../variables/template';
 import type { ToolGateServiceApi, ToolGateContext } from '../tool-gate/types';
+
+type ObservabilityServiceApi = {
+  logStructured: (options: {
+    level: 'trace' | 'debug' | 'info' | 'warning' | 'error' | 'fatal';
+    message: string;
+    metadata?: Record<string, unknown>;
+  }) => Effect.Effect<void>;
+  recordTokenUsage: (options: {
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+  }) => Effect.Effect<void>;
+  recordModelCost: (options: {
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+  }) => Effect.Effect<number | undefined>;
+};
 
 /**
  * Transform Schema.Struct fields to be OpenAI strict-mode compatible.
@@ -117,6 +138,19 @@ function getSafeToolErrorMessage(toolId: string, error: unknown): string {
   return errorMessage;
 }
 
+function getApprovalSessionKey(context: ToolGateContext): string | undefined {
+  const conversationId = context.metadata?.conversationId;
+  if (typeof conversationId === 'string' && conversationId.length > 0) {
+    return conversationId;
+  }
+
+  if (context.userId && context.userId.length > 0) {
+    return context.userId;
+  }
+
+  return undefined;
+}
+
 export interface MCPClientMetrics {
   totalConnections: number;
   activeConnections: number;
@@ -139,7 +173,7 @@ export class AgentFactory {
   };
   private mcpClients: Map<string, MCPClientImpl> = new Map();
   private tracer?: Tracer;
-  private observabilityService?: any; // ObservabilityService type from observability/service
+  private observabilityService?: ObservabilityServiceApi;
   private defaultSystemMessage?: string;
   private metrics: MCPClientMetrics = {
     totalConnections: 0,
@@ -170,8 +204,25 @@ export class AgentFactory {
     this.tracer = tracer;
   }
 
-  setObservabilityService(observabilityService?: any): void {
+  setObservabilityService(observabilityService?: ObservabilityServiceApi): void {
     this.observabilityService = observabilityService;
+  }
+
+  private logWarning(message: string, metadata?: Record<string, unknown>): void {
+    if (this.observabilityService) {
+      void Effect.runPromise(
+        this.observabilityService.logStructured({
+          level: 'warning',
+          message,
+          metadata,
+        })
+      ).catch(() => {
+        console.warn(message);
+      });
+      return;
+    }
+
+    console.warn(message);
   }
 
   setToolGateService(toolGateService?: ToolGateServiceApi): void {
@@ -391,14 +442,26 @@ export class AgentFactory {
               agentId: runtimeOptions.policyContext?.agentId ?? config.id,
               userId: runtimeOptions.policyContext?.userId,
               role: runtimeOptions.policyContext?.role,
-              metadata: runtimeOptions.policyContext?.metadata,
+              metadata: {
+                ...(runtimeOptions.policyContext?.metadata ?? {}),
+                ...(runtimeOptions.policyContext?.conversationId
+                  ? { conversationId: runtimeOptions.policyContext.conversationId }
+                  : {}),
+              },
             };
 
             const decision = yield* self.toolGateService!.evaluateToolById(toolId, gateContext);
 
             // If tool requires approval, check for existing approval
             if (decision.requireApproval) {
-              const sessionKey = (gateContext.metadata?.conversationId as string | undefined) ?? gateContext.userId ?? 'default';
+              const sessionKey = getApprovalSessionKey(gateContext);
+              if (!sessionKey) {
+                return yield* Effect.fail(
+                  new Error(
+                    `Tool "${toolId}" requires approval but no session scope is available. Provide conversationId or userId in policy context.`
+                  )
+                );
+              }
               const hasApproval = yield* self.toolGateService!.hasApproval(toolId, sessionKey);
 
               if (!hasApproval) {
@@ -409,7 +472,7 @@ export class AgentFactory {
                   // Return PauseSignal to trigger HITL checkpoint
                   return {
                     __pause: true,
-                    prompt: `Tool '${toolId}' requires approval. Intent: ${gateContext.intentId ?? 'N/A'}, Agent: ${gateContext.agentId ?? 'N/A'}.`,
+                    prompt: 'This action requires approval before continuing.',
                     metadata: {
                       toolId,
                       intentId: gateContext.intentId,
@@ -445,6 +508,12 @@ export class AgentFactory {
         return executeToolLogic();
 
         function executeToolLogic() {
+          if (allowedToolIds && !allowedToolIds.has(toolId)) {
+            const deniedError = new Error(`Tool "${toolId}" denied by policy`);
+            deniedError.name = 'ToolPolicyDeniedError';
+            return Effect.fail(deniedError);
+          }
+
           const startTime = Date.now();
           const toolSpan = self.tracer?.startSpan('tool.execute', {
             kind: SpanKind.CLIENT,
@@ -460,18 +529,17 @@ export class AgentFactory {
             self.tracer?.setActiveSpan(toolSpan);
           }
 
-          if (allowedToolIds && !allowedToolIds.has(toolId)) {
-            const deniedError = new Error(`Tool "${toolId}" denied by policy`);
-            deniedError.name = 'ToolPolicyDeniedError';
-            return Effect.fail(deniedError);
-          }
-
           // Annotate tool span with Fred identifiers (best effort)
           const toolAnnotation = annotateSpan({
             toolId,
             agentId: config.id,
           });
-          Effect.runPromise(toolAnnotation).catch(() => {});
+          Effect.runPromise(toolAnnotation).catch(() => {
+            self.logWarning('Failed to annotate tool execution span', {
+              toolId,
+              agentId: config.id,
+            });
+          });
 
           const toolDefinition = toolDefinitions.get(toolId);
           const executor = execute ?? toolDefinition?.execute;
@@ -657,10 +725,11 @@ export class AgentFactory {
 
             // Log denied MCP tools
             if (filterResult.denied.length > 0) {
-              console.warn(
-                `MCP tools denied by policy for agent "${config.id}" from server "${serverId}":`,
-                filterResult.denied.map((d) => d.toolId).join(', ')
-              );
+              this.logWarning('MCP tools denied by policy', {
+                agentId: config.id,
+                serverId,
+                deniedToolIds: filterResult.denied.map((d) => d.toolId),
+              });
             }
           }
 
@@ -686,10 +755,11 @@ export class AgentFactory {
           }
         } catch (error) {
           // Graceful degradation: server not found or discovery failed
-          console.warn(
-            `Failed to discover tools from MCP server "${serverId}" for agent "${config.id}":`,
-            error instanceof Error ? error.message : String(error)
-          );
+          this.logWarning('Failed to discover MCP tools for agent', {
+            agentId: config.id,
+            serverId,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }
@@ -706,7 +776,12 @@ export class AgentFactory {
         agentId: runtimeOptions?.policyContext?.agentId ?? config.id,
         userId: runtimeOptions?.policyContext?.userId,
         role: runtimeOptions?.policyContext?.role,
-        metadata: runtimeOptions?.policyContext?.metadata,
+        metadata: {
+          ...(runtimeOptions?.policyContext?.metadata ?? {}),
+          ...(runtimeOptions?.policyContext?.conversationId
+            ? { conversationId: runtimeOptions.policyContext.conversationId }
+            : {}),
+        },
       };
 
       const allConfiguredTools = Array.from(toolDefinitions.values()) as FredTool[];
@@ -781,7 +856,13 @@ export class AgentFactory {
         agentId: config.id,
         provider: config.platform,
       });
-      Effect.runPromise(modelAnnotation).catch(() => {});
+      Effect.runPromise(modelAnnotation).catch(() => {
+        this.logWarning('Failed to annotate model span', {
+          agentId: config.id,
+          provider: config.platform,
+          model: config.model,
+        });
+      });
 
       try {
         const allowedToolIds = await resolveAllowedToolIds(runtimeOptions);
@@ -899,10 +980,12 @@ export class AgentFactory {
               })
             );
           } catch (error) {
-            // Silently fail - observability should not break agent execution
-            if (process.env.NODE_ENV !== 'production') {
-              console.debug('Failed to record token usage metrics:', error);
-            }
+            this.logWarning('Failed to record token usage metrics', {
+              agentId: config.id,
+              provider: config.platform,
+              model: config.model,
+              errorMessage: error instanceof Error ? error.message : String(error),
+            });
           }
         }
 
@@ -948,6 +1031,7 @@ export class AgentFactory {
       previousMessages: AgentMessage[] = [],
       options?: { threadId?: string }
     ): Stream.Stream<StreamEvent, unknown, any> => {
+      const self = this;
       const startedAt = Date.now();
       const runId = `run_${startedAt}_${Math.random().toString(36).slice(2, 8)}`;
       const messageId = `msg_${startedAt}_${Math.random().toString(36).slice(2, 6)}`;
@@ -1115,7 +1199,7 @@ export class AgentFactory {
 
           // Annotate model span with token counts from streaming usage
           if (streamState.usage && streamState.usage.totalTokens && streamState.usage.totalTokens > 0) {
-            const modelSpan = this.tracer?.getActiveSpan();
+            const modelSpan = self.tracer?.getActiveSpan();
             if (modelSpan) {
               modelSpan.setAttributes({
                 'token.input': streamState.usage.inputTokens ?? 0,
@@ -1125,10 +1209,10 @@ export class AgentFactory {
             }
 
             // Record token usage and cost metrics if observability is available
-            if (this.observabilityService) {
+            if (self.observabilityService) {
               try {
                 // Record token usage
-                yield* this.observabilityService.recordTokenUsage({
+                yield* self.observabilityService.recordTokenUsage({
                   provider: config.platform,
                   model: config.model,
                   inputTokens: streamState.usage.inputTokens ?? 0,
@@ -1136,17 +1220,19 @@ export class AgentFactory {
                 });
 
                 // Record model cost if pricing is configured
-                yield* this.observabilityService.recordModelCost({
+                yield* self.observabilityService.recordModelCost({
                   provider: config.platform,
                   model: config.model,
                   inputTokens: streamState.usage.inputTokens ?? 0,
                   outputTokens: streamState.usage.outputTokens ?? 0,
                 });
               } catch (error) {
-                // Silently fail - observability should not break agent execution
-                if (process.env.NODE_ENV !== 'production') {
-                  console.debug('Failed to record streaming token usage metrics:', error);
-                }
+                self.logWarning('Failed to record streaming token usage metrics', {
+                  agentId: config.id,
+                  provider: config.platform,
+                  model: config.model,
+                  errorMessage: error instanceof Error ? error.message : String(error),
+                });
               }
             }
           }
@@ -1172,7 +1258,7 @@ export class AgentFactory {
               usage: streamState.usage,
             },
           };
-        }.bind(this))
+        })
       );
 
       return Stream.fromIterable(initialEvents).pipe(

@@ -9,20 +9,21 @@
  */
 
 import {
-  PipelineStep,
-  AgentStep,
-  FunctionStep,
-  ConditionalStep,
-  PipelineRefStep,
-  RetryConfig,
+  type PipelineStep,
+  type AgentStep,
+  type FunctionStep,
+  type ConditionalStep,
+  type PipelineRefStep,
+  type RetryConfig,
 } from './steps';
-import { PipelineConfigV2 } from './pipeline';
-import { PipelineContext, PipelineContextManager, createPipelineContext } from './context';
+import type { PipelineConfigV2 } from './pipeline';
+import { PipelineContextManager, createPipelineContext } from './context';
+import type { PipelineContext } from './context';
 import { HookManager } from '../hooks/manager';
-import { HookEvent, StepHookEventData, PipelineHookEventData } from '../hooks/types';
+import type { HookEvent, StepHookEventData, PipelineHookEventData } from '../hooks/types';
 import { AgentManager } from '../agent/manager';
-import { AgentResponse } from '../agent/agent';
-import { Tracer } from '../tracing';
+import type { AgentResponse } from '../agent/agent';
+import type { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
 import type { CheckpointManager } from './checkpoint/manager';
 import { detectPauseSignal, type DetectedPause } from './pause';
@@ -256,6 +257,7 @@ async function executeStepWithHooks(
 
   let result: unknown;
   let lastError: Error | undefined;
+  const stepStartTime = Date.now();
   const maxRetries = step.retry?.maxRetries ?? 0;
   const backoffMs = step.retry?.backoffMs ?? 100;
   const maxBackoffMs = step.retry?.maxBackoffMs ?? 10000;
@@ -413,7 +415,7 @@ async function executeStepWithHooks(
           });
         });
 
-        Effect.runPromise(recordBranchEffect).catch(() => {
+        Effect.runPromise(recordBranchEffect as any).catch(() => {
           // Best-effort: ignore failures
         });
       }
@@ -425,13 +427,14 @@ async function executeStepWithHooks(
 
   // Record step in ObservabilityService (best-effort)
   if (runId) {
+    const stepEndTime = Date.now();
     const recordStepEffect = Effect.gen(function* () {
       const service = yield* ObservabilityService;
       const ctx = yield* getCorrelationContext;
       yield* service.recordRunStepSpan(runId, {
         stepName: step.name,
-        startTime: Date.now(), // Approximate - actual start was earlier
-        endTime: Date.now(),
+        startTime: stepStartTime,
+        endTime: stepEndTime,
         status: 'success',
         metadata: {
           pipelineId: config.id,
@@ -442,7 +445,7 @@ async function executeStepWithHooks(
       });
     });
 
-    Effect.runPromise(recordStepEffect).catch(() => {
+    Effect.runPromise(recordStepEffect as any).catch(() => {
       // Best-effort: ignore failures
     });
   }

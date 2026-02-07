@@ -66,9 +66,11 @@ export interface NormalizeLegacyTraceInput {
 
 function toMs(input: number | string | Date | undefined): number {
   if (input === undefined) return 0;
-  if (typeof input === 'number') return input;
-  if (typeof input === 'string') return new Date(input).getTime();
-  return input.getTime();
+  if (typeof input === 'number') {
+    return Number.isFinite(input) ? input : 0;
+  }
+  const parsed = typeof input === 'string' ? new Date(input).getTime() : input.getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function sanitizeVolatile(input: unknown): unknown {

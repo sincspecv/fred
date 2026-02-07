@@ -21,8 +21,11 @@ import type {
 } from './types';
 import type { HookManagerService } from '../hooks/service';
 import { HookManagerService as HookManagerServiceTag } from '../hooks/service';
-import type { ObservabilityService } from '../observability/service';
 import { ObservabilityService as ObservabilityServiceTag } from '../observability/service';
+
+type ObservabilityServiceApi = {
+  hashPayload: (payload: unknown) => Effect.Effect<string>;
+};
 
 const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
@@ -263,13 +266,26 @@ const collectRuleEvaluations = (tool: ToolGateCandidateTool, rules: ToolGateScop
   return evaluations;
 };
 
+const resolveApprovalSessionKey = (context: ToolGateContext): string | undefined => {
+  const conversationId = context.metadata?.conversationId;
+  if (typeof conversationId === 'string' && conversationId.length > 0) {
+    return conversationId;
+  }
+
+  if (context.userId && context.userId.length > 0) {
+    return context.userId;
+  }
+
+  return undefined;
+};
+
 class ToolGateServiceImpl implements ToolGateServiceApi {
   constructor(
     private readonly policiesRef: Ref.Ref<ToolPoliciesConfig | undefined>,
     private readonly toolRegistry: ToolRegistryService,
     private readonly approvalsRef: Ref.Ref<Map<string, import('./types').ToolApprovalRecord>>,
     private readonly hookManager?: HookManagerService,
-    private readonly observability?: ObservabilityService
+    private readonly observability?: ObservabilityServiceApi
   ) {}
 
   evaluateTool(tool: ToolGateCandidateTool, context: ToolGateContext): Effect.Effect<ToolGateDecision> {
@@ -302,7 +318,7 @@ class ToolGateServiceImpl implements ToolGateServiceApi {
     });
   }
 
-  private emitAuditEvent(decision: ToolGateDecision, context: ToolGateContext): Effect.Effect<void> {
+  private emitAuditEvent(decision: ToolGateDecision, context: ToolGateContext): Effect.Effect<void, unknown> {
     const self = this;
     return Effect.gen(function* () {
       if (!self.hookManager) {
@@ -496,7 +512,10 @@ class ToolGateServiceImpl implements ToolGateServiceApi {
       }
 
       // Derive session key from context
-      const sessionKey = (context.metadata?.conversationId as string | undefined) ?? context.userId ?? 'default';
+      const sessionKey = resolveApprovalSessionKey(context);
+      if (!sessionKey) {
+        return undefined;
+      }
 
       // Check if already approved in this session
       const alreadyApproved = yield* self.hasApproval(decision.toolId, sessionKey);
