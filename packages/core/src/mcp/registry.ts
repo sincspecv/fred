@@ -182,16 +182,22 @@ export class MCPServerRegistry {
     return Effect.gen(function* (this: MCPServerRegistry) {
       const entry = this.servers.get(id);
       if (entry) {
-        yield* Effect.tryPromise({
-          try: () => entry.client.close(),
-          catch: (error) => {
-            console.warn(
-              `Failed to close MCP server '${id}':`,
-              error instanceof Error ? error.message : String(error)
-            );
-            return Promise.resolve();
-          },
-        });
+        // Only try to close if client exists (not null for error-state servers)
+        if (entry.client) {
+          // Use Effect.catchAll to suppress errors and just log warnings
+          yield* Effect.tryPromise({
+            try: () => entry.client.close(),
+            catch: (error) =>
+              new Error(
+                `Failed to close MCP server '${id}': ${error instanceof Error ? error.message : String(error)}`
+              ),
+          }).pipe(
+            Effect.catchAll((error) => {
+              console.warn(error.message);
+              return Effect.succeed(undefined);
+            })
+          );
+        }
         this.servers.delete(id);
       }
     }.bind(this));
@@ -263,7 +269,7 @@ export class MCPServerRegistry {
   /**
    * Register and connect a server with graceful failure handling.
    *
-   * On failure: logs warning, marks server as 'error', does not throw.
+   * On failure: logs warning, does not throw, server not added to registry.
    *
    * @param id - Server identifier
    * @param config - Server configuration
@@ -274,36 +280,31 @@ export class MCPServerRegistry {
     config: MCPServerConfig
   ): Effect.Effect<void, never> {
     return Effect.gen(function* (this: MCPServerRegistry) {
-      try {
-        const client = new MCPClientImplClass(config);
-        yield* Effect.tryPromise({
-          try: () => client.initialize(),
-          catch: (error) => {
-            console.warn(
-              `MCP server '${id}' failed to initialize:`,
-              error instanceof Error ? error.message : String(error)
-            );
-            return new Error(
-              `MCP server '${id}' failed to initialize: ${error instanceof Error ? error.message : String(error)}`
-            );
-          },
-        });
+      // Use Effect.either to catch all errors
+      const registry = this; // Capture for inner scope
+      const result = yield* Effect.either(
+        Effect.gen(function* () {
+          const client = new MCPClientImplClass(config);
+          yield* Effect.tryPromise({
+            try: () => client.initialize(),
+            catch: (error) =>
+              new Error(
+                `MCP server '${id}' failed to initialize: ${error instanceof Error ? error.message : String(error)}`
+              ),
+          });
 
-        // Register successfully initialized client
-        yield* this.registerServer(id, config, client);
-      } catch (error) {
+          // Register successfully initialized client
+          yield* registry.registerServer(id, config, client);
+        })
+      );
+
+      if (result._tag === 'Left') {
         // Graceful degradation - log warning but don't throw
+        // Server is NOT added to registry
         console.warn(
           `MCP server '${id}' initialization failed - continuing without this server:`,
-          error instanceof Error ? error.message : String(error)
+          result.left instanceof Error ? result.left.message : String(result.left)
         );
-
-        // Mark as error in registry (without client)
-        this.servers.set(id, {
-          client: null as any, // Placeholder - won't be used since status is error
-          config,
-          status: 'error',
-        });
       }
     }.bind(this));
   }

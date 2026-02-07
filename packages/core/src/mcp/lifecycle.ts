@@ -31,13 +31,15 @@ export const acquireMCPClient = (
     (client) =>
       Effect.tryPromise({
         try: () => client.close(),
-        catch: (error) => {
+        catch: (error) =>
+          new Error(
+            `Failed to close MCP client '${config.id}': ${error instanceof Error ? error.message : String(error)}`
+          ),
+      }).pipe(
+        Effect.catchAll((error) => {
           // Log error but don't fail release - best effort cleanup
-          console.warn(
-            `Failed to close MCP client '${config.id}':`,
-            error instanceof Error ? error.message : String(error)
-          );
-          return Promise.resolve();
-        },
-      })
+          console.warn(error.message);
+          return Effect.succeed(undefined);
+        })
+      )
   );
