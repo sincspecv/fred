@@ -9,8 +9,12 @@ class MockMCPClient implements MCPClient {
   private _connected = false;
   private _tools: Array<{ name: string; description: string; inputSchema: any }> = [];
 
-  constructor(tools: Array<{ name: string; description: string; inputSchema: any }> = []) {
+  constructor(tools: Array<{ name: string; description: string; inputSchema: any }> = [], autoConnect = true) {
     this._tools = tools;
+    // Auto-connect by default for registry tests (registry expects initialized clients)
+    if (autoConnect) {
+      this._connected = true;
+    }
   }
 
   async initialize() {

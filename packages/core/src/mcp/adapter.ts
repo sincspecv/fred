@@ -10,7 +10,8 @@ export function convertMCPToolToFredTool(
   mcpClient: MCPClient,
   serverId: string
 ): Tool<Record<string, unknown>, unknown, never> {
-  const toolId = `mcp-${serverId}-${mcpTool.name}`;
+  // Use server/tool namespace format (slash-separated)
+  const toolId = `${serverId}/${mcpTool.name}`;
 
   // Create a properly typed schema for MCP tools
   const schema: ToolSchemaDefinition<Record<string, unknown>, unknown, never> = {

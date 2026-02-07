@@ -5,6 +5,7 @@ import type {
   ProviderPackConfig,
   ToolPoliciesConfig,
   ToolPolicyRule,
+  MCPGlobalServerConfig,
 } from './types';
 import { parseConfigFile } from './parser';
 import type { Intent } from '../intent/intent';
@@ -219,6 +220,11 @@ export function validateConfig(config: FrameworkConfig): void {
     }
   }
 
+  // Validate MCP server configuration (warn-only)
+  if (config.mcpServers) {
+    validateMCPServers(config.mcpServers, config.agents);
+  }
+
   if (policies) {
     const toolIds = new Set((config.tools ?? []).map((tool) => tool.id));
     const intentIds = new Set((config.intents ?? []).map((intent) => intent.id));
@@ -361,6 +367,56 @@ function validateSchemaMetadata(toolId: string, metadata: ToolSchemaMetadata): v
   }
   if (!metadata.properties || typeof metadata.properties !== 'object') {
     throw new Error(`Tool "${toolId}" schema metadata must include properties`);
+  }
+}
+
+/**
+ * Validate MCP server configuration.
+ * Uses warn-only semantics - logs warnings but does not throw.
+ */
+function validateMCPServers(
+  mcpServers: Record<string, MCPGlobalServerConfig>,
+  agents?: AgentConfig[]
+): void {
+  const serverIds = new Set(Object.keys(mcpServers));
+
+  // Validate each server config
+  for (const [serverId, serverConfig] of Object.entries(mcpServers)) {
+    // Warn if stdio transport is missing command
+    if (serverConfig.transport === 'stdio' && !serverConfig.command) {
+      console.warn(
+        `[Config] MCP server "${serverId}" uses stdio transport but is missing "command" field`
+      );
+    }
+
+    // Warn if http/sse transport is missing url
+    if ((serverConfig.transport === 'http' || serverConfig.transport === 'sse') && !serverConfig.url) {
+      console.warn(
+        `[Config] MCP server "${serverId}" uses ${serverConfig.transport} transport but is missing "url" field`
+      );
+    }
+  }
+
+  // Validate agent server references
+  if (agents) {
+    for (const agent of agents) {
+      if (agent.mcpServers && Array.isArray(agent.mcpServers)) {
+        // Check if it's string[] (server ID references) or MCPServerConfig[] (inline config)
+        const firstElement = agent.mcpServers[0];
+        if (typeof firstElement === 'string') {
+          // String array - validate server IDs exist
+          const serverRefs = agent.mcpServers as string[];
+          for (const serverId of serverRefs) {
+            if (!serverIds.has(serverId)) {
+              console.warn(
+                `[Config] Agent "${agent.id}" references unknown MCP server "${serverId}"`
+              );
+            }
+          }
+        }
+        // If it's MCPServerConfig[], it's the old inline format - no validation needed for now
+      }
+    }
   }
 }
 
@@ -690,6 +746,85 @@ function createConditionPredicate(
 
 function getNestedValue(obj: any, path: string): any {
   return path.split('.').reduce((acc, key) => acc?.[key], obj);
+}
+
+// =============================================================================
+// MCP Server Extraction
+// =============================================================================
+
+/**
+ * Resolve environment variable patterns in a string value.
+ * Replaces ${VAR_NAME} with process.env.VAR_NAME.
+ * If the environment variable is not set, logs a warning and keeps the literal value.
+ *
+ * @param value - String potentially containing ${ENV_VAR} patterns
+ * @returns String with environment variables resolved
+ */
+function resolveEnvVars(value: string): string {
+  return value.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (match, varName) => {
+    const envValue = process.env[varName];
+    if (envValue === undefined) {
+      console.warn(
+        `[Config] Environment variable "${varName}" is not set. Keeping literal value "${match}"`
+      );
+      return match;
+    }
+    return envValue;
+  });
+}
+
+/**
+ * Resolve environment variables in all string values of an object.
+ */
+function resolveEnvVarsInObject<T extends Record<string, any>>(obj: T | undefined): T | undefined {
+  if (!obj) return obj;
+
+  const resolved: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'string') {
+      resolved[key] = resolveEnvVars(value);
+    } else {
+      resolved[key] = value;
+    }
+  }
+  return resolved;
+}
+
+/**
+ * Extract MCP server configurations from framework config.
+ * Resolves ${ENV_VAR} patterns in string values and returns array with server IDs.
+ *
+ * @param config - Framework configuration
+ * @returns Array of MCP server configs with resolved env vars and id field
+ */
+export function extractMCPServers(
+  config: FrameworkConfig
+): Array<MCPGlobalServerConfig & { id: string }> {
+  if (!config.mcpServers || Object.keys(config.mcpServers).length === 0) {
+    return [];
+  }
+
+  return Object.entries(config.mcpServers).map(([id, serverConfig]) => {
+    // Resolve env vars in string fields
+    const resolvedEnv = resolveEnvVarsInObject(serverConfig.env);
+    const resolvedHeaders = resolveEnvVarsInObject(serverConfig.headers);
+    const resolvedUrl = serverConfig.url ? resolveEnvVars(serverConfig.url) : undefined;
+
+    return {
+      id,
+      transport: serverConfig.transport,
+      command: serverConfig.command,
+      args: serverConfig.args,
+      env: resolvedEnv,
+      url: resolvedUrl,
+      headers: resolvedHeaders,
+      timeout: serverConfig.timeout ?? 30000, // default 30s
+      enabled: serverConfig.enabled ?? true, // default enabled
+      lazy: serverConfig.lazy ?? false, // default auto-start
+      retry: serverConfig.retry,
+      healthCheckIntervalMs: serverConfig.healthCheckIntervalMs,
+    };
+  });
 }
 
 // =============================================================================

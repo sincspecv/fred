@@ -45,6 +45,78 @@ export interface ProviderPackConfig {
 }
 
 // =============================================================================
+// MCP Server Config Types
+// =============================================================================
+
+/**
+ * Global MCP server configuration.
+ *
+ * Servers are declared globally in config and agents reference them by ID.
+ *
+ * @example
+ * mcpServers:
+ *   github:
+ *     transport: stdio
+ *     command: npx
+ *     args: ["-y", "@modelcontextprotocol/server-github"]
+ *     env:
+ *       GITHUB_TOKEN: "${GITHUB_TOKEN}"
+ *     timeout: 30000
+ *   remote-api:
+ *     transport: http
+ *     url: "https://api.example.com/mcp"
+ *     headers:
+ *       Authorization: "Bearer ${API_TOKEN}"
+ *     timeout: 60000
+ *     retry:
+ *       maxRetries: 3
+ *       backoffMs: 1000
+ *     healthCheckIntervalMs: 60000
+ *     lazy: true
+ */
+export interface MCPGlobalServerConfig {
+  /** Transport type for this MCP server */
+  transport: 'stdio' | 'http' | 'sse';
+
+  // stdio transport fields
+  /** Command to execute (stdio transport only) */
+  command?: string;
+  /** Command arguments (stdio transport only) */
+  args?: string[];
+  /** Environment variables for subprocess (stdio transport only) */
+  env?: Record<string, string>;
+
+  // http/sse transport fields
+  /** Server URL (http/sse transport only) */
+  url?: string;
+  /** HTTP headers (http/sse transport only) */
+  headers?: Record<string, string>;
+
+  // Common configuration
+  /** Connection timeout in milliseconds (default: 30000) */
+  timeout?: number;
+  /** Enable/disable this server (default: true) */
+  enabled?: boolean;
+  /** Lazy startup - connect on first use instead of at initialization (default: false) */
+  lazy?: boolean;
+
+  // Retry configuration
+  /** Retry policy for failed connections */
+  retry?: {
+    /** Maximum number of retry attempts */
+    maxRetries?: number;
+    /** Initial backoff delay in milliseconds */
+    backoffMs?: number;
+    /** Maximum backoff delay in milliseconds */
+    maxBackoffMs?: number;
+  };
+
+  // Health check configuration
+  /** Health check interval in milliseconds (optional) */
+  healthCheckIntervalMs?: number;
+}
+
+// =============================================================================
 // Persistence Config Types
 // =============================================================================
 
@@ -271,6 +343,8 @@ export interface FrameworkConfig {
   policies?: ToolPoliciesConfig;
   /** Backward-compatible alias for policy declarations */
   toolPolicies?: ToolPoliciesConfig;
+  /** MCP server declarations (global registry, agents reference by ID) */
+  mcpServers?: Record<string, MCPGlobalServerConfig>;
 }
 
 export interface MemoryConfig {

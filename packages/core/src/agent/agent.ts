@@ -48,7 +48,8 @@ export interface AgentConfig {
   temperature?: number; // Optional temperature setting
   maxTokens?: number; // Optional max tokens setting
   utterances?: string[]; // Phrases that trigger this agent directly (bypasses intent matching)
-  mcpServers?: MCPServerConfig[]; // MCP servers to connect to for this agent
+  /** MCP server references (string[] of server IDs from global config, or legacy MCPServerConfig[] inline) */
+  mcpServers?: string[] | MCPServerConfig[];
   maxSteps?: number; // Maximum number of steps in the agent loop (default: 20)
   toolChoice?: 'auto' | 'required' | 'none' | { type: 'tool'; toolName: string }; // Control tool usage
   toolTimeout?: number; // Timeout for tool execution in milliseconds (default: 300000 = 5 minutes)
