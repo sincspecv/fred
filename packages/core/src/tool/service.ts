@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Ref } from 'effect';
 import type { Tool } from './tool';
+import { withInferredCapabilities } from './capabilities';
 import { ToolNotFoundError, ToolAlreadyExistsError, ToolValidationError } from './errors';
 import { validateToolSchema } from './validation';
 import { normalizeToolDefinition } from './utils';
@@ -100,11 +101,13 @@ class ToolRegistryServiceImpl implements ToolRegistryService {
         return yield* Effect.fail(new ToolAlreadyExistsError({ id: tool.id }));
       }
 
+      const toolWithCapabilities = withInferredCapabilities(tool);
+
       // Validate tool schema using Effect
-      yield* validateToolSchemaEffect(tool);
+      yield* validateToolSchemaEffect(toolWithCapabilities);
 
       const newTools = new Map(tools);
-      newTools.set(tool.id, tool);
+      newTools.set(tool.id, toolWithCapabilities);
       yield* Ref.set(self.tools, newTools);
     });
   }
