@@ -12,19 +12,19 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 
 ## Current Position
 
-**Phase:** 24 — Tool Access Control
-**Plan:** 6 of 6 plans complete
-**Status:** Phase complete
-**Last activity:** 2026-02-07 — Completed 24-06-PLAN.md (HITL approval workflow)
+**Phase:** 25 — MCP Integration
+**Plan:** 1 of 6 plans complete
+**Status:** In progress
+**Last activity:** 2026-02-07 — Completed 25-02-PLAN.md (MCP registry with Effect lifecycle)
 
-**Progress:** ████████████ 98% (111/113 plans complete)
+**Progress:** ████████████ 99% (113/115 plans complete)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
 | 22 | Observability Foundation | 8 | 8/8 | ✅ Complete |
 | 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
 | 24 | Tool Access Control | 8 | 6/6 | ✅ Complete |
-| 25 | MCP Integration | 10 | — | ⚪ Not started |
+| 25 | MCP Integration | 10 | 2/6 | 🔵 In progress |
 | 26 | Routing Explainability | 3 | — | ⚪ Not started |
 
 ---
@@ -124,6 +124,17 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Layer composition pattern: Use Layer.merge to combine dependencies, then Layer.provide(service, deps) to wire into service (Phase 23-09)
 - Config-less replay mode: CLI replay works without Fred config file using artifact-only runtime (Phase 23-10)
 
+**MCP Integration Decisions (Phase 25):**
+- MCP servers declared globally in config as Record<string, MCPGlobalServerConfig> (Phase 25-01)
+- Agent mcpServers field accepts string[] (server ID refs) as primary format with MCPServerConfig[] for backward compat (Phase 25-01)
+- Environment variable syntax ${ENV_VAR} resolves at config load time (Phase 25-01)
+- MCP config validation is warn-only - log issues but never throw (Phase 25-01)
+- MCP server defaults: enabled=true, lazy=false (auto-start), timeout=30000ms (Phase 25-01)
+- MCP tool namespace format: server/tool (slash-separated) for collision-free discovery (Phase 25-02)
+- MCPServerRegistry stores initialized clients with status tracking (connected/disconnected/error) (Phase 25-02)
+- Effect.acquireRelease guarantees MCP client cleanup on shutdown or error via lifecycle.ts (Phase 25-02)
+- Duplicate server registration rejected - same server ID cannot be registered twice (Phase 25-02)
+
 **Safety Decisions:**
 - Gate tools at discovery time (LLM never sees disallowed tools)
 - All MCP tools pass through ToolGateService before being offered to LLM
@@ -153,6 +164,28 @@ None.
 
 ---
 
+## Phase 25: MCP Integration — IN PROGRESS
+
+**Status:** 🔵 In progress (1/6 plans complete)
+**Started:** 2026-02-07
+
+**What was built:**
+- MCPGlobalServerConfig type with all transport fields (stdio, http, sse) (25-01)
+- Global server config schema as Record<string, MCPGlobalServerConfig> in FrameworkConfig (25-01)
+- extractMCPServers function with ${ENV_VAR} resolution and defaults (25-01)
+- Warn-only MCP config validation (unknown servers, missing required fields) (25-01)
+- Agent mcpServers field updated to accept string[] (server ID refs) or legacy MCPServerConfig[] (25-01)
+
+**Key achievements:**
+- Environment variables resolve at config load time with fallback to literal values
+- MCP config validation never blocks Fred startup (warn-only semantics)
+- Agent config supports dual format for smooth migration path
+- Foundation for global server registry pattern (plans 25-02+)
+
+**Next:** 25-02 — Global MCPServerRegistry with Effect lifecycle
+
+---
+
 ## Phase 24: Tool Access Control — COMPLETE
 
 **Status:** ✅ Complete (6/6 plans executed)
@@ -178,8 +211,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-07T01:35:45Z
-Stopped at: Completed 24-06-PLAN.md (Phase 24 complete - 6/6 plans)
+Last session: 2026-02-07T03:00:08Z
+Stopped at: Completed 25-02-PLAN.md (MCP registry with Effect lifecycle - 2/6 plans)
 Resume file: None
 
 ---
@@ -211,4 +244,4 @@ Resume file: None
 
 *State file tracks current milestone progress*
 *Archives in .planning/milestones/ contain historical data*
-*Last updated: 2026-02-07 — Phase 24 complete (6/6 plans)*
+*Last updated: 2026-02-07 — Phase 25 in progress (2/6 plans)*
