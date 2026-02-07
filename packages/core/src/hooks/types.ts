@@ -14,6 +14,8 @@ export type HookType =
   // Tool execution hooks
   | 'beforeToolCalled'
   | 'afterToolCalled'
+  // Policy decision hooks
+  | 'afterPolicyDecision'
   // Response generation hooks
   | 'beforeResponseGenerated'
   | 'afterResponseGenerated'

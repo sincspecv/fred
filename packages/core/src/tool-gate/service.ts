@@ -17,7 +17,12 @@ import type {
   ToolGateRuleEvaluation,
   ToolGateScopedRule,
   ToolGateServiceApi,
+  PolicyAuditEvent,
 } from './types';
+import type { HookManagerService } from '../hooks/service';
+import { HookManagerService as HookManagerServiceTag } from '../hooks/service';
+import type { ObservabilityService } from '../observability/service';
+import { ObservabilityService as ObservabilityServiceTag } from '../observability/service';
 
 const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
@@ -261,7 +266,9 @@ const collectRuleEvaluations = (tool: ToolGateCandidateTool, rules: ToolGateScop
 class ToolGateServiceImpl implements ToolGateServiceApi {
   constructor(
     private readonly policiesRef: Ref.Ref<ToolPoliciesConfig | undefined>,
-    private readonly toolRegistry: ToolRegistryService
+    private readonly toolRegistry: ToolRegistryService,
+    private readonly hookManager?: HookManagerService,
+    private readonly observability?: ObservabilityService
   ) {}
 
   evaluateTool(tool: ToolGateCandidateTool, context: ToolGateContext): Effect.Effect<ToolGateDecision> {
@@ -275,13 +282,69 @@ class ToolGateServiceImpl implements ToolGateServiceApi {
       const hasAllow = matchedRules.some((rule) => rule.effect === 'allow');
       const requireApproval = matchedRules.some((rule) => rule.effect === 'requireApproval');
 
-      return {
+      const decision: ToolGateDecision = {
         toolId: tool.id,
         allowed: !deniedBy && (hasAllow || requireApproval),
         requireApproval,
         deniedBy,
         matchedRules,
       };
+
+      // Emit audit hook event (best-effort, never fails gate decision)
+      if (self.hookManager) {
+        yield* self.emitAuditEvent(decision, context).pipe(
+          Effect.catchAll(() => Effect.succeed(undefined))
+        );
+      }
+
+      return decision;
+    });
+  }
+
+  private emitAuditEvent(decision: ToolGateDecision, context: ToolGateContext): Effect.Effect<void> {
+    const self = this;
+    return Effect.gen(function* () {
+      if (!self.hookManager) {
+        return;
+      }
+
+      // Determine outcome from decision
+      let outcome: 'allow' | 'deny' | 'requireApproval';
+      if (decision.deniedBy) {
+        outcome = 'deny';
+      } else if (decision.requireApproval) {
+        outcome = 'requireApproval';
+      } else {
+        outcome = 'allow';
+      }
+
+      // Hash arguments if ObservabilityService is available and args exist
+      let argsHash: string | undefined;
+      if (self.observability && context.metadata) {
+        argsHash = yield* self.observability.hashPayload(context.metadata);
+      }
+
+      const auditEvent: PolicyAuditEvent = {
+        toolId: decision.toolId,
+        outcome,
+        intentId: context.intentId,
+        agentId: context.agentId,
+        userId: context.userId,
+        role: context.role,
+        matchedRules: decision.matchedRules,
+        deniedBy: decision.deniedBy,
+        argsHash,
+        timestamp: new Date().toISOString(),
+      };
+
+      yield* self.hookManager.executeHooks('afterPolicyDecision', {
+        type: 'afterPolicyDecision',
+        data: auditEvent,
+        conversationId: context.metadata?.conversationId as string | undefined,
+        intentId: context.intentId,
+        agentId: context.agentId,
+        timestamp: auditEvent.timestamp,
+      });
     });
   }
 
@@ -359,6 +422,14 @@ export const ToolGateServiceLive = Layer.effect(
   Effect.gen(function* () {
     const toolRegistry = yield* ToolRegistryService;
     const policiesRef = yield* Ref.make<ToolPoliciesConfig | undefined>(undefined);
-    return new ToolGateServiceImpl(policiesRef, toolRegistry);
+
+    // Optionally resolve HookManagerService and ObservabilityService
+    const hookManagerOption = yield* Effect.serviceOption(HookManagerServiceTag);
+    const observabilityOption = yield* Effect.serviceOption(ObservabilityServiceTag);
+
+    const hookManager = hookManagerOption._tag === 'Some' ? hookManagerOption.value : undefined;
+    const observability = observabilityOption._tag === 'Some' ? observabilityOption.value : undefined;
+
+    return new ToolGateServiceImpl(policiesRef, toolRegistry, hookManager, observability);
   })
 );

@@ -43,6 +43,19 @@ export interface ToolGateScopedRule {
   rule: ToolPolicyRule;
 }
 
+export interface PolicyAuditEvent {
+  toolId: string;
+  outcome: 'allow' | 'deny' | 'requireApproval';
+  intentId?: string;
+  agentId?: string;
+  userId?: string;
+  role?: string;
+  matchedRules: ToolGateRuleEvaluation[];
+  deniedBy?: ToolGateRuleEvaluation;
+  argsHash?: string;
+  timestamp: string;
+}
+
 export interface ToolGateServiceApi {
   evaluateTool(
     tool: ToolGateCandidateTool,
