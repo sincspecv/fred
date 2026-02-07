@@ -13,6 +13,7 @@ export class MCPHealthManager {
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private retryState: Map<string, { attempts: number; maxRetries: number }> =
     new Map();
+  private reconnectInFlight: Map<string, Promise<boolean>> = new Map();
 
   /**
    * Start periodic health check for a server.
@@ -72,6 +73,7 @@ export class MCPHealthManager {
     }
     this.timers.clear();
     this.retryState.clear();
+    this.reconnectInFlight.clear();
   }
 
   /**
@@ -91,6 +93,24 @@ export class MCPHealthManager {
     registry: MCPServerRegistry,
     serverId: string,
     maxRetries: number = 3
+  ): Promise<boolean> {
+    const inFlight = this.reconnectInFlight.get(serverId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const reconnectPromise = this.reconnectServerInternal(registry, serverId, maxRetries).finally(() => {
+      this.reconnectInFlight.delete(serverId);
+    });
+
+    this.reconnectInFlight.set(serverId, reconnectPromise);
+    return reconnectPromise;
+  }
+
+  private async reconnectServerInternal(
+    registry: MCPServerRegistry,
+    serverId: string,
+    maxRetries: number
   ): Promise<boolean> {
     const client = registry.getClient(serverId);
     if (!client) {

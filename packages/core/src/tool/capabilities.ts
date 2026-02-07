@@ -121,10 +121,9 @@ export const withInferredCapabilities = <T extends Tool>(tool: T): T => {
     manual: inferred.manual,
   };
 
-  Object.assign(tool, {
+  return {
+    ...tool,
     capabilities: inferred.capabilities,
     capabilityMetadata,
-  });
-
-  return tool;
+  };
 };

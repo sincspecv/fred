@@ -33,7 +33,7 @@ describe('ToolRegistry', () => {
       registry.registerTool(tool);
 
       expect(registry.hasTool('test-tool')).toBe(true);
-      expect(registry.getTool('test-tool')).toBe(tool);
+      expect(registry.getTool('test-tool')?.id).toBe(tool.id);
       expect(registry.size()).toBe(1);
     });
 
@@ -115,7 +115,7 @@ describe('ToolRegistry', () => {
       registry.registerTool(tool);
 
       const retrieved = registry.getTool('test-tool');
-      expect(retrieved).toBe(tool);
+      expect(retrieved?.id).toBe(tool.id);
     });
 
     test('should return undefined for non-existent tool', () => {
@@ -136,9 +136,7 @@ describe('ToolRegistry', () => {
 
       const retrieved = registry.getTools(['tool-1', 'tool-3']);
       expect(retrieved).toHaveLength(2);
-      expect(retrieved).toContain(tool1);
-      expect(retrieved).toContain(tool3);
-      expect(retrieved).not.toContain(tool2);
+      expect(retrieved.map((tool) => tool.id)).toEqual(['tool-1', 'tool-3']);
     });
 
     test('should return empty array for non-existent IDs', () => {
@@ -152,7 +150,7 @@ describe('ToolRegistry', () => {
 
       const retrieved = registry.getTools(['tool-1', 'non-existent']);
       expect(retrieved).toHaveLength(1);
-      expect(retrieved).toContain(tool1);
+      expect(retrieved[0]?.id).toBe('tool-1');
     });
   });
 
@@ -168,9 +166,7 @@ describe('ToolRegistry', () => {
 
       const allTools = registry.getAllTools();
       expect(allTools).toHaveLength(3);
-      expect(allTools).toContain(tool1);
-      expect(allTools).toContain(tool2);
-      expect(allTools).toContain(tool3);
+      expect(allTools.map((tool) => tool.id).sort()).toEqual(['tool-1', 'tool-2', 'tool-3']);
     });
 
     test('should return empty array when no tools registered', () => {
@@ -334,6 +330,19 @@ describe('ToolRegistry', () => {
       expect(registered?.capabilities).toEqual(['destructive', 'pci-sensitive']);
       expect(registered?.capabilityMetadata?.inferred).toEqual(['destructive']);
       expect(registered?.capabilityMetadata?.manual).toEqual(['pci-sensitive']);
+    });
+
+    test('should not mutate tool object passed into registerTool', () => {
+      const tool = createMockTool('get-account-data', 'Get Account Data');
+
+      expect(tool.capabilities).toBeUndefined();
+      expect(tool.capabilityMetadata).toBeUndefined();
+
+      registry.registerTool(tool);
+
+      expect(tool.capabilities).toBeUndefined();
+      expect(tool.capabilityMetadata).toBeUndefined();
+      expect(registry.getTool('get-account-data')?.capabilities).toEqual(['read']);
     });
 
     test('should produce deterministic capability output across repeated registrations', () => {

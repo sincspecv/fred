@@ -7,9 +7,6 @@
 
 import type { AgentMessage } from '../agent/agent';
 import type { PipelineContext } from './context';
-import { Effect } from 'effect';
-import { getCurrentCorrelationContext, getCurrentSpanIds, getCorrelationContext, getSpanIds } from '../observability/context';
-import { ObservabilityService } from '../observability/service';
 
 /**
  * Handoff configuration that defines allowed delegation targets.
@@ -87,30 +84,6 @@ export function validateHandoffTarget(
 ): HandoffResult {
   const isAllowed = config.allowedTargets.includes(request.targetAgent);
 
-  // Emit trace event for handoff validation (best-effort)
-  const recordValidationEffect = Effect.gen(function* () {
-    const service = yield* ObservabilityService;
-    const correlationCtx = yield* getCorrelationContext;
-    const spanIds = yield* getSpanIds;
-    yield* service.logStructured({
-      level: isAllowed ? 'debug' : 'warning',
-      message: isAllowed ? 'Handoff validation passed' : 'Handoff validation failed',
-      metadata: {
-        handoffFrom: config.sourceAgent,
-        handoffTo: request.targetAgent,
-        reason: request.reason,
-        allowed: isAllowed,
-        allowedTargets: config.allowedTargets,
-        ...correlationCtx,
-        ...spanIds,
-      },
-    });
-  });
-
-  Effect.runPromise(recordValidationEffect).catch(() => {
-    // Best-effort: ignore failures
-  });
-
   if (isAllowed) {
     return {
       type: 'handoff',
@@ -159,39 +132,6 @@ export function prepareHandoffContext(
     ...(request.reason ? { handoffReason: request.reason } : {}),
     ...(request.metadata ?? {}),
   };
-
-  // Emit trace event for handoff context preparation (best-effort)
-  const recordHandoffEffect = Effect.gen(function* () {
-    const service = yield* ObservabilityService;
-    const correlationCtx = yield* getCorrelationContext;
-    const spanIds = yield* getSpanIds;
-
-    // Hash message payload if needed
-    const messageHash = pipelineContext.history.length > 0
-      ? yield* service.hashPayload(pipelineContext.history)
-      : undefined;
-
-    yield* service.logStructured({
-      level: 'info',
-      message: 'Agent handoff prepared',
-      metadata: {
-        handoffFrom: config.sourceAgent,
-        handoffTo: request.targetAgent,
-        handoffReason: request.reason,
-        handoffDepth,
-        handoffChain,
-        historyLength: pipelineContext.history.length,
-        messageHash,
-        preserveHistory,
-        ...correlationCtx,
-        ...spanIds,
-      },
-    });
-  });
-
-  Effect.runPromise(recordHandoffEffect).catch(() => {
-    // Best-effort: ignore failures
-  });
 
   return {
     input: pipelineContext.input,

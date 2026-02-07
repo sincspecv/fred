@@ -44,7 +44,7 @@ export const CorrelationContextRef = FiberRef.unsafeMake<CorrelationContext | un
 /**
  * AsyncLocalStorage bridge for non-Effect consumers.
  */
-const correlationBridge = new AsyncLocalStorage<CorrelationContext>();
+const correlationBridge = new AsyncLocalStorage<CorrelationContext | undefined>();
 
 /**
  * Generate a new correlation context.
@@ -116,9 +116,13 @@ export function getCurrentCorrelationContext(): CorrelationContext | undefined {
 export function withCorrelationContext(ctx: CorrelationContext) {
   return <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     Effect.locally(CorrelationContextRef, ctx)(
-      Effect.sync(() => correlationBridge.enterWith(ctx)).pipe(
-        Effect.flatMap(() => effect)
-      )
+      Effect.suspend(() => {
+        const previous = correlationBridge.getStore();
+        return Effect.sync(() => correlationBridge.enterWith(ctx)).pipe(
+          Effect.flatMap(() => effect),
+          Effect.ensuring(Effect.sync(() => correlationBridge.enterWith(previous)))
+        );
+      })
     );
 }
 

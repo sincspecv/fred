@@ -179,7 +179,7 @@ describe('buildNarrative', () => {
     const narrative = buildNarrative(winner, [], calibrationMetadata, 'function');
 
     expect(narrative).toContain('uncalibrated');
-    expect(narrative).toContain('25 observations, need 50+');
+    expect(narrative).toContain('25 observations, need 100+');
   });
 
   it('should describe all match types correctly', () => {

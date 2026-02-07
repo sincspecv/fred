@@ -72,19 +72,10 @@ export class HookManager {
     // Wire exportTrace function into hook correlation context
     if (this.observability && event.runId) {
       const exportTraceFn = async (traceIdOverride?: string) => {
-        // If traceId is provided, use it directly
-        // Otherwise, resolve from runId
-        let traceId = traceIdOverride;
-        if (!traceId && event.runId) {
-          traceId = await Effect.runPromise(
-            this.observability!.getTraceIdByRunId(event.runId)
-          );
-        }
-        if (!traceId) {
+        if (traceIdOverride !== undefined && traceIdOverride !== event.traceId) {
           return undefined;
         }
-        // For now, exportTrace uses runId as the lookup key
-        // In the future, we could add a traceId -> runId mapping
+
         return Effect.runPromise(
           this.observability!.exportTrace(event.runId!)
         );

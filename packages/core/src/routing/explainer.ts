@@ -12,6 +12,7 @@ import type {
   CalibrationMetadata,
   MatchType,
 } from './types';
+import { MIN_SAMPLES } from './calibration/temperature';
 
 /** Low confidence threshold for concern detection */
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
@@ -99,7 +100,7 @@ export function buildNarrative(
       parts.push(`using temperature ${calibrationMetadata.temperature.toFixed(2)}`);
     }
   } else {
-    parts.push(`(uncalibrated - ${calibrationMetadata.observationCount ?? 0} observations, need 50+)`);
+    parts.push(`(uncalibrated - ${calibrationMetadata.observationCount ?? 0} observations, need ${MIN_SAMPLES}+)`);
   }
 
   // Historical accuracy

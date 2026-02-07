@@ -9,7 +9,7 @@ import { Effect } from 'effect';
 import type { Calibrator } from './index';
 
 /** Minimum samples required before recalibration (cold-start behavior until this threshold) */
-const MIN_SAMPLES = 100;
+export const MIN_SAMPLES = 100;
 
 /** Number of bins for ECE calculation */
 const ECE_BINS = 10;

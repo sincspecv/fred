@@ -154,6 +154,33 @@ describe('MCPHealthManager', () => {
       // Should have attempted reconnect and called initialize
       expect(client.getInitializeCalls()).toBeGreaterThan(0);
     });
+
+    it('should avoid overlapping reconnect attempts during health checks', async () => {
+      const client = new MockMCPClient(true);
+      const config: MCPServerConfig = {
+        id: 'test-server',
+        transport: 'stdio',
+        command: 'test',
+      };
+
+      let initializeCalls = 0;
+      const originalInitialize = client.initialize.bind(client);
+      client.initialize = async () => {
+        initializeCalls++;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return originalInitialize();
+      };
+
+      await Effect.runPromise(registry.registerServer('test-server', config, client));
+
+      healthManager.startHealthCheck(registry, 'test-server', 50);
+
+      client.disconnect();
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      expect(initializeCalls).toBe(1);
+    });
   });
 
   describe('stopHealthCheck', () => {

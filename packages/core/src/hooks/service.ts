@@ -123,16 +123,10 @@ class HookManagerServiceImpl implements HookManagerService {
       // Wire exportTrace function into hook correlation context
       if (self.observability && event.runId) {
         const exportTraceFn = async (traceIdOverride?: string) => {
-          // If traceId is provided, use it directly
-          // Otherwise, resolve from runId
-          let traceId = traceIdOverride;
-          if (!traceId && event.runId) {
-            traceId = await Effect.runPromise(self.observability!.getTraceIdByRunId(event.runId));
-          }
-          if (!traceId) {
+          if (traceIdOverride !== undefined && traceIdOverride !== event.traceId) {
             return undefined;
           }
-          // For now, exportTrace uses runId as the lookup key
+
           return Effect.runPromise(self.observability!.exportTrace(event.runId!));
         };
 
