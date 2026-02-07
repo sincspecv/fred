@@ -20,6 +20,7 @@ import { attachErrorToSpan, classifyError, ErrorClass } from '../observability/e
 import { normalizeMessages, filterHistoryForAgent } from '../messages';
 import { streamMultiStep } from './streaming';
 import { resolveTemplate } from '../variables/template';
+import type { ToolGateServiceApi, ToolGateContext } from '../tool-gate/types';
 
 /**
  * Transform Schema.Struct fields to be OpenAI strict-mode compatible.
@@ -126,6 +127,10 @@ export interface MCPClientMetrics {
   lastDisconnectionTime?: Date;
 }
 
+type AgentRuntimeOptions = {
+  policyContext?: ToolGateContext & { conversationId?: string };
+};
+
 export class AgentFactory {
   private toolRegistry: ToolRegistry;
   private handoffHandler?: {
@@ -145,6 +150,7 @@ export class AgentFactory {
   };
   private shutdownHooksRegistered = false;
   private globalVariablesResolver?: () => Record<string, string | number | boolean>;
+  private toolGateService?: ToolGateServiceApi;
 
   constructor(toolRegistry: ToolRegistry, tracer?: Tracer) {
     this.toolRegistry = toolRegistry;
@@ -165,6 +171,10 @@ export class AgentFactory {
 
   setObservabilityService(observabilityService?: any): void {
     this.observabilityService = observabilityService;
+  }
+
+  setToolGateService(toolGateService?: ToolGateServiceApi): void {
+    this.toolGateService = toolGateService;
   }
 
   setHandoffHandler(handler: { getAgent: (id: string) => any; getAvailableAgents: () => string[] }): void {
@@ -271,7 +281,7 @@ export class AgentFactory {
     config: AgentConfig,
     provider: ProviderDefinition
   ): Promise<{
-    processMessage: (message: string, messages?: AgentMessage[]) => Promise<AgentResponse>;
+    processMessage: (message: string, messages?: AgentMessage[], runtimeOptions?: AgentRuntimeOptions) => Promise<AgentResponse>;
     streamMessage: (
       message: string,
       messages?: AgentMessage[],
@@ -359,7 +369,11 @@ export class AgentFactory {
     // Helper to sleep for a given duration
     const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-    const buildToolHandler = (toolId: string, execute?: (args: Record<string, any>) => Promise<any> | any) => {
+    const buildToolHandler = (
+      toolId: string,
+      execute?: (args: Record<string, any>) => Promise<any> | any,
+      allowedToolIds?: Set<string>
+    ) => {
       return (input: unknown) => {
         const startTime = Date.now();
         const toolSpan = this.tracer?.startSpan('tool.execute', {
@@ -374,6 +388,12 @@ export class AgentFactory {
         const previousActiveSpan = this.tracer?.getActiveSpan();
         if (toolSpan) {
           this.tracer?.setActiveSpan(toolSpan);
+        }
+
+        if (allowedToolIds && !allowedToolIds.has(toolId)) {
+          const deniedError = new Error(`Tool "${toolId}" denied by policy`);
+          deniedError.name = 'ToolPolicyDeniedError';
+          return Effect.fail(deniedError);
         }
 
         // Annotate tool span with Fred identifiers (best effort)
@@ -592,6 +612,32 @@ export class AgentFactory {
       }
     }
 
+    const resolveAllowedToolIds = async (runtimeOptions?: AgentRuntimeOptions): Promise<Set<string>> => {
+      const defaultAllowed = new Set(effectTools.map((tool) => tool.name));
+
+      if (!this.toolGateService) {
+        return defaultAllowed;
+      }
+
+      const gateContext: ToolGateContext = {
+        intentId: runtimeOptions?.policyContext?.intentId,
+        agentId: runtimeOptions?.policyContext?.agentId ?? config.id,
+        userId: runtimeOptions?.policyContext?.userId,
+        role: runtimeOptions?.policyContext?.role,
+        metadata: runtimeOptions?.policyContext?.metadata,
+      };
+
+      const allConfiguredTools = Array.from(toolDefinitions.values()) as FredTool[];
+      const filtered = await Effect.runPromise(this.toolGateService.filterTools(allConfiguredTools, gateContext));
+      const allowed = new Set(filtered.allowed.map((tool) => tool.id));
+
+      if (defaultAllowed.has('handoff_to_agent')) {
+        allowed.add('handoff_to_agent');
+      }
+
+      return allowed;
+    };
+
     const toolkit = effectTools.length > 0 ? Toolkit.make(...effectTools) : undefined;
     const toolHandlers = Object.fromEntries(
       effectTools.map((tool) => [tool.name, buildToolHandler(tool.name, toolExecutors.get(tool.name))])
@@ -626,7 +672,8 @@ export class AgentFactory {
 
     const processMessage = async (
       message: string,
-      previousMessages: AgentMessage[] = []
+      previousMessages: AgentMessage[] = [],
+      runtimeOptions?: AgentRuntimeOptions
     ): Promise<AgentResponse> => {
       const modelSpan = this.tracer?.startSpan('model.call', {
         kind: SpanKind.CLIENT,
@@ -655,6 +702,18 @@ export class AgentFactory {
       Effect.runPromise(modelAnnotation).catch(() => {});
 
       try {
+        const allowedToolIds = await resolveAllowedToolIds(runtimeOptions);
+        const allowedEffectTools = effectTools.filter((tool) => allowedToolIds.has(tool.name));
+        const runtimeToolkit = allowedEffectTools.length > 0 ? Toolkit.make(...allowedEffectTools) : undefined;
+        const runtimeToolHandlers = Object.fromEntries(
+          allowedEffectTools.map((tool) => [
+            tool.name,
+            buildToolHandler(tool.name, toolExecutors.get(tool.name), allowedToolIds),
+          ])
+        );
+        const runtimeToolLayer = runtimeToolkit ? runtimeToolkit.toLayer(runtimeToolHandlers as any) : Layer.empty;
+        const runtimeAvailableToolNames = new Set(allowedEffectTools.map((tool) => tool.name));
+
         // Resolve system message with current variable values
         const resolvedSystemMessage = resolveSystemMessage();
 
@@ -667,13 +726,13 @@ export class AgentFactory {
 
         // Filter history to only include tool calls available to this agent
         // This prevents confusion when agents see tool calls from other agents
-        const promptMessages = filterHistoryForAgent(normalizedMessages, availableToolNames);
+        const promptMessages = filterHistoryForAgent(normalizedMessages, runtimeAvailableToolNames);
 
         // Get the model (AiModel) and compose all layers with proper dependency resolution
         const model = await Effect.runPromise(modelEffect);
         const providerWithHttp = provider.layer.pipe(Layer.provide(FetchHttpClient.layer));
         const modelWithClient = Layer.provide(model, providerWithHttp);
-        const fullLayer = Layer.mergeAll(modelWithClient, toolLayer, BunContext.layer);
+        const fullLayer = Layer.mergeAll(modelWithClient, runtimeToolLayer, BunContext.layer);
 
         // Use @effect/ai's built-in multi-step execution
         // This prevents double execution (no manual loop to duplicate toolkit execution)
@@ -684,7 +743,7 @@ export class AgentFactory {
         // Cast options via unknown to satisfy TypeScript - the runtime types are correct
         const generateOptions = {
           prompt,
-          toolkit,
+          toolkit: runtimeToolkit,
           maxSteps,
           toolChoice: config.toolChoice,
           temperature: config.temperature,
@@ -699,11 +758,26 @@ export class AgentFactory {
         const result = await Effect.runPromise(providedProgram);
 
         // Extract tool calls from result
-        const allToolCalls = (result.toolCalls ?? []).map((tc: any) => ({
-          toolId: tc.name,
-          args: tc.params as Record<string, any>,
-          result: undefined, // @effect/ai doesn't expose results in the response
-        }));
+        const allToolCalls = (result.toolCalls ?? []).map((tc: any) => {
+          const toolId = tc.name as string;
+          if (!allowedToolIds.has(toolId)) {
+            return {
+              toolId,
+              args: tc.params as Record<string, any>,
+              result: `Tool "${toolId}" denied by policy`,
+              error: {
+                code: 'POLICY_DENIED',
+                message: `Tool "${toolId}" denied by policy`,
+              },
+            };
+          }
+
+          return {
+            toolId,
+            args: tc.params as Record<string, any>,
+            result: undefined,
+          };
+        });
 
         const usage = {
           inputTokens: result.usage?.inputTokens ?? 0,
