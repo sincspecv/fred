@@ -15,7 +15,7 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 **Phase:** 23 — Evaluation Framework
 **Plan:** 10 of 10 plans complete
 **Status:** Phase complete
-**Last activity:** 2026-02-06 — Completed 23-10-PLAN.md (config-less replay mode gap closure)
+**Last activity:** 2026-02-06 — Completed 23-11-PLAN.md (suite CLI integration with aggregate metrics)
 
 **Progress:** ████████████ 100% (103/103 plans complete)
 

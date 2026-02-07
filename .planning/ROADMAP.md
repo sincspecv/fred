@@ -133,7 +133,7 @@ Plans:
 
 **Milestone:** v0.3.0
 **Goal:** Developers can record, replay, and compare agent runs to detect regressions and validate behavior deterministically.
-**Status:** 🔄 Gap closure in progress (UAT diagnosed 2026-02-06)
+**Status:** 🔵 In Progress (8/11 plans complete, 3 gap closure plans from UAT diagnosis)
 
 **Requirements Covered:** EVAL-01, EVAL-02, EVAL-03, EVAL-04, EVAL-05, EVAL-06, EVAL-07, EVAL-08
 
@@ -190,7 +190,7 @@ Plans:
 - CLI commands: `fred eval record`, `fred eval replay`, `fred eval compare`
 - Tool mocking layer for deterministic replay
 
-**Plans:** 8 plans (6/8 complete, including 3 gap closure)
+**Plans:** 11 plans (8/11 complete, 3 additional gap closure from UAT diagnosis)
 
 Plans:
 - [x] 23-01-PLAN.md — Build deterministic recording artifact pipeline + TraceStorageService abstraction
@@ -199,8 +199,11 @@ Plans:
 - [x] 23-04-PLAN.md — Add batch suite runner and per-intent confusion-matrix metrics
 - [x] 23-05-PLAN.md — Expose eval workflows via CLI commands and public core exports
 - [x] 23-06-PLAN.md — [GAP] Wire default CLI eval flows to core EvaluationService/comparator APIs
-- [ ] 23-07-PLAN.md — [GAP] Fix record layer provisioning and add config-less replay checkpoint path
-- [ ] 23-08-PLAN.md — [GAP] Replace default suite placeholder with core-backed suite + diagnostics and full default-path regression coverage
+- [x] 23-07-PLAN.md — [GAP] Fix record layer provisioning and add config-less replay checkpoint path
+- [x] 23-08-PLAN.md — [GAP] Replace default suite placeholder with core-backed suite + diagnostics and full default-path regression coverage
+- [ ] 23-09-PLAN.md — [GAP] Fix CLI eval record layer-composition bug (Layer.provide chain)
+- [ ] 23-10-PLAN.md — [GAP] Implement config-less replay mode for artifact/checkpoint validation
+- [ ] 23-11-PLAN.md — [GAP] Wire suite CLI to core runner and unify eval wiring consistency
 
 **Research Flags:**
 - Complex domain around trace format design

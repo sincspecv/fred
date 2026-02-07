@@ -1,8 +1,8 @@
-import { Intent } from '../intent/intent';
-import { AgentConfig } from '../agent/agent';
-import { Tool, ToolSchemaMetadata } from '../tool/tool';
-import { PipelineConfig } from '../pipeline/pipeline';
-import { RoutingConfig } from '../routing/types';
+import type { Intent } from '../intent/intent';
+import type { AgentConfig } from '../agent/agent';
+import type { Tool, ToolSchemaMetadata } from '../tool/tool';
+import type { PipelineConfig } from '../pipeline/pipeline';
+import type { RoutingConfig } from '../routing/types';
 
 // =============================================================================
 // Provider Pack Config Types
@@ -175,6 +175,71 @@ export interface ObservabilityConfig {
 }
 
 // =============================================================================
+// Tool Access Policy Config Types
+// =============================================================================
+
+/**
+ * Declarative metadata predicate for tool policy conditions.
+ */
+export interface ToolPolicyMetadataPredicate {
+  equals?: unknown;
+  notEquals?: unknown;
+  in?: unknown[];
+  notIn?: unknown[];
+  exists?: boolean;
+}
+
+/**
+ * Optional conditions used to scope a policy rule.
+ */
+export interface ToolPolicyCondition {
+  role?: string | string[];
+  userId?: string | string[];
+  metadata?: Record<string, unknown | ToolPolicyMetadataPredicate>;
+}
+
+/**
+ * Base rule declarations for tool access control.
+ *
+ * - allow: tool IDs explicitly allowed
+ * - deny: tool IDs explicitly denied
+ * - requireApproval: tool IDs requiring human approval
+ * - requiredCategories: categories the tool must belong to
+ * - conflictResolution: how allow/deny conflicts are resolved
+ */
+export interface ToolPolicyRule {
+  allow?: string[];
+  deny?: string[];
+  requireApproval?: string[];
+  requiredCategories?: string[];
+  conflictResolution?: 'deny-overrides' | 'allow-overrides';
+  conditions?: ToolPolicyCondition;
+}
+
+/**
+ * Override policy block that explicitly replaces inherited behavior
+ * for the declared scope.
+ */
+export interface ToolPolicyOverride extends ToolPolicyRule {
+  id: string;
+  override: true;
+  target: {
+    intentId?: string;
+    agentId?: string;
+  };
+}
+
+/**
+ * Tool access policies with default -> intent -> agent inheritance.
+ */
+export interface ToolPoliciesConfig {
+  default?: ToolPolicyRule;
+  intents?: Record<string, ToolPolicyRule>;
+  agents?: Record<string, ToolPolicyRule>;
+  overrides?: ToolPolicyOverride[];
+}
+
+// =============================================================================
 // Framework Config
 // =============================================================================
 
@@ -202,6 +267,10 @@ export interface FrameworkConfig {
   persistence?: PersistenceConfig;
   /** Observability configuration (tracing and logging) */
   observability?: ObservabilityConfig;
+  /** Tool access policy declarations */
+  policies?: ToolPoliciesConfig;
+  /** Backward-compatible alias for policy declarations */
+  toolPolicies?: ToolPoliciesConfig;
 }
 
 export interface MemoryConfig {
