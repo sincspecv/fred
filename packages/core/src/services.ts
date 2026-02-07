@@ -9,6 +9,8 @@ import { Effect, Layer, Runtime, Scope, Ref } from 'effect';
 
 // Import all services
 import { ToolRegistryService, ToolRegistryServiceLive } from './tool/service';
+import { ToolGateService, ToolGateServiceLive } from './tool-gate/service';
+import type { ToolGateServiceApi } from './tool-gate/types';
 import { HookManagerService, HookManagerServiceLive } from './hooks/service';
 import { ProviderRegistryService, ProviderRegistryServiceLive } from './platform/service';
 import { ContextStorageService, ContextStorageServiceLive } from './context/service';
@@ -33,6 +35,7 @@ import type { CheckpointStorage, Checkpoint, CheckpointStatus } from './pipeline
  */
 export type FredServices =
   | ToolRegistryService
+  | ToolGateServiceApi
   | HookManagerService
   | ProviderRegistryService
   | ContextStorageService
@@ -220,6 +223,13 @@ const coreLayer = Layer.mergeAll(
 );
 
 /**
+ * ToolGate layer depends on ToolRegistry
+ */
+const toolGateLayer = ToolGateServiceLive.pipe(
+  Layer.provide(ToolRegistryServiceLive)
+);
+
+/**
  * Pause layer depends on Checkpoint
  */
 const pauseLayer = PauseServiceLive.pipe(
@@ -289,6 +299,7 @@ const messageProcessorLayer = MessageProcessorServiceLive.pipe(
  */
 export const FredLayers = Layer.mergeAll(
   baseLayer,
+  toolGateLayer,
   coreLayer,
   pauseLayer,
   agentLayer,
@@ -336,6 +347,8 @@ export const createScopedFredRuntime = (): Promise<FredRuntime> => {
 export {
   ToolRegistryService,
   ToolRegistryServiceLive,
+  ToolGateService,
+  ToolGateServiceLive,
   HookManagerService,
   HookManagerServiceLive,
   ProviderRegistryService,

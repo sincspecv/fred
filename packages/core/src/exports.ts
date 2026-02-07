@@ -3,6 +3,7 @@ export * from './intent/intent';
 export * from './agent/agent';
 // Note: MCPClientMetrics can be imported directly from './agent/factory' if needed
 export * from './tool/tool';
+export * from './tool-gate';
 export type { EffectProviderFactory } from './platform/base';
 export * from './platform/provider';
 
