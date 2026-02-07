@@ -2,27 +2,27 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-06)
+See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Core value:** Route any message to the right agent and execute multi-step pipelines with shared context, without developers stitching orchestration together themselves.
-**Current focus:** v0.3.0 milestone — Phase 24 tool access control in progress
-**Milestone:** v0.3.0 Observability & Safety (Phases 22-26)
+**Current focus:** Planning v0.3.1 CLI/TUI Developer Experience milestone
+**Milestone:** v0.3.1 CLI/TUI Developer Experience (next)
 
 ---
 
 ## Current Position
 
-**Phase:** 26 — Routing Explainability
-**Plan:** 3 of 3 plans complete
-**Status:** ✅ Phase complete
-**Last activity:** 2026-02-07 — Completed 26-03-PLAN.md (Hook emission + public API)
+**Phase:** Not started (next milestone planning)
+**Plan:** Not started
+**Status:** Ready to plan
+**Last activity:** 2026-02-07 — Completed v0.3.0 milestone archival
 
-**Progress:** ████████████ 102.6% (118/115 plans complete)
+**Progress:** ████████░░░░ 66% overall roadmap maturity (v0.3.0 shipped, v0.3.1 unplanned)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
 | 22 | Observability Foundation | 8 | 8/8 | ✅ Complete |
-| 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
+| 23 | Evaluation Framework | 8 | 11/11 | ✅ Complete |
 | 24 | Tool Access Control | 8 | 6/6 | ✅ Complete |
 | 25 | MCP Integration | 10 | 6/6 | ✅ Complete |
 | 26 | Routing Explainability | 3 | 3/3 | ✅ Complete |
@@ -31,7 +31,11 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 
 ## Milestone History
 
-**v0.3.0 — COMPLETE**
+**v0.3.1 — NEXT**
+- CLI/TUI developer experience milestone
+- Start with `/gsd/new-milestone`
+
+**v0.3.0 — SHIPPED 2026-02-07**
 - Target: 5 phases (22-26)
 - 35 requirements mapped
 - Phase 22: ✅ Complete (2026-02-06)
@@ -39,10 +43,6 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Phase 24: ✅ Complete (2026-02-07)
 - Phase 25: ✅ Complete (2026-02-07)
 - Phase 26: ✅ Complete (2026-02-07)
-
-**v0.3.1 — PLANNED**
-- CLI/TUI developer experience
-- Waiting for v0.3.0 completion
 
 **v0.2.0 — SHIPPED 2026-02-01**
 - 22 phases, 86 plans, 1,072 tests
@@ -348,4 +348,4 @@ Resume file: None
 
 *State file tracks current milestone progress*
 *Archives in .planning/milestones/ contain historical data*
-*Last updated: 2026-02-07 — Phase 26 complete (3/3 plans), v0.3.0 milestone complete*
+*Last updated: 2026-02-07 — v0.3.0 archived and shipped, ready to plan v0.3.1*
