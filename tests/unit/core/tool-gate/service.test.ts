@@ -1,10 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { Effect, Layer } from 'effect';
+import { createHash } from 'crypto';
 import type { ToolPoliciesConfig } from '../../../../packages/core/src/config/types';
 import { ToolGateService, ToolGateServiceLive } from '../../../../packages/core/src/tool-gate/service';
-import type { ToolGateContext, ToolGateServiceApi } from '../../../../packages/core/src/tool-gate/types';
+import type { ToolGateContext, ToolGateServiceApi, PolicyAuditEvent } from '../../../../packages/core/src/tool-gate/types';
 import { ToolRegistryServiceLive } from '../../../../packages/core/src/tool/service';
 import type { Tool } from '../../../../packages/core/src/tool/tool';
+import type { HookManagerService } from '../../../../packages/core/src/hooks/service';
+import { HookManagerService as HookManagerServiceTag } from '../../../../packages/core/src/hooks/service';
+import type { HookEvent } from '../../../../packages/core/src/hooks/types';
+import type { ObservabilityService } from '../../../../packages/core/src/observability/service';
+import { ObservabilityService as ObservabilityServiceTag } from '../../../../packages/core/src/observability/service';
 
 const testTool = (id: string, capabilities: string[] = []): Tool => ({
   id,
@@ -20,6 +26,54 @@ const ToolGateTestLayer = ToolGateServiceLive.pipe(
 
 const runWithToolGate = <A, E>(effect: Effect.Effect<A, E, ToolGateServiceApi>) =>
   Effect.runPromise(effect.pipe(Effect.provide(ToolGateTestLayer)));
+
+// Mock HookManagerService that collects events
+const createMockHookManager = () => {
+  const events: HookEvent[] = [];
+
+  const mockService: HookManagerService = {
+    registerHook: () => Effect.succeed(undefined),
+    unregisterHook: () => Effect.succeed(false),
+    executeHooks: (type, event) => Effect.sync(() => {
+      events.push(event);
+      return [];
+    }),
+    executeHooksAndMerge: () => Effect.succeed({}),
+    clearHooks: () => Effect.succeed(undefined),
+    clearAllHooks: () => Effect.succeed(undefined),
+    getRegisteredHookTypes: () => Effect.succeed([]),
+    getHookCount: () => Effect.succeed(0),
+  };
+
+  return { mockService, events };
+};
+
+// Mock ObservabilityService with deterministic hashing
+const createMockObservability = () => {
+  const mockService: ObservabilityService = {
+    hashPayload: (payload) => Effect.sync(() => {
+      const hash = createHash('sha256');
+      hash.update(JSON.stringify(payload));
+      return hash.digest('hex').slice(0, 16);
+    }),
+    logStructured: () => Effect.succeed(undefined),
+    recordMetric: () => Effect.succeed(undefined),
+    recordTokenUsage: () => Effect.succeed(undefined),
+    recordCost: () => Effect.succeed(undefined),
+    recordHookEvent: () => Effect.succeed(undefined),
+    startRun: () => Effect.succeed(undefined),
+    recordHook: () => Effect.succeed(undefined),
+    recordStep: () => Effect.succeed(undefined),
+    recordTool: () => Effect.succeed(undefined),
+    recordModel: () => Effect.succeed(undefined),
+    endRun: () => Effect.succeed(undefined),
+    getTraceIdByRunId: () => Effect.succeed(undefined),
+    exportTrace: () => Effect.succeed(undefined),
+    evaluateSampling: () => Effect.succeed({ shouldSample: true, reason: 'debug' as const }),
+  } as any;
+
+  return mockService;
+};
 
 describe('ToolGateService', () => {
   test('evaluates default -> intent -> agent deterministically with deny precedence', async () => {
@@ -266,5 +320,297 @@ describe('ToolGateService', () => {
     expect(result.before.allowed).toBe(true);
     expect(result.after.allowed).toBe(false);
     expect(result.after.deniedBy?.effect).toBe('deny');
+  });
+
+  describe('policy audit events', () => {
+    test('emits afterPolicyDecision with allow outcome', async () => {
+      const { mockService: mockHookManager, events } = createMockHookManager();
+      const mockObservability = createMockObservability();
+
+      const hookLayer = Layer.succeed(HookManagerServiceTag, mockHookManager);
+      const obsLayer = Layer.succeed(ObservabilityServiceTag, mockObservability);
+
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, Layer.merge(hookLayer, obsLayer)))
+      );
+
+      const policies: ToolPoliciesConfig = {
+        default: { allow: ['write-report'] },
+      };
+
+      const context: ToolGateContext = {
+        intentId: 'reporting',
+        agentId: 'analyst',
+        userId: 'user-123',
+        role: 'admin',
+      };
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.setPolicies(policies);
+          yield* toolGate.evaluateTool({ id: 'write-report', capabilities: ['write'] }, context);
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(events).toHaveLength(1);
+      const event = events[0];
+      expect(event.type).toBe('afterPolicyDecision');
+
+      const auditData = event.data as PolicyAuditEvent;
+      expect(auditData.outcome).toBe('allow');
+      expect(auditData.toolId).toBe('write-report');
+      expect(auditData.intentId).toBe('reporting');
+      expect(auditData.agentId).toBe('analyst');
+      expect(auditData.userId).toBe('user-123');
+      expect(auditData.role).toBe('admin');
+      expect(auditData.matchedRules).toHaveLength(1);
+      expect(auditData.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    });
+
+    test('emits afterPolicyDecision with deny outcome', async () => {
+      const { mockService: mockHookManager, events } = createMockHookManager();
+      const mockObservability = createMockObservability();
+
+      const hookLayer = Layer.succeed(HookManagerServiceTag, mockHookManager);
+      const obsLayer = Layer.succeed(ObservabilityServiceTag, mockObservability);
+
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, Layer.merge(hookLayer, obsLayer)))
+      );
+
+      const policies: ToolPoliciesConfig = {
+        default: { deny: ['delete-database'] },
+      };
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.setPolicies(policies);
+          yield* toolGate.evaluateTool({ id: 'delete-database' }, {});
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(events).toHaveLength(1);
+      const auditData = events[0].data as PolicyAuditEvent;
+      expect(auditData.outcome).toBe('deny');
+      expect(auditData.deniedBy).toBeDefined();
+      expect(auditData.deniedBy?.effect).toBe('deny');
+    });
+
+    test('emits afterPolicyDecision with requireApproval outcome', async () => {
+      const { mockService: mockHookManager, events } = createMockHookManager();
+      const mockObservability = createMockObservability();
+
+      const hookLayer = Layer.succeed(HookManagerServiceTag, mockHookManager);
+      const obsLayer = Layer.succeed(ObservabilityServiceTag, mockObservability);
+
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, Layer.merge(hookLayer, obsLayer)))
+      );
+
+      const policies: ToolPoliciesConfig = {
+        default: { requireApproval: ['deploy-production'] },
+      };
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.setPolicies(policies);
+          yield* toolGate.evaluateTool({ id: 'deploy-production' }, {});
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(events).toHaveLength(1);
+      const auditData = events[0].data as PolicyAuditEvent;
+      expect(auditData.outcome).toBe('requireApproval');
+    });
+
+    test('includes hashed arguments in audit event', async () => {
+      const { mockService: mockHookManager, events } = createMockHookManager();
+      const mockObservability = createMockObservability();
+
+      const hookLayer = Layer.succeed(HookManagerServiceTag, mockHookManager);
+      const obsLayer = Layer.succeed(ObservabilityServiceTag, mockObservability);
+
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, Layer.merge(hookLayer, obsLayer)))
+      );
+
+      const policies: ToolPoliciesConfig = {
+        default: { allow: ['send-email'] },
+      };
+
+      const context: ToolGateContext = {
+        metadata: {
+          recipient: 'user@example.com',
+          subject: 'Test email',
+        },
+      };
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.setPolicies(policies);
+          yield* toolGate.evaluateTool({ id: 'send-email' }, context);
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(events).toHaveLength(1);
+      const auditData = events[0].data as PolicyAuditEvent;
+      expect(auditData.argsHash).toBeDefined();
+      expect(auditData.argsHash).toHaveLength(16);
+      expect(auditData.argsHash).toMatch(/^[0-9a-f]+$/);
+    });
+
+    test('includes matched rules in audit event', async () => {
+      const { mockService: mockHookManager, events } = createMockHookManager();
+      const mockObservability = createMockObservability();
+
+      const hookLayer = Layer.succeed(HookManagerServiceTag, mockHookManager);
+      const obsLayer = Layer.succeed(ObservabilityServiceTag, mockObservability);
+
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, Layer.merge(hookLayer, obsLayer)))
+      );
+
+      const policies: ToolPoliciesConfig = {
+        default: { allow: ['write-report'] },
+        intents: { reporting: { allow: ['write-report'] } },
+        agents: { analyst: { deny: ['write-report'] } },
+      };
+
+      const context: ToolGateContext = {
+        intentId: 'reporting',
+        agentId: 'analyst',
+      };
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.setPolicies(policies);
+          yield* toolGate.evaluateTool({ id: 'write-report' }, context);
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(events).toHaveLength(1);
+      const auditData = events[0].data as PolicyAuditEvent;
+      expect(auditData.matchedRules).toHaveLength(3);
+      expect(auditData.matchedRules.map((r) => `${r.scope}:${r.effect}`)).toEqual([
+        'default:allow',
+        'intent:allow',
+        'agent:deny',
+      ]);
+    });
+
+    test('includes timestamp in audit event', async () => {
+      const { mockService: mockHookManager, events } = createMockHookManager();
+      const mockObservability = createMockObservability();
+
+      const hookLayer = Layer.succeed(HookManagerServiceTag, mockHookManager);
+      const obsLayer = Layer.succeed(ObservabilityServiceTag, mockObservability);
+
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, Layer.merge(hookLayer, obsLayer)))
+      );
+
+      const policies: ToolPoliciesConfig = {
+        default: { allow: ['test-tool'] },
+      };
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.setPolicies(policies);
+          yield* toolGate.evaluateTool({ id: 'test-tool' }, {});
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      expect(events).toHaveLength(1);
+      const auditData = events[0].data as PolicyAuditEvent;
+      expect(auditData.timestamp).toBeDefined();
+
+      // Verify it's a valid ISO 8601 timestamp
+      const timestamp = new Date(auditData.timestamp);
+      expect(timestamp.toISOString()).toBe(auditData.timestamp);
+    });
+
+    test('audit emission failure does not break gate decision', async () => {
+      // Create a hook manager that throws
+      const throwingHookManager: HookManagerService = {
+        registerHook: () => Effect.succeed(undefined),
+        unregisterHook: () => Effect.succeed(false),
+        executeHooks: () => Effect.fail(new Error('Hook execution failed')),
+        executeHooksAndMerge: () => Effect.fail(new Error('Hook execution failed')),
+        clearHooks: () => Effect.succeed(undefined),
+        clearAllHooks: () => Effect.succeed(undefined),
+        getRegisteredHookTypes: () => Effect.succeed([]),
+        getHookCount: () => Effect.succeed(0),
+      };
+
+      const mockObservability = createMockObservability();
+
+      const hookLayer = Layer.succeed(HookManagerServiceTag, throwingHookManager);
+      const obsLayer = Layer.succeed(ObservabilityServiceTag, mockObservability);
+
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, Layer.merge(hookLayer, obsLayer)))
+      );
+
+      const policies: ToolPoliciesConfig = {
+        default: { allow: ['test-tool'] },
+      };
+
+      // This should not throw even though hooks fail
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.setPolicies(policies);
+          return yield* toolGate.evaluateTool({ id: 'test-tool' }, {});
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      // Gate decision should still work
+      expect(result.allowed).toBe(true);
+      expect(result.toolId).toBe('test-tool');
+    });
+
+    test('filterTools emits one audit event per tool', async () => {
+      const { mockService: mockHookManager, events } = createMockHookManager();
+      const mockObservability = createMockObservability();
+
+      const hookLayer = Layer.succeed(HookManagerServiceTag, mockHookManager);
+      const obsLayer = Layer.succeed(ObservabilityServiceTag, mockObservability);
+
+      const testLayer = ToolGateServiceLive.pipe(
+        Layer.provide(Layer.merge(ToolRegistryServiceLive, Layer.merge(hookLayer, obsLayer)))
+      );
+
+      const tools = [
+        testTool('tool-a'),
+        testTool('tool-b'),
+        testTool('tool-c'),
+      ];
+
+      const policies: ToolPoliciesConfig = {
+        default: { allow: ['tool-a', 'tool-b', 'tool-c'] },
+      };
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolGate = yield* ToolGateService;
+          yield* toolGate.setPolicies(policies);
+          yield* toolGate.filterTools(tools, {});
+        }).pipe(Effect.provide(testLayer))
+      );
+
+      // Should emit 3 events (one per tool)
+      expect(events).toHaveLength(3);
+      expect(events.map((e) => (e.data as PolicyAuditEvent).toolId)).toEqual([
+        'tool-a',
+        'tool-b',
+        'tool-c',
+      ]);
+    });
   });
 });
