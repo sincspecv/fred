@@ -13,18 +13,18 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 ## Current Position
 
 **Phase:** 25 — MCP Integration
-**Plan:** 1 of 6 plans complete
+**Plan:** 4 of 6 plans complete
 **Status:** In progress
-**Last activity:** 2026-02-07 — Completed 25-02-PLAN.md (MCP registry with Effect lifecycle)
+**Last activity:** 2026-02-07 — Completed 25-04-PLAN.md (MCP resource service and tool discovery)
 
-**Progress:** ████████████ 99% (113/115 plans complete)
+**Progress:** ████████████ 99% (114/115 plans complete)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
 | 22 | Observability Foundation | 8 | 8/8 | ✅ Complete |
 | 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
 | 24 | Tool Access Control | 8 | 6/6 | ✅ Complete |
-| 25 | MCP Integration | 10 | 2/6 | 🔵 In progress |
+| 25 | MCP Integration | 10 | 4/6 | 🔵 In progress |
 | 26 | Routing Explainability | 3 | — | ⚪ Not started |
 
 ---
@@ -134,6 +134,10 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - MCPServerRegistry stores initialized clients with status tracking (connected/disconnected/error) (Phase 25-02)
 - Effect.acquireRelease guarantees MCP client cleanup on shutdown or error via lifecycle.ts (Phase 25-02)
 - Duplicate server registration rejected - same server ID cannot be registered twice (Phase 25-02)
+- Resource service returns empty array + warning for disconnected servers (not error) (Phase 25-04)
+- Tool execution returns formatted error string instead of throwing exceptions (Phase 25-04)
+- discoverAllTools skips error servers gracefully using Effect.either (Phase 25-04)
+- Tool error format: "Tool server/tool failed: message" for consistent agent feedback (Phase 25-04)
 
 **Safety Decisions:**
 - Gate tools at discovery time (LLM never sees disallowed tools)
@@ -166,7 +170,7 @@ None.
 
 ## Phase 25: MCP Integration — IN PROGRESS
 
-**Status:** 🔵 In progress (1/6 plans complete)
+**Status:** 🔵 In progress (4/6 plans complete)
 **Started:** 2026-02-07
 
 **What was built:**
@@ -175,14 +179,20 @@ None.
 - extractMCPServers function with ${ENV_VAR} resolution and defaults (25-01)
 - Warn-only MCP config validation (unknown servers, missing required fields) (25-01)
 - Agent mcpServers field updated to accept string[] (server ID refs) or legacy MCPServerConfig[] (25-01)
+- MCPServerRegistry with Effect.acquireRelease lifecycle and server/tool namespace format (25-02)
+- MCPResourceService for listing and reading resources from MCP servers (25-04)
+- Enhanced tool discovery with graceful error handling for disconnected servers (25-04)
 
 **Key achievements:**
 - Environment variables resolve at config load time with fallback to literal values
 - MCP config validation never blocks Fred startup (warn-only semantics)
 - Agent config supports dual format for smooth migration path
-- Foundation for global server registry pattern (plans 25-02+)
+- Effect-managed client lifecycle guarantees cleanup on shutdown or error
+- Tool namespace format (server/tool) prevents collisions between servers
+- Resource service and tool discovery handle mid-conversation server failures gracefully
+- Tool execution returns error messages instead of throwing exceptions
 
-**Next:** 25-02 — Global MCPServerRegistry with Effect lifecycle
+**Next:** 25-05 — Agent factory integration with global registry
 
 ---
 
@@ -211,8 +221,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-07T03:00:08Z
-Stopped at: Completed 25-02-PLAN.md (MCP registry with Effect lifecycle - 2/6 plans)
+Last session: 2026-02-07T03:10:47Z
+Stopped at: Completed 25-04-PLAN.md (MCP resource service and tool discovery - 4/6 plans)
 Resume file: None
 
 ---
