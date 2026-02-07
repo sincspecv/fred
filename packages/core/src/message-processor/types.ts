@@ -45,6 +45,7 @@ export interface RouteResult {
   type: 'agent' | 'pipeline' | 'intent' | 'default' | 'none';
   agent?: AgentInstance;
   agentId?: string;
+  intentId?: string;
   pipelineId?: string;
   response?: AgentResponse;
 }
@@ -58,6 +59,9 @@ export interface ProcessingOptions {
   conversationId?: string;
   requireConversationId?: boolean;
   sequentialVisibility?: boolean;
+  userId?: string;
+  role?: string;
+  policyMetadata?: Record<string, unknown>;
 }
 
 /**

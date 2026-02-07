@@ -10,8 +10,10 @@ import {
   extractWorkflows,
   extractProviders,
   extractObservability,
+  extractToolPolicies,
 } from './loader';
 import { loadPromptFile } from '../utils/prompt-loader';
+import type { ToolPoliciesConfig } from './types';
 import { PostgresContextStorage } from '../context/storage/postgres';
 import { SqliteContextStorage } from '../context/storage/sqlite';
 import {
@@ -38,6 +40,7 @@ export interface FredLike {
   configureRouting(config: import('../routing/types').RoutingConfig): void;
   configureWorkflows(workflows: import('../workflow/types').Workflow[]): void;
   configureObservability(config: import('./types').ObservabilityConfig): void;
+  setToolPolicies?(policies: ToolPoliciesConfig | undefined): Promise<void> | void;
 }
 
 /**
@@ -95,6 +98,11 @@ export class ConfigInitializer {
     // Configure observability (tracing and logging)
     const observabilityConfig = extractObservability(config);
     fred.configureObservability(observabilityConfig);
+
+    const toolPolicies = extractToolPolicies(config);
+    if (fred.setToolPolicies) {
+      await fred.setToolPolicies(toolPolicies);
+    }
 
     // Register providers
     const providers = extractProviders(config);

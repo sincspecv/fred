@@ -29,6 +29,7 @@ import { WorkflowManager } from './workflow/manager';
 import { Workflow } from './workflow/types';
 import { buildObservabilityLayers, type ObservabilityLayers } from './observability/otel';
 import type { ObservabilityConfig } from './config/types';
+import type { ToolPoliciesConfig } from './config/types';
 import {
   GlobalVariablesService,
   GlobalVariablesServiceLive,
@@ -48,6 +49,7 @@ import {
   ContextStorageService,
   ProviderRegistryService,
   HookManagerService,
+  ToolGateService,
 } from './services';
 import { normalizeRunRecord, normalizeLegacyGoldenTrace } from './eval/normalizer';
 import { FileTraceStorageLive } from './eval/storage';
@@ -510,6 +512,16 @@ export class Fred implements FredLike {
 
   configureObservability(config: ObservabilityConfig): void {
     this.observabilityLayers = buildObservabilityLayers(config);
+  }
+
+  async setToolPolicies(policies: ToolPoliciesConfig | undefined): Promise<void> {
+    await this.runEffect(
+      Effect.gen(function* () {
+        const toolGate = yield* ToolGateService;
+        yield* toolGate.reloadPolicies(policies);
+      }),
+      'Failed to apply tool policies'
+    );
   }
 
   getObservabilityLayers(): ObservabilityLayers | undefined {

@@ -344,6 +344,7 @@ export class MessageProcessor {
                   type: 'agent',
                   agent,
                   agentId: match.intent.action.target,
+                  intentId: match.intent.id,
                 } as RouteResult;
               }
             } else {
@@ -596,10 +597,21 @@ export class MessageProcessor {
           }
 
           response = yield* Effect.tryPromise({
-            try: () => route.agent!.processMessage(
-              message,
-              sequentialVisibility ? previousMessages : []
-            ),
+            try: () =>
+              (route.agent!.processMessage as any)(
+                message,
+                sequentialVisibility ? previousMessages : [],
+                {
+                  policyContext: {
+                    intentId: route.intentId,
+                    agentId: route.agentId,
+                    conversationId: actualConversationId,
+                    userId: options?.userId,
+                    role: options?.role,
+                    metadata: options?.policyMetadata,
+                  },
+                }
+              ) as Promise<AgentResponse>,
             catch: (error) => new RouteExecutionError({
               routeType: 'agent',
               cause: error,
