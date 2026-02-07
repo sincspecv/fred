@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 
 ## Current Position
 
-**Phase:** 25 — MCP Integration
-**Plan:** 6 of 6 plans complete
-**Status:** Phase complete
-**Last activity:** 2026-02-07 — Completed 25-06-PLAN.md (Fred class integration and public API wiring)
+**Phase:** 26 — Routing Explainability
+**Plan:** 2 of 3 plans complete
+**Status:** In progress
+**Last activity:** 2026-02-07 — Completed 26-02-PLAN.md (Router + intent matcher integration)
 
-**Progress:** ████████████ 100% (115/115 plans complete)
+**Progress:** ████████████░ 101.7% (117/115 plans complete)
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 | 23 | Evaluation Framework | 8 | 10/10 | ✅ Complete |
 | 24 | Tool Access Control | 8 | 6/6 | ✅ Complete |
 | 25 | MCP Integration | 10 | 6/6 | ✅ Complete |
-| 26 | Routing Explainability | 3 | — | ⚪ Not started |
+| 26 | Routing Explainability | 3 | 2/3 | 🔄 In progress |
 
 ---
 
@@ -37,7 +37,8 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Phase 22: ✅ Complete (2026-02-06)
 - Phase 23: ✅ Complete (2026-02-06)
 - Phase 24: ✅ Complete (2026-02-07)
-- Next: Phase 25 (MCP Integration)
+- Phase 25: ✅ Complete (2026-02-07)
+- Next: Phase 26 Plan 02 (Router Integration)
 
 **v0.3.1 — PLANNED**
 - CLI/TUI developer experience
@@ -150,6 +151,18 @@ See: .planning/PROJECT.md (updated 2026-02-06)
 - Denied MCP tools never added to effectTools - LLM never sees them (Phase 25-05)
 - Unknown server IDs log warning but don't crash agent creation (Phase 25-05)
 
+**Routing Explainability Decisions (Phase 26):**
+- Numeric confidence scores only (0.0-1.0), no qualitative labels (HIGH/MEDIUM/LOW) (Phase 26-01)
+- Temperature scaling with cold-start: no calibration until 100 observations (Phase 26-01)
+- Separate calibrators for rule-based vs intent-based routing via AdaptiveCalibrationCoordinator (Phase 26-01)
+- Plain JavaScript closures for calibrator state instead of Effect Ref (simpler, single-threaded) (Phase 26-01)
+- Low-confidence threshold = 0.6, close-alternatives gap = 0.1 for concern detection (Phase 26-01)
+- Both structured (RoutingExplanation) and narrative formats generated from same data (Phase 26-01)
+- Optional calibration integration via constructor params for backward compatibility (Phase 26-02)
+- findBestMatch() returns { best, allMatches } to enable explanation generation (Phase 26-02)
+- Match type priority preserved in IntentMatcher: exact > regex > semantic (Phase 26-02)
+- Generate explanations even without calibration (use raw scores, set calibrated=false) (Phase 26-02)
+
 **Safety Decisions:**
 - Gate tools at discovery time (LLM never sees disallowed tools)
 - All MCP tools pass through ToolGateService before being offered to LLM
@@ -225,6 +238,39 @@ None.
 
 ---
 
+## Phase 26: Routing Explainability — IN PROGRESS
+
+**Status:** 2/3 plans complete
+**Started:** 2026-02-07
+
+**What was built (26-01)**:
+- RoutingExplanation, RoutingAlternative, CalibrationMetadata, RoutingConcern types
+- Extended RoutingDecision with optional explanation field
+- TemperatureScalingCalibrator with ECE-based adaptation and cold-start behavior
+- HistoricalAccuracyTracker for per-target accuracy recording
+- AdaptiveCalibrationCoordinator with separate rule/intent calibrators
+- Explanation generator producing structured + narrative formats from same data
+- 31 tests (17 calibration + 14 explainer) all passing
+
+**What was built (26-02)**:
+- MessageRouter explanation generation with optional calibration
+- findBestMatch() returns { best, allMatches } for alternative collection
+- IntentMatcher allCandidates field with multi-tier candidate collection
+- Match type priority sorting (exact > regex > semantic) in IntentMatcher
+- Fallback decision explanation generation with 0.5 confidence
+- 12 new tests (6 router + 6 intent matcher) all passing
+
+**Key achievements**:
+- Every routing decision now produces complete explanation (winner, alternatives, confidence, narrative)
+- Calibration is optional - backward compatible with existing code
+- Multi-candidate collection across all matching rules/intents
+- Explanations generated even without calibration (uses raw scores)
+- Match type priority preserved in intent matching tier order
+
+**Next**: 26-03 (Hook Emission)
+
+---
+
 ## Phase 24: Tool Access Control — COMPLETE
 
 **Status:** ✅ Complete (6/6 plans executed)
@@ -250,8 +296,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-07T03:30:57Z
-Stopped at: Completed 25-06-PLAN.md (Fred class integration and public API wiring - Phase 25 complete)
+Last session: 2026-02-07T05:57:04Z
+Stopped at: Completed 26-02-PLAN.md (Router + intent matcher explanation integration)
 Resume file: None
 
 ---

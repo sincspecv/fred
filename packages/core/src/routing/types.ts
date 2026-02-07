@@ -109,6 +109,9 @@ export interface RoutingDecision {
 
   /** Routing explanation with confidence and alternatives */
   explanation?: RoutingExplanation;
+
+  /** HITL clarification request (present when low confidence or ambiguous routing) */
+  clarificationNeeded?: import('../pipeline/pause/types').PauseSignal;
 }
 
 /**

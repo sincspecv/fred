@@ -25,6 +25,7 @@ export type HookType =
   // Routing hooks
   | 'beforeRouting'
   | 'afterRouting'
+  | 'afterRoutingDecision' // Emitted only when routing concerns are detected
   // Pipeline-specific hooks
   | 'beforePipeline' // Before pipeline execution starts
   | 'afterPipeline' // After pipeline completes successfully

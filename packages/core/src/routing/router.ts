@@ -161,6 +161,21 @@ export class MessageRouter {
           match.matchType
         );
 
+        // Generate HITL clarification pause signal if needed (use filtered alternatives from explanation)
+        let clarificationNeeded: import('../pipeline/pause/types').PauseSignal | undefined;
+        const filteredAlternatives = explanation.alternatives; // Already filtered to exclude winner
+        if (calibratedConfidence < 0.6 || (filteredAlternatives.length > 0 && calibratedConfidence - filteredAlternatives[0].confidence < 0.1)) {
+          const reason = calibratedConfidence < 0.6
+            ? `Low confidence (${(calibratedConfidence * 100).toFixed(1)}%)`
+            : `Close alternatives (gap: ${((calibratedConfidence - filteredAlternatives[0].confidence) * 100).toFixed(1)}%)`;
+
+          clarificationNeeded = {
+            __pause: true,
+            prompt: `Routing confidence is low. ${reason}. Please clarify your intent.\n\nSelected: ${match.rule.agent}\nAlternatives: ${filteredAlternatives.map(a => `${a.targetName} (${(a.confidence * 100).toFixed(1)}%)`).join(', ')}`,
+            resumeBehavior: 'continue',
+          };
+        }
+
         decision = {
           agent: match.rule.agent,
           rule: match.rule,
@@ -168,6 +183,7 @@ export class MessageRouter {
           fallback: false,
           specificity: match.specificity,
           explanation,
+          clarificationNeeded,
         };
       } else {
         const fallbackAgent = yield* self.getFallbackAgentEffect();
@@ -200,6 +216,31 @@ export class MessageRouter {
       }
 
       const durationMs = Date.now() - startTime;
+
+      // Emit afterRoutingDecision hook ONLY when concerns are detected
+      if (self.hookManager && decision.explanation && decision.explanation.concerns.length > 0) {
+        const hookEvent: HookEvent = {
+          type: 'afterRoutingDecision',
+          data: {
+            message,
+            metadata,
+            decision,
+            explanation: decision.explanation,
+            concerns: decision.explanation.concerns,
+            durationMs,
+          },
+          ...correlationContext,
+          agentId: decision.agent,
+        };
+        yield* Effect.tryPromise({
+          try: () => self.hookManager!.executeHooks('afterRoutingDecision', hookEvent),
+          catch: (error) => {
+            // Log hook error but don't fail routing - hooks are optional
+            console.warn('afterRoutingDecision hook failed:', error);
+            return error;
+          }
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      }
 
       // Debug logging using Effect.log with intent metadata if available
       if (self.config.debug) {
