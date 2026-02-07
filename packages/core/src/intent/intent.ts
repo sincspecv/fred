@@ -30,6 +30,12 @@ export interface IntentMatch {
   confidence: number; // 0-1 confidence score
   matchedUtterance?: string; // The utterance that matched
   matchType: 'exact' | 'regex' | 'semantic'; // How the match was made
+  allCandidates?: Array<{
+    intentId: string;
+    intentName: string;
+    confidence: number;
+    matchType: 'exact' | 'regex' | 'semantic';
+  }>;
 }
 
 

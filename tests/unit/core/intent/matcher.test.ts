@@ -339,4 +339,116 @@ describe('IntentMatcher', () => {
       expect(match?.matchType).toBe('semantic');
     });
   });
+
+  describe('matchIntent - allCandidates collection', () => {
+    test('matchIntent returns allCandidates with all evaluated intents', async () => {
+      const matcher = await createTestMatcher();
+      const intent1 = createIntent('greeting', ['hello', 'hi there']);
+      const intent2 = createIntent('weather', ['weather', 'temperature']);
+      await Effect.runPromise(matcher.registerIntents([intent1, intent2]));
+
+      const match = await Effect.runPromise(matcher.matchIntent('hello'));
+
+      expect(match).not.toBeNull();
+      expect(match?.allCandidates).toBeDefined();
+      expect(match?.allCandidates?.length).toBeGreaterThan(0);
+      expect(match?.allCandidates?.[0].intentId).toBe('greeting');
+    });
+
+    test('matchIntent allCandidates sorted by confidence descending', async () => {
+      const matcher = await createTestMatcher();
+      const intent1 = createIntent('exact-match', ['test']);
+      const intent2 = createIntent('regex-match', ['test.*']);
+      await Effect.runPromise(matcher.registerIntents([intent1, intent2]));
+
+      const match = await Effect.runPromise(matcher.matchIntent('test'));
+
+      expect(match).not.toBeNull();
+      expect(match?.allCandidates).toBeDefined();
+
+      const candidates = match!.allCandidates!;
+      expect(candidates.length).toBeGreaterThan(0);
+
+      // Check that candidates are sorted by confidence descending
+      for (let i = 1; i < candidates.length; i++) {
+        expect(candidates[i - 1].confidence).toBeGreaterThanOrEqual(candidates[i].confidence);
+      }
+    });
+
+    test('matchIntent with multiple exact matches includes all in candidates', async () => {
+      const matcher = await createTestMatcher();
+      const intent1 = createIntent('greeting-1', ['hello']);
+      const intent2 = createIntent('greeting-2', ['hello']);
+      await Effect.runPromise(matcher.registerIntents([intent1, intent2]));
+
+      const match = await Effect.runPromise(matcher.matchIntent('hello'));
+
+      expect(match).not.toBeNull();
+      expect(match?.allCandidates).toBeDefined();
+      expect(match?.allCandidates?.length).toBeGreaterThanOrEqual(2);
+
+      const intentIds = match!.allCandidates!.map((c) => c.intentId);
+      expect(intentIds).toContain('greeting-1');
+      expect(intentIds).toContain('greeting-2');
+    });
+
+    test('matchIntent with regex match includes exact + regex candidates', async () => {
+      const matcher = await createTestMatcher();
+      const intent1 = createIntent('exact', ['test message']);
+      const intent2 = createIntent('regex', ['test.*']);
+      await Effect.runPromise(matcher.registerIntents([intent1, intent2]));
+
+      const match = await Effect.runPromise(matcher.matchIntent('test message'));
+
+      expect(match).not.toBeNull();
+      expect(match?.allCandidates).toBeDefined();
+      expect(match?.allCandidates?.length).toBeGreaterThan(0);
+
+      const matchTypes = match!.allCandidates!.map((c) => c.matchType);
+      expect(matchTypes).toContain('exact');
+    });
+
+    test('matchIntent with semantic matcher includes all tiers in candidates', async () => {
+      const matcher = await createTestMatcher();
+      const intent1 = createIntent('exact', ['hello']);
+      const intent2 = createIntent('regex', ['hel.*']);
+      const intent3 = createIntent('semantic-only', ['greeting']);
+      await Effect.runPromise(matcher.registerIntents([intent1, intent2, intent3]));
+
+      const semanticMatcher = async (message: string, utterances: string[]) => {
+        // Match the semantic-only intent
+        if (utterances.includes('greeting')) {
+          return {
+            matched: true,
+            confidence: 0.7,
+            utterance: 'greeting',
+          };
+        }
+        return {
+          matched: false,
+          confidence: 0.0,
+        };
+      };
+
+      const match = await Effect.runPromise(matcher.matchIntent('hello', semanticMatcher));
+
+      expect(match).not.toBeNull();
+      expect(match?.allCandidates).toBeDefined();
+
+      const matchTypes = match!.allCandidates!.map((c) => c.matchType);
+      // Should have exact and regex matches
+      expect(matchTypes).toContain('exact');
+      expect(matchTypes).toContain('regex');
+    });
+
+    test('matchIntent returns null when no matches (same as before)', async () => {
+      const matcher = await createTestMatcher();
+      const intent = createIntent('greeting', ['hello']);
+      await Effect.runPromise(matcher.registerIntents([intent]));
+
+      const match = await Effect.runPromise(matcher.matchIntent('goodbye'));
+
+      expect(match).toBeNull();
+    });
+  });
 });
