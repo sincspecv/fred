@@ -23,7 +23,7 @@ Roadmap is milestone-scoped; shipped milestones are archived under `.planning/mi
 
 **Milestone Goal:** Transform `@fancyrobot/fred-cli` into a production-grade CLI + TUI that any Fred project can install and instantly use.
 
-- [ ] **Phase 27: Terminal Foundation & Project Detection** - Terminal lifecycle management and project auto-detection
+- [x] **Phase 27: Terminal Foundation & Project Detection** - Terminal lifecycle management and project auto-detection (completed 2026-02-08)
 - [ ] **Phase 28: Streaming Performance & Core TUI** - High-performance streaming token rendering and TUI layout
 - [ ] **Phase 29: Session Management** - Persistent sessions with export capabilities
 - [ ] **Phase 30: CLI Commands** - Headless operation and config validation
@@ -48,7 +48,7 @@ Plans:
 - [x] 27-01-PLAN.md — Build project/config detection and actionable validation diagnostics (completed 2026-02-07, 4.25 min)
 - [x] 27-02-PLAN.md — Add terminal lifecycle safety, help-first default, and `fred chat` command routing (completed 2026-02-07, 4.50 min)
 - [x] 27-03-PLAN.md — Implement multi-pane TUI shell with keyboard focus and scroll navigation (completed 2026-02-08, 6.80 min)
-- [ ] 27-04-PLAN.md — Add phase smoke coverage and run blocking human verification checkpoint
+- [x] 27-04-PLAN.md — Add phase smoke coverage and run blocking human verification checkpoint (completed 2026-02-08, ~12 min)
 
 ### Phase 28: Streaming Performance & Core TUI
 **Goal**: Deliver high-performance streaming token rendering with optimized Effect Stream integration and complete TUI interaction model
@@ -128,7 +128,7 @@ Phases execute in numeric order: 27 → 28 → 29 → 30 → 31 → 32
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 27. Terminal Foundation & Project Detection | 0/4 | Not started | - |
+| 27. Terminal Foundation & Project Detection | 4/4 | Complete | 2026-02-08 |
 | 28. Streaming Performance & Core TUI | 0/TBD | Not started | - |
 | 29. Session Management | 0/TBD | Not started | - |
 | 30. CLI Commands | 0/TBD | Not started | - |
@@ -155,4 +155,4 @@ See `.planning/milestones/v0.2.0-ROADMAP.md` for complete details.
 
 ---
 
-*Last updated: 2026-02-07 - v0.3.1 roadmap created*
+*Last updated: 2026-02-08 - Phase 27 complete*
