@@ -1,14 +1,22 @@
-import { FrameworkConfig, ConfigStep, ConfigConditionalStep, ProviderPackConfig, PersistenceConfig } from './types';
+import type {
+  FrameworkConfig,
+  ConfigStep,
+  ConfigConditionalStep,
+  ProviderPackConfig,
+  ToolPoliciesConfig,
+  ToolPolicyRule,
+  MCPGlobalServerConfig,
+} from './types';
 import { parseConfigFile } from './parser';
-import { Intent } from '../intent/intent';
-import { AgentConfig } from '../agent/agent';
-import { PipelineConfig, PipelineConfigV2 } from '../pipeline/pipeline';
-import { PipelineStep } from '../pipeline/steps';
-import { Tool, ToolSchemaMetadata } from '../tool/tool';
+import type { Intent } from '../intent/intent';
+import type { AgentConfig } from '../agent/agent';
+import type { PipelineConfig, PipelineConfigV2 } from '../pipeline/pipeline';
+import type { PipelineStep } from '../pipeline/steps';
+import type { Tool, ToolSchemaMetadata } from '../tool/tool';
 import { loadPromptFile } from '../utils/prompt-loader';
 import { validateId, validatePipelineAgentCount } from '../utils/validation';
-import { Workflow } from '../workflow/types';
-import { ProviderConfig } from '../platform/provider';
+import type { Workflow } from '../workflow/types';
+import type { ProviderConfig } from '../platform/provider';
 import { Schema, ParseResult } from 'effect';
 
 // =============================================================================
@@ -48,6 +56,7 @@ export function loadConfig(filePath: string): FrameworkConfig {
  */
 export function validateConfig(config: FrameworkConfig): void {
   const hasDefaultSystemMessage = Boolean(config.defaultSystemMessage);
+  const policies = getPolicyConfig(config);
 
   if (config.intents) {
     for (const intent of config.intents) {
@@ -210,6 +219,19 @@ export function validateConfig(config: FrameworkConfig): void {
       );
     }
   }
+
+  // Validate MCP server configuration (warn-only)
+  if (config.mcpServers) {
+    validateMCPServers(config.mcpServers, config.agents);
+  }
+
+  if (policies) {
+    const toolIds = new Set((config.tools ?? []).map((tool) => tool.id));
+    const intentIds = new Set((config.intents ?? []).map((intent) => intent.id));
+    const agentIds = new Set((config.agents ?? []).map((agent) => agent.id));
+
+    validateToolPolicies(policies, toolIds, intentIds, agentIds);
+  }
 }
 
 /**
@@ -276,6 +298,31 @@ export function extractTools(config: FrameworkConfig): Omit<Tool, 'execute'>[] {
 }
 
 /**
+ * Extract tool access policies from config.
+ */
+export function extractToolPolicies(config: FrameworkConfig): ToolPoliciesConfig | undefined {
+  const policies = getPolicyConfig(config);
+  if (!policies) {
+    return undefined;
+  }
+
+  return {
+    default: cloneToolPolicyRule(policies.default),
+    intents: cloneScopedPolicyRules(policies.intents),
+    agents: cloneScopedPolicyRules(policies.agents),
+    overrides: policies.overrides?.map((override) => ({
+      ...cloneToolPolicyRule(override),
+      id: override.id,
+      override: true,
+      target: {
+        intentId: override.target.intentId,
+        agentId: override.target.agentId,
+      },
+    })),
+  };
+}
+
+/**
  * Extract pipelines from config
  * @param config - Framework configuration
  * @param basePath - Optional base path for resolving relative prompt file paths (usually config file path)
@@ -321,6 +368,197 @@ function validateSchemaMetadata(toolId: string, metadata: ToolSchemaMetadata): v
   if (!metadata.properties || typeof metadata.properties !== 'object') {
     throw new Error(`Tool "${toolId}" schema metadata must include properties`);
   }
+}
+
+/**
+ * Validate MCP server configuration.
+ * Uses warn-only semantics - logs warnings but does not throw.
+ */
+function validateMCPServers(
+  mcpServers: Record<string, MCPGlobalServerConfig>,
+  agents?: AgentConfig[]
+): void {
+  const serverIds = new Set(Object.keys(mcpServers));
+
+  // Validate each server config
+  for (const [serverId, serverConfig] of Object.entries(mcpServers)) {
+    // Warn if stdio transport is missing command
+    if (serverConfig.transport === 'stdio' && !serverConfig.command) {
+      console.warn(
+        `[Config] MCP server "${serverId}" uses stdio transport but is missing "command" field`
+      );
+    }
+
+    // Warn if http/sse transport is missing url
+    if ((serverConfig.transport === 'http' || serverConfig.transport === 'sse') && !serverConfig.url) {
+      console.warn(
+        `[Config] MCP server "${serverId}" uses ${serverConfig.transport} transport but is missing "url" field`
+      );
+    }
+  }
+
+  // Validate agent server references
+  if (agents) {
+    for (const agent of agents) {
+      if (agent.mcpServers && Array.isArray(agent.mcpServers)) {
+        // Check if it's string[] (server ID references) or MCPServerConfig[] (inline config)
+        const firstElement = agent.mcpServers[0];
+        if (typeof firstElement === 'string') {
+          // String array - validate server IDs exist
+          const serverRefs = agent.mcpServers as string[];
+          for (const serverId of serverRefs) {
+            if (!serverIds.has(serverId)) {
+              console.warn(
+                `[Config] Agent "${agent.id}" references unknown MCP server "${serverId}"`
+              );
+            }
+          }
+        }
+        // If it's MCPServerConfig[], it's the old inline format - no validation needed for now
+      }
+    }
+  }
+}
+
+function getPolicyConfig(config: FrameworkConfig): ToolPoliciesConfig | undefined {
+  if (config.policies && config.toolPolicies) {
+    throw new Error('Config cannot define both "policies" and "toolPolicies". Use only one policy section');
+  }
+
+  return config.policies ?? config.toolPolicies;
+}
+
+function validateToolPolicies(
+  policies: ToolPoliciesConfig,
+  toolIds: Set<string>,
+  intentIds: Set<string>,
+  agentIds: Set<string>
+): void {
+  validatePolicyRule(policies.default, 'Default tool policy', toolIds);
+
+  for (const [intentId, policy] of Object.entries(policies.intents ?? {})) {
+    if (!intentIds.has(intentId)) {
+      throw new Error(`Tool policy references unknown intent "${intentId}"`);
+    }
+    validatePolicyRule(policy, `Tool policy for intent "${intentId}"`, toolIds);
+  }
+
+  for (const [agentId, policy] of Object.entries(policies.agents ?? {})) {
+    if (!agentIds.has(agentId)) {
+      throw new Error(`Tool policy references unknown agent "${agentId}"`);
+    }
+    validatePolicyRule(policy, `Tool policy for agent "${agentId}"`, toolIds);
+  }
+
+  const seenOverrideIds = new Set<string>();
+  for (const override of policies.overrides ?? []) {
+    if (seenOverrideIds.has(override.id)) {
+      throw new Error(`Duplicate tool policy override id "${override.id}"`);
+    }
+    seenOverrideIds.add(override.id);
+
+    if (!override.target || (!override.target.intentId && !override.target.agentId)) {
+      throw new Error(`Tool policy override "${override.id}" must declare a target scope (intentId and/or agentId)`);
+    }
+
+    if (override.target.intentId && !intentIds.has(override.target.intentId)) {
+      throw new Error(
+        `Tool policy override "${override.id}" references unknown intent "${override.target.intentId}"`
+      );
+    }
+
+    if (override.target.agentId && !agentIds.has(override.target.agentId)) {
+      throw new Error(
+        `Tool policy override "${override.id}" references unknown agent "${override.target.agentId}"`
+      );
+    }
+
+    validatePolicyRule(override, `Tool policy override "${override.id}"`, toolIds);
+  }
+}
+
+function validatePolicyRule(rule: ToolPolicyRule | undefined, scope: string, toolIds: Set<string>): void {
+  if (!rule) {
+    return;
+  }
+
+  validatePolicyToolReferences(rule.allow, `${scope} allow`, toolIds);
+  validatePolicyToolReferences(rule.deny, `${scope} deny`, toolIds);
+  validatePolicyToolReferences(rule.requireApproval, `${scope} requireApproval`, toolIds);
+
+  const allowDenyConflicts = findConflicts(rule.allow, rule.deny);
+  if (allowDenyConflicts.length > 0) {
+    throw new Error(
+      `${scope} has conflicting allow/deny declarations for tool(s): ${allowDenyConflicts.map((id) => `"${id}"`).join(', ')}`
+    );
+  }
+
+  const denyApprovalConflicts = findConflicts(rule.deny, rule.requireApproval);
+  if (denyApprovalConflicts.length > 0) {
+    throw new Error(
+      `${scope} has conflicting deny/requireApproval declarations for tool(s): ${denyApprovalConflicts.map((id) => `"${id}"`).join(', ')}`
+    );
+  }
+}
+
+function validatePolicyToolReferences(toolRefs: string[] | undefined, scope: string, toolIds: Set<string>): void {
+  if (!toolRefs || toolRefs.length === 0) {
+    return;
+  }
+
+  const seen = new Set<string>();
+  for (const toolId of toolRefs) {
+    if (seen.has(toolId)) {
+      throw new Error(`${scope} contains duplicate tool reference "${toolId}"`);
+    }
+    seen.add(toolId);
+
+    if (!toolIds.has(toolId)) {
+      throw new Error(`${scope} references unknown tool "${toolId}"`);
+    }
+  }
+}
+
+function findConflicts(first: string[] | undefined, second: string[] | undefined): string[] {
+  if (!first || !second || first.length === 0 || second.length === 0) {
+    return [];
+  }
+
+  const right = new Set(second);
+  return [...new Set(first.filter((id) => right.has(id)))];
+}
+
+function cloneToolPolicyRule(rule: ToolPolicyRule | undefined): ToolPolicyRule | undefined {
+  if (!rule) {
+    return undefined;
+  }
+
+  return {
+    allow: rule.allow ? [...rule.allow] : undefined,
+    deny: rule.deny ? [...rule.deny] : undefined,
+    requireApproval: rule.requireApproval ? [...rule.requireApproval] : undefined,
+    requiredCategories: rule.requiredCategories ? [...rule.requiredCategories] : undefined,
+    conflictResolution: rule.conflictResolution,
+    conditions: rule.conditions
+      ? {
+          role: Array.isArray(rule.conditions.role) ? [...rule.conditions.role] : rule.conditions.role,
+          userId: Array.isArray(rule.conditions.userId) ? [...rule.conditions.userId] : rule.conditions.userId,
+          metadata: rule.conditions.metadata ? { ...rule.conditions.metadata } : undefined,
+        }
+      : undefined,
+  };
+}
+
+function cloneScopedPolicyRules(
+  scoped: Record<string, ToolPolicyRule> | undefined
+): Record<string, ToolPolicyRule> | undefined {
+  if (!scoped) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    Object.entries(scoped).map(([key, rule]) => [key, cloneToolPolicyRule(rule) as ToolPolicyRule])
+  );
 }
 
 /**
@@ -511,6 +749,85 @@ function getNestedValue(obj: any, path: string): any {
 }
 
 // =============================================================================
+// MCP Server Extraction
+// =============================================================================
+
+/**
+ * Resolve environment variable patterns in a string value.
+ * Replaces ${VAR_NAME} with process.env.VAR_NAME.
+ * If the environment variable is not set, logs a warning and keeps the literal value.
+ *
+ * @param value - String potentially containing ${ENV_VAR} patterns
+ * @returns String with environment variables resolved
+ */
+function resolveEnvVars(value: string): string {
+  return value.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (match, varName) => {
+    const envValue = process.env[varName];
+    if (envValue === undefined) {
+      console.warn(
+        `[Config] Environment variable "${varName}" is not set. Keeping literal value "${match}"`
+      );
+      return match;
+    }
+    return envValue;
+  });
+}
+
+/**
+ * Resolve environment variables in all string values of an object.
+ */
+function resolveEnvVarsInObject<T extends Record<string, any>>(obj: T | undefined): T | undefined {
+  if (!obj) return obj;
+
+  const resolved: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'string') {
+      resolved[key] = resolveEnvVars(value);
+    } else {
+      resolved[key] = value;
+    }
+  }
+  return resolved;
+}
+
+/**
+ * Extract MCP server configurations from framework config.
+ * Resolves ${ENV_VAR} patterns in string values and returns array with server IDs.
+ *
+ * @param config - Framework configuration
+ * @returns Array of MCP server configs with resolved env vars and id field
+ */
+export function extractMCPServers(
+  config: FrameworkConfig
+): Array<MCPGlobalServerConfig & { id: string }> {
+  if (!config.mcpServers || Object.keys(config.mcpServers).length === 0) {
+    return [];
+  }
+
+  return Object.entries(config.mcpServers).map(([id, serverConfig]) => {
+    // Resolve env vars in string fields
+    const resolvedEnv = resolveEnvVarsInObject(serverConfig.env);
+    const resolvedHeaders = resolveEnvVarsInObject(serverConfig.headers);
+    const resolvedUrl = serverConfig.url ? resolveEnvVars(serverConfig.url) : undefined;
+
+    return {
+      id,
+      transport: serverConfig.transport,
+      command: serverConfig.command,
+      args: serverConfig.args,
+      env: resolvedEnv,
+      url: resolvedUrl,
+      headers: resolvedHeaders,
+      timeout: serverConfig.timeout ?? 30000, // default 30s
+      enabled: serverConfig.enabled ?? true, // default enabled
+      lazy: serverConfig.lazy ?? false, // default auto-start
+      retry: serverConfig.retry,
+      healthCheckIntervalMs: serverConfig.healthCheckIntervalMs,
+    };
+  });
+}
+
+// =============================================================================
 // Observability Extraction
 // =============================================================================
 
@@ -522,6 +839,9 @@ function getNestedValue(obj: any, path: string): any {
  * - FRED_OTEL_ENDPOINT: OTLP endpoint URL
  * - FRED_OTEL_HEADERS: JSON object of headers (e.g., '{"Authorization":"Bearer token"}')
  * - FRED_LOG_LEVEL: Minimum log level (trace|debug|info|warning|error|fatal)
+ * - FRED_SAMPLE_RATE: Success sampling rate (0.0 to 1.0)
+ * - FRED_SLOW_THRESHOLD_MS: Slow threshold in milliseconds
+ * - FRED_DEBUG: Debug mode (true/false)
  *
  * @param config - Framework configuration
  * @returns Observability configuration with environment overrides applied
@@ -529,14 +849,57 @@ function getNestedValue(obj: any, path: string): any {
 export function extractObservability(config: FrameworkConfig): import('./types').ObservabilityConfig {
   const base = config.observability ?? {};
 
-  // Apply environment variable overrides
+  const parseSampleRateOverride = (value: string | undefined): number | undefined => {
+    if (value === undefined) {
+      return undefined;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      console.warn(`[Config] Invalid FRED_SAMPLE_RATE value "${value}". Using configured/default value.`);
+      return undefined;
+    }
+    return Math.max(0, Math.min(1, parsed));
+  };
+
+  const parseSlowThresholdOverride = (value: string | undefined): number | undefined => {
+    if (value === undefined) {
+      return undefined;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      console.warn(
+        `[Config] Invalid FRED_SLOW_THRESHOLD_MS value "${value}". Using configured/default value.`
+      );
+      return undefined;
+    }
+    return parsed;
+  };
+
+  // Apply environment variable overrides for OTLP
   const otlpEndpoint = process.env.FRED_OTEL_ENDPOINT ?? base.otlp?.endpoint;
   const otlpHeadersJson = process.env.FRED_OTEL_HEADERS;
-  const otlpHeaders = otlpHeadersJson
-    ? { ...base.otlp?.headers, ...JSON.parse(otlpHeadersJson) }
-    : base.otlp?.headers;
+  const otlpHeaders = (() => {
+    if (!otlpHeadersJson) {
+      return base.otlp?.headers;
+    }
+    try {
+      return { ...base.otlp?.headers, ...JSON.parse(otlpHeadersJson) };
+    } catch {
+      console.warn('[Config] Invalid FRED_OTEL_HEADERS JSON. Using configured/default headers.');
+      return base.otlp?.headers;
+    }
+  })();
 
   const logLevel = (process.env.FRED_LOG_LEVEL as any) ?? base.logLevel;
+
+  // Apply environment variable overrides for sampling
+  const successSampleRate =
+    parseSampleRateOverride(process.env.FRED_SAMPLE_RATE) ?? base.sampling?.successSampleRate;
+  const slowThresholdMs =
+    parseSlowThresholdOverride(process.env.FRED_SLOW_THRESHOLD_MS) ?? base.sampling?.slowThresholdMs;
+  const debugMode = process.env.FRED_DEBUG
+    ? process.env.FRED_DEBUG === 'true'
+    : base.sampling?.debugMode;
 
   return {
     otlp: otlpEndpoint
@@ -548,5 +911,11 @@ export function extractObservability(config: FrameworkConfig): import('./types')
     logLevel,
     resource: base.resource,
     enableConsoleFallback: base.enableConsoleFallback,
+    sampling: {
+      successSampleRate,
+      slowThresholdMs,
+      debugMode,
+    },
+    metrics: base.metrics,
   };
 }

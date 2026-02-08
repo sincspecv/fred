@@ -14,6 +14,8 @@ export type HookType =
   // Tool execution hooks
   | 'beforeToolCalled'
   | 'afterToolCalled'
+  // Policy decision hooks
+  | 'afterPolicyDecision'
   // Response generation hooks
   | 'beforeResponseGenerated'
   | 'afterResponseGenerated'
@@ -23,6 +25,7 @@ export type HookType =
   // Routing hooks
   | 'beforeRouting'
   | 'afterRouting'
+  | 'afterRoutingDecision' // Emitted only when routing concerns are detected
   // Pipeline-specific hooks
   | 'beforePipeline' // Before pipeline execution starts
   | 'afterPipeline' // After pipeline completes successfully
@@ -32,6 +35,34 @@ export type HookType =
   | 'onPipelineError'; // When pipeline fails (after all retries exhausted)
 
 /**
+ * Hook correlation context with export capabilities
+ */
+export interface HookCorrelationContext {
+  /** Unique identifier for this run */
+  runId?: string;
+  /** Conversation identifier */
+  conversationId?: string;
+  /** Intent identifier */
+  intentId?: string;
+  /** Agent identifier */
+  agentId?: string;
+  /** ISO 8601 timestamp when event occurred */
+  timestamp?: string;
+  /** OpenTelemetry trace ID */
+  traceId?: string;
+  /** OpenTelemetry span ID */
+  spanId?: string;
+  /** OpenTelemetry parent span ID */
+  parentSpanId?: string;
+  /** Pipeline identifier (for pipeline runs) */
+  pipelineId?: string;
+  /** Step name (for pipeline steps) */
+  stepName?: string;
+  /** Export trace function (available when observability is enabled) */
+  exportTrace?: (traceId?: string) => Promise<any>;
+}
+
+/**
  * Hook event data structure
  */
 export interface HookEvent {
@@ -39,6 +70,26 @@ export interface HookEvent {
   data: any;
   conversationId?: string;
   metadata?: Record<string, any>;
+  /** Unique identifier for this run */
+  runId?: string;
+  /** Intent identifier */
+  intentId?: string;
+  /** Agent identifier */
+  agentId?: string;
+  /** ISO 8601 timestamp when event occurred */
+  timestamp?: string;
+  /** OpenTelemetry trace ID */
+  traceId?: string;
+  /** OpenTelemetry span ID */
+  spanId?: string;
+  /** OpenTelemetry parent span ID */
+  parentSpanId?: string;
+  /** Pipeline identifier (for pipeline runs) */
+  pipelineId?: string;
+  /** Step name (for pipeline steps) */
+  stepName?: string;
+  /** Correlation context with export capabilities */
+  correlation?: HookCorrelationContext;
 }
 
 /**

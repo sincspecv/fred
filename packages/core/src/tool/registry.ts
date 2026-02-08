@@ -1,4 +1,5 @@
-import { Tool } from './tool';
+import type { Tool } from './tool';
+import { withInferredCapabilities } from './capabilities';
 import { normalizeToolDefinition } from './utils';
 import { validateToolSchema } from './validation';
 import { Effect, LogLevel } from 'effect';
@@ -21,8 +22,9 @@ export class ToolRegistry {
     if (this.tools.has(tool.id)) {
       throw new Error(`Tool with id "${tool.id}" is already registered`);
     }
-    validateToolSchema(tool);
-    this.tools.set(tool.id, tool);
+    const toolWithCapabilities = withInferredCapabilities(tool);
+    validateToolSchema(toolWithCapabilities);
+    this.tools.set(tool.id, toolWithCapabilities);
   }
 
   /**

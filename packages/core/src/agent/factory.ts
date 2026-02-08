@@ -5,14 +5,15 @@ import { Tool as EffectTool, Toolkit, LanguageModel, Prompt } from '@effect/ai';
 import { BunContext } from '@effect/platform-bun';
 import { FetchHttpClient } from '@effect/platform';
 import type { StreamEvent } from '../stream/events';
-import { AgentConfig, AgentMessage, AgentResponse, ToolRetryPolicy } from './agent';
-import { ProviderDefinition } from '../platform/provider';
+import type { AgentConfig, AgentMessage, AgentResponse, ToolRetryPolicy } from './agent';
+import type { ProviderDefinition } from '../platform/provider';
 import { ToolRegistry } from '../tool/registry';
 import type { Tool as FredTool } from '../tool/tool';
-import { createHandoffTool, HandoffResult } from '../tool/handoff';
+import { createHandoffTool } from '../tool/handoff';
+import type { HandoffResult } from '../tool/handoff';
 import { loadPromptFile } from '../utils/prompt-loader';
-import { MCPClientImpl, convertMCPToolsToFredTools } from '../mcp';
-import { Tracer } from '../tracing';
+import { MCPClientImpl, convertMCPToolsToFredTools, MCPServerRegistry } from '../mcp';
+import type { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
 import { wrapToolExecution } from '../tool/validation';
 import { annotateSpan } from '../observability/otel';
@@ -20,6 +21,27 @@ import { attachErrorToSpan, classifyError, ErrorClass } from '../observability/e
 import { normalizeMessages, filterHistoryForAgent } from '../messages';
 import { streamMultiStep } from './streaming';
 import { resolveTemplate } from '../variables/template';
+import type { ToolGateServiceApi, ToolGateContext } from '../tool-gate/types';
+
+type ObservabilityServiceApi = {
+  logStructured: (options: {
+    level: 'trace' | 'debug' | 'info' | 'warning' | 'error' | 'fatal';
+    message: string;
+    metadata?: Record<string, unknown>;
+  }) => Effect.Effect<void>;
+  recordTokenUsage: (options: {
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+  }) => Effect.Effect<void>;
+  recordModelCost: (options: {
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+  }) => Effect.Effect<number | undefined>;
+};
 
 /**
  * Transform Schema.Struct fields to be OpenAI strict-mode compatible.
@@ -116,6 +138,19 @@ function getSafeToolErrorMessage(toolId: string, error: unknown): string {
   return errorMessage;
 }
 
+function getApprovalSessionKey(context: ToolGateContext): string | undefined {
+  const conversationId = context.metadata?.conversationId;
+  if (typeof conversationId === 'string' && conversationId.length > 0) {
+    return conversationId;
+  }
+
+  if (context.userId && context.userId.length > 0) {
+    return context.userId;
+  }
+
+  return undefined;
+}
+
 export interface MCPClientMetrics {
   totalConnections: number;
   activeConnections: number;
@@ -126,6 +161,10 @@ export interface MCPClientMetrics {
   lastDisconnectionTime?: Date;
 }
 
+type AgentRuntimeOptions = {
+  policyContext?: ToolGateContext & { conversationId?: string };
+};
+
 export class AgentFactory {
   private toolRegistry: ToolRegistry;
   private handoffHandler?: {
@@ -134,6 +173,7 @@ export class AgentFactory {
   };
   private mcpClients: Map<string, MCPClientImpl> = new Map();
   private tracer?: Tracer;
+  private observabilityService?: ObservabilityServiceApi;
   private defaultSystemMessage?: string;
   private metrics: MCPClientMetrics = {
     totalConnections: 0,
@@ -144,6 +184,8 @@ export class AgentFactory {
   };
   private shutdownHooksRegistered = false;
   private globalVariablesResolver?: () => Record<string, string | number | boolean>;
+  private toolGateService?: ToolGateServiceApi;
+  private mcpServerRegistry?: MCPServerRegistry;
 
   constructor(toolRegistry: ToolRegistry, tracer?: Tracer) {
     this.toolRegistry = toolRegistry;
@@ -160,6 +202,35 @@ export class AgentFactory {
 
   setTracer(tracer?: Tracer): void {
     this.tracer = tracer;
+  }
+
+  setObservabilityService(observabilityService?: ObservabilityServiceApi): void {
+    this.observabilityService = observabilityService;
+  }
+
+  private logWarning(message: string, metadata?: Record<string, unknown>): void {
+    if (this.observabilityService) {
+      void Effect.runPromise(
+        this.observabilityService.logStructured({
+          level: 'warning',
+          message,
+          metadata,
+        })
+      ).catch(() => {
+        console.warn(message);
+      });
+      return;
+    }
+
+    console.warn(message);
+  }
+
+  setToolGateService(toolGateService?: ToolGateServiceApi): void {
+    this.toolGateService = toolGateService;
+  }
+
+  setMCPServerRegistry(registry: MCPServerRegistry): void {
+    this.mcpServerRegistry = registry;
   }
 
   setHandoffHandler(handler: { getAgent: (id: string) => any; getAvailableAgents: () => string[] }): void {
@@ -266,7 +337,7 @@ export class AgentFactory {
     config: AgentConfig,
     provider: ProviderDefinition
   ): Promise<{
-    processMessage: (message: string, messages?: AgentMessage[]) => Promise<AgentResponse>;
+    processMessage: (message: string, messages?: AgentMessage[], runtimeOptions?: AgentRuntimeOptions) => Promise<AgentResponse>;
     streamMessage: (
       message: string,
       messages?: AgentMessage[],
@@ -354,172 +425,265 @@ export class AgentFactory {
     // Helper to sleep for a given duration
     const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-    const buildToolHandler = (toolId: string, execute?: (args: Record<string, any>) => Promise<any> | any) => {
+    const buildToolHandler = (
+      toolId: string,
+      execute?: (args: Record<string, any>) => Promise<any> | any,
+      allowedToolIds?: Set<string>,
+      runtimeOptions?: AgentRuntimeOptions
+    ) => {
       return (input: unknown) => {
-        const startTime = Date.now();
-        const toolSpan = this.tracer?.startSpan('tool.execute', {
-          kind: SpanKind.CLIENT,
-          attributes: {
-            'tool.id': toolId,
-            'tool.timeout': toolTimeout,
-            'tool.retry.maxRetries': retryPolicy.maxRetries,
-          },
-        });
+        const self = this;
 
-        const previousActiveSpan = this.tracer?.getActiveSpan();
-        if (toolSpan) {
-          this.tracer?.setActiveSpan(toolSpan);
-        }
+        // Check for requireApproval gate BEFORE starting execution
+        if (self.toolGateService && runtimeOptions?.policyContext) {
+          const checkApproval = Effect.gen(function* () {
+            const gateContext: ToolGateContext = {
+              intentId: runtimeOptions.policyContext?.intentId,
+              agentId: runtimeOptions.policyContext?.agentId ?? config.id,
+              userId: runtimeOptions.policyContext?.userId,
+              role: runtimeOptions.policyContext?.role,
+              metadata: {
+                ...(runtimeOptions.policyContext?.metadata ?? {}),
+                ...(runtimeOptions.policyContext?.conversationId
+                  ? { conversationId: runtimeOptions.policyContext.conversationId }
+                  : {}),
+              },
+            };
 
-        // Annotate tool span with Fred identifiers (best effort)
-        const toolAnnotation = annotateSpan({
-          toolId,
-          agentId: config.id,
-        });
-        Effect.runPromise(toolAnnotation).catch(() => {});
+            const decision = yield* self.toolGateService!.evaluateToolById(toolId, gateContext);
 
-        const toolDefinition = toolDefinitions.get(toolId);
-        const executor = execute ?? toolDefinition?.execute;
-        // Cast toolDefinition to satisfy wrapToolExecution type requirements
-        const validatedExecute = toolDefinition && executor
-          ? wrapToolExecution(toolDefinition as any, executor)
-          : executor;
+            // If tool requires approval, check for existing approval
+            if (decision.requireApproval) {
+              const sessionKey = getApprovalSessionKey(gateContext);
+              if (!sessionKey) {
+                return yield* Effect.fail(
+                  new Error(
+                    `Tool "${toolId}" requires approval but no session scope is available. Provide conversationId or userId in policy context.`
+                  )
+                );
+              }
+              const hasApproval = yield* self.toolGateService!.hasApproval(toolId, sessionKey);
 
-        // Execute tool with timeout
-        const executeWithTimeout = async (): Promise<any> => {
-          let timeoutId: ReturnType<typeof setTimeout> | undefined;
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-              const timeoutError = new Error(`Tool "${toolId}" execution timed out after ${toolTimeout}ms`);
-              timeoutError.name = 'ToolTimeoutError';
-              reject(timeoutError);
-            }, toolTimeout);
+              if (!hasApproval) {
+                // Generate approval request and return pause signal
+                const approvalRequest = yield* self.toolGateService!.createApprovalRequest(decision, gateContext);
+
+                if (approvalRequest) {
+                  // Return PauseSignal to trigger HITL checkpoint
+                  return {
+                    __pause: true,
+                    prompt: 'This action requires approval before continuing.',
+                    metadata: {
+                      toolId,
+                      intentId: gateContext.intentId,
+                      agentId: gateContext.agentId,
+                      approvalRequest: true,
+                    },
+                    ttlMs: approvalRequest.ttlMs ?? 300000,
+                  };
+                }
+              }
+            }
+
+            // No pause needed - return null to continue
+            return null;
           });
 
-          try {
-            const result = await Promise.race([
-              Promise.resolve(validatedExecute ? validatedExecute(input as Record<string, any>) : undefined),
-              timeoutPromise,
-            ]);
-            return result;
-          } finally {
-            if (timeoutId) {
-              clearTimeout(timeoutId);
-            }
+          // Run approval check first
+          const approvalCheckEffect = checkApproval.pipe(
+            Effect.flatMap((pauseSignal) => {
+              if (pauseSignal) {
+                // Return pause signal immediately
+                return Effect.succeed(pauseSignal);
+              }
+              // Continue with normal tool execution
+              return executeToolLogic();
+            })
+          );
+
+          return approvalCheckEffect;
+        }
+
+        // No approval check needed, execute directly
+        return executeToolLogic();
+
+        function executeToolLogic() {
+          if (allowedToolIds && !allowedToolIds.has(toolId)) {
+            const deniedError = new Error(`Tool "${toolId}" denied by policy`);
+            deniedError.name = 'ToolPolicyDeniedError';
+            return Effect.fail(deniedError);
           }
-        };
 
-        // Execute with retry logic for retryable errors only
-        const executeWithRetry = async (): Promise<any> => {
-          let lastError: Error | undefined;
-          let attempt = 0;
+          const startTime = Date.now();
+          const toolSpan = self.tracer?.startSpan('tool.execute', {
+            kind: SpanKind.CLIENT,
+            attributes: {
+              'tool.id': toolId,
+              'tool.timeout': toolTimeout,
+              'tool.retry.maxRetries': retryPolicy.maxRetries,
+            },
+          });
 
-          while (attempt <= retryPolicy.maxRetries) {
+          const previousActiveSpan = self.tracer?.getActiveSpan();
+          if (toolSpan) {
+            self.tracer?.setActiveSpan(toolSpan);
+          }
+
+          // Annotate tool span with Fred identifiers (best effort)
+          const toolAnnotation = annotateSpan({
+            toolId,
+            agentId: config.id,
+          });
+          Effect.runPromise(toolAnnotation).catch(() => {
+            self.logWarning('Failed to annotate tool execution span', {
+              toolId,
+              agentId: config.id,
+            });
+          });
+
+          const toolDefinition = toolDefinitions.get(toolId);
+          const executor = execute ?? toolDefinition?.execute;
+          // Cast toolDefinition to satisfy wrapToolExecution type requirements
+          const validatedExecute = toolDefinition && executor
+            ? wrapToolExecution(toolDefinition as any, executor)
+            : executor;
+
+          // Execute tool with timeout
+          const executeWithTimeout = async (): Promise<any> => {
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => {
+                const timeoutError = new Error(`Tool "${toolId}" execution timed out after ${toolTimeout}ms`);
+                timeoutError.name = 'ToolTimeoutError';
+                reject(timeoutError);
+              }, toolTimeout);
+            });
+
             try {
-              const result = await executeWithTimeout();
-              // On successful retry, annotate the span
-              if (attempt > 0 && toolSpan) {
-                toolSpan.addEvent('retry.success', {
-                  'retry.attempt': attempt,
-                  'retry.totalAttempts': attempt + 1,
-                });
-              }
+              const result = await Promise.race([
+                Promise.resolve(validatedExecute ? validatedExecute(input as Record<string, any>) : undefined),
+                timeoutPromise,
+              ]);
               return result;
-            } catch (error) {
-              const err = error instanceof Error ? error : new Error(String(error));
-              lastError = err;
-
-              // Classify error to determine if retryable
-              const errorClass = classifyError(err);
-              const isRetryable = errorClass === ErrorClass.RETRYABLE;
-
-              // Annotate retry attempt on span
-              if (toolSpan) {
-                toolSpan.addEvent('retry.attempt', {
-                  'retry.attempt': attempt,
-                  'retry.errorClass': errorClass,
-                  'retry.isRetryable': isRetryable,
-                  'retry.errorMessage': err.message,
-                });
+            } finally {
+              if (timeoutId) {
+                clearTimeout(timeoutId);
               }
+            }
+          };
 
-              // Only retry if error is retryable and we haven't exhausted attempts
-              if (!isRetryable || attempt >= retryPolicy.maxRetries) {
-                if (toolSpan) {
-                  toolSpan.setAttribute('tool.retry.totalAttempts', attempt + 1);
-                  toolSpan.setAttribute('tool.retry.exhausted', attempt >= retryPolicy.maxRetries);
-                  toolSpan.addEvent('retry.error', {
-                    'retry.finalAttempt': attempt,
-                    'retry.exhausted': attempt >= retryPolicy.maxRetries,
-                    'retry.errorClass': errorClass,
+          // Execute with retry logic for retryable errors only
+          const executeWithRetry = async (): Promise<any> => {
+            let lastError: Error | undefined;
+            let attempt = 0;
+
+            while (attempt <= retryPolicy.maxRetries) {
+              try {
+                const result = await executeWithTimeout();
+                // On successful retry, annotate the span
+                if (attempt > 0 && toolSpan) {
+                  toolSpan.addEvent('retry.success', {
+                    'retry.attempt': attempt,
+                    'retry.totalAttempts': attempt + 1,
                   });
                 }
-                throw err;
+                return result;
+              } catch (error) {
+                const err = error instanceof Error ? error : new Error(String(error));
+                lastError = err;
+
+                // Classify error to determine if retryable
+                const errorClass = classifyError(err);
+                const isRetryable = errorClass === ErrorClass.RETRYABLE;
+
+                // Annotate retry attempt on span
+                if (toolSpan) {
+                  toolSpan.addEvent('retry.attempt', {
+                    'retry.attempt': attempt,
+                    'retry.errorClass': errorClass,
+                    'retry.isRetryable': isRetryable,
+                    'retry.errorMessage': err.message,
+                  });
+                }
+
+                // Only retry if error is retryable and we haven't exhausted attempts
+                if (!isRetryable || attempt >= retryPolicy.maxRetries) {
+                  if (toolSpan) {
+                    toolSpan.setAttribute('tool.retry.totalAttempts', attempt + 1);
+                    toolSpan.setAttribute('tool.retry.exhausted', attempt >= retryPolicy.maxRetries);
+                    toolSpan.addEvent('retry.error', {
+                      'retry.finalAttempt': attempt,
+                      'retry.exhausted': attempt >= retryPolicy.maxRetries,
+                      'retry.errorClass': errorClass,
+                    });
+                  }
+                  throw err;
+                }
+
+                // Wait before retrying
+                const backoffMs = computeBackoff(attempt);
+                if (toolSpan) {
+                  toolSpan.addEvent('retry.backoff', {
+                    'retry.attempt': attempt,
+                    'retry.backoffMs': backoffMs,
+                  });
+                }
+                await sleep(backoffMs);
+                attempt++;
               }
-
-              // Wait before retrying
-              const backoffMs = computeBackoff(attempt);
-              if (toolSpan) {
-                toolSpan.addEvent('retry.backoff', {
-                  'retry.attempt': attempt,
-                  'retry.backoffMs': backoffMs,
-                });
-              }
-              await sleep(backoffMs);
-              attempt++;
-            }
-          }
-
-          // Should never reach here, but throw last error just in case
-          throw lastError ?? new Error(`Tool "${toolId}" failed after ${retryPolicy.maxRetries} retries`);
-        };
-
-        return Effect.tryPromise({
-          try: executeWithRetry,
-          catch: (error) => {
-            const executionTime = Date.now() - startTime;
-            const err = error instanceof Error ? error : new Error(String(error));
-
-            if (toolSpan) {
-              toolSpan.setAttribute('tool.executionTime', executionTime);
-              // Use error taxonomy for span status/classification
-              attachErrorToSpan(toolSpan, err, {
-                includeStack: false,
-              });
             }
 
-            if (err.name === 'ToolTimeoutError') {
-              return new Error(`Tool "${toolId}" execution timed out. Please try again or use a different approach.`);
-            }
+            // Should never reach here, but throw last error just in case
+            throw lastError ?? new Error(`Tool "${toolId}" failed after ${retryPolicy.maxRetries} retries`);
+          };
 
-            return new Error(getSafeToolErrorMessage(toolId, error));
-          },
-        }).pipe(
-          Effect.tap((result) =>
-            Effect.sync(() => {
+          return Effect.tryPromise({
+            try: executeWithRetry,
+            catch: (error) => {
               const executionTime = Date.now() - startTime;
+              const err = error instanceof Error ? error : new Error(String(error));
+
               if (toolSpan) {
-                toolSpan.setAttributes({
-                  'tool.executionTime': executionTime,
-                  'tool.result.hasValue': result !== undefined && result !== null,
+                toolSpan.setAttribute('tool.executionTime', executionTime);
+                // Use error taxonomy for span status/classification
+                attachErrorToSpan(toolSpan, err, {
+                  includeStack: false,
                 });
-                toolSpan.setStatus('ok');
               }
-            })
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              if (toolSpan) {
-                toolSpan.end();
+
+              if (err.name === 'ToolTimeoutError') {
+                return new Error(`Tool "${toolId}" execution timed out. Please try again or use a different approach.`);
               }
-              if (previousActiveSpan) {
-                this.tracer?.setActiveSpan(previousActiveSpan);
-              } else {
-                this.tracer?.setActiveSpan(undefined);
-              }
-            })
-          )
-        );
+
+              return new Error(getSafeToolErrorMessage(toolId, error));
+            },
+          }).pipe(
+            Effect.tap((result) =>
+              Effect.sync(() => {
+                const executionTime = Date.now() - startTime;
+                if (toolSpan) {
+                  toolSpan.setAttributes({
+                    'tool.executionTime': executionTime,
+                    'tool.result.hasValue': result !== undefined && result !== null,
+                  });
+                  toolSpan.setStatus('ok');
+                }
+              })
+            ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (toolSpan) {
+                  toolSpan.end();
+                }
+                if (previousActiveSpan) {
+                  self.tracer?.setActiveSpan(previousActiveSpan);
+                } else {
+                  self.tracer?.setActiveSpan(undefined);
+                }
+              })
+            )
+          );
+        }
       };
     };
 
@@ -539,35 +703,44 @@ export class AgentFactory {
       );
     }
 
-    const mcpClientInstances: MCPClientImpl[] = [];
-    if (config.mcpServers && config.mcpServers.length > 0) {
-      for (const mcpConfig of config.mcpServers) {
-        if (mcpConfig.enabled === false) {
-          continue;
-        }
+    // MCP tool discovery from global registry
+    if (this.mcpServerRegistry && config.mcpServers && config.mcpServers.length > 0) {
+      for (const serverId of config.mcpServers) {
         try {
-          const mcpClient = new MCPClientImpl(mcpConfig);
-          await mcpClient.initialize();
-          mcpClientInstances.push(mcpClient);
+          // Discover tools from global registry for this server
+          const fredTools = await Effect.runPromise(
+            this.mcpServerRegistry.discoverTools(serverId)
+          );
 
-          const clientKey = `${config.id}-${mcpConfig.id}`;
-          this.mcpClients.set(clientKey, mcpClient);
+          // Apply ToolGateService filtering at discovery time
+          let filteredTools = fredTools;
+          if (this.toolGateService) {
+            const gateContext: ToolGateContext = {
+              agentId: config.id,
+            };
+            const filterResult = await Effect.runPromise(
+              this.toolGateService.filterTools(fredTools, gateContext)
+            );
+            filteredTools = filterResult.allowed;
 
-          this.metrics.totalConnections++;
-          this.metrics.activeConnections = this.mcpClients.size;
-          this.metrics.lastConnectionTime = new Date();
-          this.metrics.connectionsByAgent[config.id] = (this.metrics.connectionsByAgent[config.id] ?? 0) + 1;
+            // Log denied MCP tools
+            if (filterResult.denied.length > 0) {
+              this.logWarning('MCP tools denied by policy', {
+                agentId: config.id,
+                serverId,
+                deniedToolIds: filterResult.denied.map((d) => d.toolId),
+              });
+            }
+          }
 
-          const discoveredTools = await mcpClient.listTools();
-          const fredTools = convertMCPToolsToFredTools(discoveredTools, mcpClient, mcpConfig.id);
-          for (const fredTool of fredTools) {
+          // Register allowed MCP tools
+          for (const fredTool of filteredTools) {
             if (!this.toolRegistry.hasTool(fredTool.id)) {
               this.toolRegistry.registerTool(fredTool);
             }
             toolExecutors.set(fredTool.id, fredTool.execute);
             toolDefinitions.set(fredTool.id, fredTool);
-            // Type-assert input as Struct (Fred convention: all tool inputs are Structs)
-            // Use any cast since Schema types don't overlap sufficiently for direct assertion
+
             // Transform MCP tool fields for OpenAI strict-mode compatibility
             const mcpInputFields = transformFieldsForStrictMode(fredTool.schema?.input);
 
@@ -581,11 +754,46 @@ export class AgentFactory {
             );
           }
         } catch (error) {
-          this.metrics.failedConnections++;
-          console.error(`Failed to initialize MCP server "${mcpConfig.id}":`, error);
+          // Graceful degradation: server not found or discovery failed
+          this.logWarning('Failed to discover MCP tools for agent', {
+            agentId: config.id,
+            serverId,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }
+
+    const resolveAllowedToolIds = async (runtimeOptions?: AgentRuntimeOptions): Promise<Set<string>> => {
+      const defaultAllowed = new Set(effectTools.map((tool) => tool.name));
+
+      if (!this.toolGateService) {
+        return defaultAllowed;
+      }
+
+      const gateContext: ToolGateContext = {
+        intentId: runtimeOptions?.policyContext?.intentId,
+        agentId: runtimeOptions?.policyContext?.agentId ?? config.id,
+        userId: runtimeOptions?.policyContext?.userId,
+        role: runtimeOptions?.policyContext?.role,
+        metadata: {
+          ...(runtimeOptions?.policyContext?.metadata ?? {}),
+          ...(runtimeOptions?.policyContext?.conversationId
+            ? { conversationId: runtimeOptions.policyContext.conversationId }
+            : {}),
+        },
+      };
+
+      const allConfiguredTools = Array.from(toolDefinitions.values()) as FredTool[];
+      const filtered = await Effect.runPromise(this.toolGateService.filterTools(allConfiguredTools, gateContext));
+      const allowed = new Set(filtered.allowed.map((tool) => tool.id));
+
+      if (defaultAllowed.has('handoff_to_agent')) {
+        allowed.add('handoff_to_agent');
+      }
+
+      return allowed;
+    };
 
     const toolkit = effectTools.length > 0 ? Toolkit.make(...effectTools) : undefined;
     const toolHandlers = Object.fromEntries(
@@ -621,7 +829,8 @@ export class AgentFactory {
 
     const processMessage = async (
       message: string,
-      previousMessages: AgentMessage[] = []
+      previousMessages: AgentMessage[] = [],
+      runtimeOptions?: AgentRuntimeOptions
     ): Promise<AgentResponse> => {
       const modelSpan = this.tracer?.startSpan('model.call', {
         kind: SpanKind.CLIENT,
@@ -647,9 +856,27 @@ export class AgentFactory {
         agentId: config.id,
         provider: config.platform,
       });
-      Effect.runPromise(modelAnnotation).catch(() => {});
+      Effect.runPromise(modelAnnotation).catch(() => {
+        this.logWarning('Failed to annotate model span', {
+          agentId: config.id,
+          provider: config.platform,
+          model: config.model,
+        });
+      });
 
       try {
+        const allowedToolIds = await resolveAllowedToolIds(runtimeOptions);
+        const allowedEffectTools = effectTools.filter((tool) => allowedToolIds.has(tool.name));
+        const runtimeToolkit = allowedEffectTools.length > 0 ? Toolkit.make(...allowedEffectTools) : undefined;
+        const runtimeToolHandlers = Object.fromEntries(
+          allowedEffectTools.map((tool) => [
+            tool.name,
+            buildToolHandler(tool.name, toolExecutors.get(tool.name), allowedToolIds, runtimeOptions),
+          ])
+        );
+        const runtimeToolLayer = runtimeToolkit ? runtimeToolkit.toLayer(runtimeToolHandlers as any) : Layer.empty;
+        const runtimeAvailableToolNames = new Set(allowedEffectTools.map((tool) => tool.name));
+
         // Resolve system message with current variable values
         const resolvedSystemMessage = resolveSystemMessage();
 
@@ -662,13 +889,13 @@ export class AgentFactory {
 
         // Filter history to only include tool calls available to this agent
         // This prevents confusion when agents see tool calls from other agents
-        const promptMessages = filterHistoryForAgent(normalizedMessages, availableToolNames);
+        const promptMessages = filterHistoryForAgent(normalizedMessages, runtimeAvailableToolNames);
 
         // Get the model (AiModel) and compose all layers with proper dependency resolution
         const model = await Effect.runPromise(modelEffect);
         const providerWithHttp = provider.layer.pipe(Layer.provide(FetchHttpClient.layer));
         const modelWithClient = Layer.provide(model, providerWithHttp);
-        const fullLayer = Layer.mergeAll(modelWithClient, toolLayer, BunContext.layer);
+        const fullLayer = Layer.mergeAll(modelWithClient, runtimeToolLayer, BunContext.layer);
 
         // Use @effect/ai's built-in multi-step execution
         // This prevents double execution (no manual loop to duplicate toolkit execution)
@@ -679,7 +906,7 @@ export class AgentFactory {
         // Cast options via unknown to satisfy TypeScript - the runtime types are correct
         const generateOptions = {
           prompt,
-          toolkit,
+          toolkit: runtimeToolkit,
           maxSteps,
           toolChoice: config.toolChoice,
           temperature: config.temperature,
@@ -694,17 +921,73 @@ export class AgentFactory {
         const result = await Effect.runPromise(providedProgram);
 
         // Extract tool calls from result
-        const allToolCalls = (result.toolCalls ?? []).map((tc: any) => ({
-          toolId: tc.name,
-          args: tc.params as Record<string, any>,
-          result: undefined, // @effect/ai doesn't expose results in the response
-        }));
+        const allToolCalls = (result.toolCalls ?? []).map((tc: any) => {
+          const toolId = tc.name as string;
+          if (!allowedToolIds.has(toolId)) {
+            return {
+              toolId,
+              args: tc.params as Record<string, any>,
+              result: `Tool "${toolId}" denied by policy`,
+              error: {
+                code: 'POLICY_DENIED',
+                message: `Tool "${toolId}" denied by policy`,
+              },
+            };
+          }
+
+          return {
+            toolId,
+            args: tc.params as Record<string, any>,
+            result: undefined,
+          };
+        });
 
         const usage = {
           inputTokens: result.usage?.inputTokens ?? 0,
           outputTokens: result.usage?.outputTokens ?? 0,
           totalTokens: result.usage?.totalTokens ?? 0,
         };
+
+        // Annotate model span with token counts
+        if (modelSpan && usage.totalTokens > 0) {
+          modelSpan.setAttributes({
+            'token.input': usage.inputTokens,
+            'token.output': usage.outputTokens,
+            'token.total': usage.totalTokens,
+          });
+        }
+
+        // Record token usage and cost metrics if observability is available
+        if (this.observabilityService && usage.totalTokens > 0) {
+          try {
+            // Record token usage
+            await Effect.runPromise(
+              this.observabilityService.recordTokenUsage({
+                provider: config.platform,
+                model: config.model,
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+              })
+            );
+
+            // Record model cost if pricing is configured
+            await Effect.runPromise(
+              this.observabilityService.recordModelCost({
+                provider: config.platform,
+                model: config.model,
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+              })
+            );
+          } catch (error) {
+            this.logWarning('Failed to record token usage metrics', {
+              agentId: config.id,
+              provider: config.platform,
+              model: config.model,
+              errorMessage: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
 
         // Check for handoff
         const handoffCall = allToolCalls.find((call: any) => call.toolId === 'handoff_to_agent');
@@ -748,6 +1031,7 @@ export class AgentFactory {
       previousMessages: AgentMessage[] = [],
       options?: { threadId?: string }
     ): Stream.Stream<StreamEvent, unknown, any> => {
+      const self = this;
       const startedAt = Date.now();
       const runId = `run_${startedAt}_${Math.random().toString(36).slice(2, 8)}`;
       const messageId = `msg_${startedAt}_${Math.random().toString(36).slice(2, 6)}`;
@@ -910,8 +1194,48 @@ export class AgentFactory {
 
       // Generate run-end event after stream completes
       const runEndEvent = Stream.fromEffect(
-        Effect.sync(() => {
+        Effect.gen(function* () {
           const finishedAt = Date.now();
+
+          // Annotate model span with token counts from streaming usage
+          if (streamState.usage && streamState.usage.totalTokens && streamState.usage.totalTokens > 0) {
+            const modelSpan = self.tracer?.getActiveSpan();
+            if (modelSpan) {
+              modelSpan.setAttributes({
+                'token.input': streamState.usage.inputTokens ?? 0,
+                'token.output': streamState.usage.outputTokens ?? 0,
+                'token.total': streamState.usage.totalTokens ?? 0,
+              });
+            }
+
+            // Record token usage and cost metrics if observability is available
+            if (self.observabilityService) {
+              try {
+                // Record token usage
+                yield* self.observabilityService.recordTokenUsage({
+                  provider: config.platform,
+                  model: config.model,
+                  inputTokens: streamState.usage.inputTokens ?? 0,
+                  outputTokens: streamState.usage.outputTokens ?? 0,
+                });
+
+                // Record model cost if pricing is configured
+                yield* self.observabilityService.recordModelCost({
+                  provider: config.platform,
+                  model: config.model,
+                  inputTokens: streamState.usage.inputTokens ?? 0,
+                  outputTokens: streamState.usage.outputTokens ?? 0,
+                });
+              } catch (error) {
+                self.logWarning('Failed to record streaming token usage metrics', {
+                  agentId: config.id,
+                  provider: config.platform,
+                  model: config.model,
+                  errorMessage: error instanceof Error ? error.message : String(error),
+                });
+              }
+            }
+          }
 
           // Check for handoff tool result
           const handoffCall = streamState.toolCalls.find(

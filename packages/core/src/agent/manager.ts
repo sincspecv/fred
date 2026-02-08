@@ -47,6 +47,13 @@ export class AgentManager {
   }
 
   /**
+   * Get the agent factory for advanced configuration
+   */
+  getAgentFactory(): AgentFactory {
+    return this.factory;
+  }
+
+  /**
    * Get MCP client connection metrics
    */
   getMCPMetrics() {

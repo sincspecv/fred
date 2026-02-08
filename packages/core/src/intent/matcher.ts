@@ -31,6 +31,7 @@ export class IntentMatcher {
   /**
    * Match a user message against registered intents
    * Uses hybrid strategy: exact → regex → semantic
+   * Returns best match along with all candidate matches
    */
   matchIntent(
     message: string,
@@ -41,16 +42,26 @@ export class IntentMatcher {
       const intents = yield* Ref.get(self.intents);
       const normalizedMessage = message.toLowerCase().trim();
 
+      // Collect all candidates with their matched utterances
+      const allCandidates: Array<{
+        intentId: string;
+        intentName: string;
+        confidence: number;
+        matchType: 'exact' | 'regex' | 'semantic';
+        matchedUtterance?: string;
+      }> = [];
+
       // Try exact match first
       for (const intent of intents) {
         for (const utterance of intent.utterances) {
           if (normalizedMessage === utterance.toLowerCase().trim()) {
-            return {
-              intent,
+            allCandidates.push({
+              intentId: intent.id,
+              intentName: intent.description || intent.id,
               confidence: 1.0,
-              matchedUtterance: utterance,
               matchType: 'exact' as const,
-            };
+              matchedUtterance: utterance,
+            });
           }
         }
       }
@@ -69,12 +80,13 @@ export class IntentMatcher {
           );
 
           if (regexResult) {
-            return {
-              intent: regexResult.intent,
+            allCandidates.push({
+              intentId: regexResult.intent.id,
+              intentName: regexResult.intent.description || regexResult.intent.id,
               confidence: 0.8,
-              matchedUtterance: regexResult.utterance,
               matchType: 'regex' as const,
-            };
+              matchedUtterance: regexResult.utterance,
+            });
           }
         }
       }
@@ -91,17 +103,41 @@ export class IntentMatcher {
           });
 
           if (result.matched) {
-            return {
-              intent,
+            allCandidates.push({
+              intentId: intent.id,
+              intentName: intent.description || intent.id,
               confidence: result.confidence,
-              matchedUtterance: result.utterance,
               matchType: 'semantic' as const,
-            };
+              matchedUtterance: result.utterance,
+            });
           }
         }
       }
 
-      return null;
+      // No matches found
+      if (allCandidates.length === 0) {
+        return null;
+      }
+
+      // Sort by match type priority first (exact > regex > semantic), then confidence
+      const matchTypePriority = { exact: 3, regex: 2, semantic: 1 };
+      allCandidates.sort((a, b) => {
+        const priorityDiff = matchTypePriority[b.matchType] - matchTypePriority[a.matchType];
+        if (priorityDiff !== 0) return priorityDiff;
+        return b.confidence - a.confidence;
+      });
+
+      // Return best match with all candidates
+      const best = allCandidates[0];
+      const bestIntent = intents.find((i) => i.id === best.intentId)!;
+
+      return {
+        intent: bestIntent,
+        confidence: best.confidence,
+        matchType: best.matchType,
+        matchedUtterance: best.matchedUtterance,
+        allCandidates: allCandidates.map(({ matchedUtterance, ...rest }) => rest),
+      };
     });
   }
 

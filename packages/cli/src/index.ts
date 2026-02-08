@@ -7,6 +7,7 @@
 
 import { handleTestCommand } from './test';
 import { handleDevCommand } from './dev';
+import { handleEvalCommand } from './eval';
 
 /**
  * Options that require a value
@@ -16,6 +17,19 @@ const OPTIONS_REQUIRING_VALUE = new Set([
   'config',
   'traces-dir',
   'tracesDir',
+  'run-id',
+  'runId',
+  'trace-id',
+  'traceId',
+  'from-step',
+  'fromStep',
+  'suite',
+  'suite-file',
+  'suiteFile',
+  'output',
+  'baseline',
+  'candidate',
+  'mode',
 ]);
 
 /**
@@ -78,6 +92,13 @@ Commands:
   test --record <message>  Record a new golden trace
   test --update            Update existing golden traces
   test <pattern>           Run tests matching pattern
+  eval                    Run evaluation workflows
+  eval record --run-id <id>           Record evaluation artifact for a run
+  eval replay --trace-id <id>         Replay run from checkpoint (config optional; uses artifact data when no config)
+                                    Optional: --from-step <n> --mode retry|skip|restart --config <file>
+  eval compare --baseline <id> --candidate <id>  Compare two evaluation traces
+  eval suite --suite <file>           Run evaluation suite manifest
+                                    Outputs: pass/fail totals, latency/token metrics, intent confusion matrix
 
 Options:
   --config <file>          Path to Fred config file
@@ -89,6 +110,10 @@ Examples:
   fred test --record "Hello, world!"
   fred test --update
   fred test --config fred.config.yaml
+  fred eval record --run-id run-123 --output json
+  fred eval replay --trace-id trace-abc --from-step 2
+  fred eval compare --baseline trace-a --candidate trace-b
+  fred eval suite --suite ./eval/suite.yaml --output json
   `);
 }
 
@@ -124,6 +149,10 @@ async function main(): Promise<void> {
           tracesDir: options['traces-dir'] || options.tracesDir,
           configFile: options.config,
         });
+        break;
+
+      case 'eval':
+        exitCode = await handleEvalCommand(commandArgs, options);
         break;
 
       default:

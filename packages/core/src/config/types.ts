@@ -1,8 +1,8 @@
-import { Intent } from '../intent/intent';
-import { AgentConfig } from '../agent/agent';
-import { Tool, ToolSchemaMetadata } from '../tool/tool';
-import { PipelineConfig } from '../pipeline/pipeline';
-import { RoutingConfig } from '../routing/types';
+import type { Intent } from '../intent/intent';
+import type { AgentConfig } from '../agent/agent';
+import type { Tool, ToolSchemaMetadata } from '../tool/tool';
+import type { PipelineConfig } from '../pipeline/pipeline';
+import type { RoutingConfig } from '../routing/types';
 
 // =============================================================================
 // Provider Pack Config Types
@@ -42,6 +42,78 @@ export interface ProviderPackConfig {
     temperature?: number;
     maxTokens?: number;
   };
+}
+
+// =============================================================================
+// MCP Server Config Types
+// =============================================================================
+
+/**
+ * Global MCP server configuration.
+ *
+ * Servers are declared globally in config and agents reference them by ID.
+ *
+ * @example
+ * mcpServers:
+ *   github:
+ *     transport: stdio
+ *     command: npx
+ *     args: ["-y", "@modelcontextprotocol/server-github"]
+ *     env:
+ *       GITHUB_TOKEN: "${GITHUB_TOKEN}"
+ *     timeout: 30000
+ *   remote-api:
+ *     transport: http
+ *     url: "https://api.example.com/mcp"
+ *     headers:
+ *       Authorization: "Bearer ${API_TOKEN}"
+ *     timeout: 60000
+ *     retry:
+ *       maxRetries: 3
+ *       backoffMs: 1000
+ *     healthCheckIntervalMs: 60000
+ *     lazy: true
+ */
+export interface MCPGlobalServerConfig {
+  /** Transport type for this MCP server */
+  transport: 'stdio' | 'http' | 'sse';
+
+  // stdio transport fields
+  /** Command to execute (stdio transport only) */
+  command?: string;
+  /** Command arguments (stdio transport only) */
+  args?: string[];
+  /** Environment variables for subprocess (stdio transport only) */
+  env?: Record<string, string>;
+
+  // http/sse transport fields
+  /** Server URL (http/sse transport only) */
+  url?: string;
+  /** HTTP headers (http/sse transport only) */
+  headers?: Record<string, string>;
+
+  // Common configuration
+  /** Connection timeout in milliseconds (default: 30000) */
+  timeout?: number;
+  /** Enable/disable this server (default: true) */
+  enabled?: boolean;
+  /** Lazy startup - connect on first use instead of at initialization (default: false) */
+  lazy?: boolean;
+
+  // Retry configuration
+  /** Retry policy for failed connections */
+  retry?: {
+    /** Maximum number of retry attempts */
+    maxRetries?: number;
+    /** Initial backoff delay in milliseconds */
+    backoffMs?: number;
+    /** Maximum backoff delay in milliseconds */
+    maxBackoffMs?: number;
+  };
+
+  // Health check configuration
+  /** Health check interval in milliseconds (optional) */
+  healthCheckIntervalMs?: number;
 }
 
 // =============================================================================
@@ -114,6 +186,16 @@ export interface PersistenceConfig {
  *     serviceName: 'fred',
  *     serviceVersion: '0.1.2',
  *     environment: 'production'
+ *   },
+ *   sampling: {
+ *     successSampleRate: 0.01,
+ *     slowThresholdMs: 5000,
+ *     debugMode: false
+ *   },
+ *   metrics: {
+ *     pricing: {
+ *       'openai:gpt-4': { input: 0.03, output: 0.06 }
+ *     }
  *   }
  * }
  *
@@ -146,6 +228,87 @@ export interface ObservabilityConfig {
 
   /** Enable console exporter as fallback when OTLP is not configured (defaults to true in dev) */
   enableConsoleFallback?: boolean;
+
+  /** Sampling configuration for controlling observability data volume */
+  sampling?: {
+    /** Success sampling rate (0.0 to 1.0). Default: 0.01 (1%). Errors always sampled. */
+    successSampleRate?: number;
+    /** Slow threshold in milliseconds. Runs exceeding this are always sampled. Default: 5000 */
+    slowThresholdMs?: number;
+    /** Debug mode: force all runs to be sampled. Default: false */
+    debugMode?: boolean;
+  };
+
+  /** Metrics configuration for token usage and cost tracking */
+  metrics?: {
+    /** Pricing table for cost calculation (model key -> price per 1000 tokens) */
+    pricing?: Record<string, { input: number; output: number }>;
+  };
+}
+
+// =============================================================================
+// Tool Access Policy Config Types
+// =============================================================================
+
+/**
+ * Declarative metadata predicate for tool policy conditions.
+ */
+export interface ToolPolicyMetadataPredicate {
+  equals?: unknown;
+  notEquals?: unknown;
+  in?: unknown[];
+  notIn?: unknown[];
+  exists?: boolean;
+}
+
+/**
+ * Optional conditions used to scope a policy rule.
+ */
+export interface ToolPolicyCondition {
+  role?: string | string[];
+  userId?: string | string[];
+  metadata?: Record<string, unknown | ToolPolicyMetadataPredicate>;
+}
+
+/**
+ * Base rule declarations for tool access control.
+ *
+ * - allow: tool IDs explicitly allowed
+ * - deny: tool IDs explicitly denied
+ * - requireApproval: tool IDs requiring human approval
+ * - requiredCategories: categories the tool must belong to
+ * - conflictResolution: how allow/deny conflicts are resolved
+ */
+export interface ToolPolicyRule {
+  allow?: string[];
+  deny?: string[];
+  requireApproval?: string[];
+  requiredCategories?: string[];
+  conflictResolution?: 'deny-overrides' | 'allow-overrides';
+  conditions?: ToolPolicyCondition;
+}
+
+/**
+ * Override policy block that explicitly replaces inherited behavior
+ * for the declared scope.
+ */
+export interface ToolPolicyOverride extends ToolPolicyRule {
+  id: string;
+  override: true;
+  target: {
+    intentId?: string;
+    agentId?: string;
+  };
+}
+
+/**
+ * Tool access policies with default -> intent -> agent inheritance.
+ */
+export interface ToolPoliciesConfig {
+  default?: ToolPolicyRule;
+  intents?: Record<string, ToolPolicyRule>;
+  agents?: Record<string, ToolPolicyRule>;
+  overrides?: ToolPolicyOverride[];
 }
 
 // =============================================================================
@@ -176,6 +339,12 @@ export interface FrameworkConfig {
   persistence?: PersistenceConfig;
   /** Observability configuration (tracing and logging) */
   observability?: ObservabilityConfig;
+  /** Tool access policy declarations */
+  policies?: ToolPoliciesConfig;
+  /** Backward-compatible alias for policy declarations */
+  toolPolicies?: ToolPoliciesConfig;
+  /** MCP server declarations (global registry, agents reference by ID) */
+  mcpServers?: Record<string, MCPGlobalServerConfig>;
 }
 
 export interface MemoryConfig {

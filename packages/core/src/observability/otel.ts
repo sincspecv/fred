@@ -162,8 +162,11 @@ export function buildObservabilityLayers(config: ObservabilityConfig = {}): Obse
     tracerLayer = NodeSdk.layerEmpty as Layer.Layer<never>;
   }
 
-  // Build logger layer with minimum log level
-  const loggerLayer = Logger.minimumLogLevel(minLevel);
+  // Build logger layer with JSON output and minimum log level
+  const loggerLayer = Layer.mergeAll(
+    Logger.json,
+    Logger.minimumLogLevel(minLevel)
+  );
 
   return {
     tracerLayer,

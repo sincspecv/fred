@@ -1,5 +1,4 @@
 import { Action } from '../intent/intent';
-import { MCPServerConfig } from '../mcp/types';
 import type { Prompt } from '@effect/ai';
 import type { Stream } from 'effect';
 import type { StreamEvent } from '../stream/events';
@@ -48,7 +47,8 @@ export interface AgentConfig {
   temperature?: number; // Optional temperature setting
   maxTokens?: number; // Optional max tokens setting
   utterances?: string[]; // Phrases that trigger this agent directly (bypasses intent matching)
-  mcpServers?: MCPServerConfig[]; // MCP servers to connect to for this agent
+  /** MCP server references (string[] of server IDs from global config) */
+  mcpServers?: string[];
   maxSteps?: number; // Maximum number of steps in the agent loop (default: 20)
   toolChoice?: 'auto' | 'required' | 'none' | { type: 'tool'; toolName: string }; // Control tool usage
   toolTimeout?: number; // Timeout for tool execution in milliseconds (default: 300000 = 5 minutes)
@@ -115,4 +115,6 @@ export interface AgentResponse {
     message: string;
     context?: Record<string, any>;
   };
+  /** Routing explanation (populated when routing explainability is enabled) */
+  routingExplanation?: import('../routing/types').RoutingExplanation;
 }

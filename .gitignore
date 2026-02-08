@@ -89,3 +89,6 @@ fred.config.local.json
 
 # Claude
 .claude/
+
+# Fred local runtime/eval artifacts
+.fred/

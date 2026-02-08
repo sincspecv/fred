@@ -938,7 +938,7 @@ describe('MessageRouter', () => {
   });
 
   describe('findBestMatch', () => {
-    it('should return null when no rules match', async () => {
+    it('should return null best match when no rules match', async () => {
       const config: RoutingConfig = {
         defaultAgent: 'default',
         rules: [
@@ -951,12 +951,13 @@ describe('MessageRouter', () => {
       };
 
       const router = createRouter(config, [{ id: 'default' }, { id: 'specific-agent' }]);
-      const match = await Effect.runPromise(router.findBestMatch('no match', {}));
+      const result = await Effect.runPromise(router.findBestMatch('no match', {}));
 
-      expect(match).toBeNull();
+      expect(result.best).toBeNull();
+      expect(result.allMatches).toEqual([]);
     });
 
-    it('should return highest specificity match', async () => {
+    it('should return highest specificity match and all matches', async () => {
       const config: RoutingConfig = {
         defaultAgent: 'default',
         rules: [
@@ -974,11 +975,14 @@ describe('MessageRouter', () => {
       };
 
       const router = createRouter(config, [{ id: 'default' }, { id: 'low-agent' }, { id: 'high-agent' }]);
-      const match = await Effect.runPromise(router.findBestMatch('test message', {}));
+      const result = await Effect.runPromise(router.findBestMatch('test message', {}));
 
-      expect(match).not.toBeNull();
-      expect(match?.rule.id).toBe('high-spec');
-      expect(match?.matchType).toBe('exact');
+      expect(result.best).not.toBeNull();
+      expect(result.best?.rule.id).toBe('high-spec');
+      expect(result.best?.matchType).toBe('exact');
+      expect(result.allMatches.length).toBe(2);
+      expect(result.allMatches[0].rule.id).toBe('high-spec');
+      expect(result.allMatches[1].rule.id).toBe('low-spec');
     });
   });
 
@@ -1106,6 +1110,165 @@ describe('MessageRouter', () => {
       };
 
       expect(router.calculateSpecificity(rule, 'keyword')).toBe(750); // 700 + 50
+    });
+  });
+
+  describe('routing explanations', () => {
+    it('route() returns decision with explanation when no calibration provided', async () => {
+      const config: RoutingConfig = {
+        defaultAgent: 'default',
+        rules: [
+          {
+            id: 'greeting',
+            agent: 'greeter',
+            patterns: ['^hello$'],
+          },
+        ],
+      };
+
+      const router = createRouter(config, [{ id: 'default' }, { id: 'greeter' }]);
+      const result = await Effect.runPromise(router.route('hello'));
+
+      expect(result.explanation).toBeDefined();
+      expect(result.explanation?.winner.targetId).toBe('greeter');
+      expect(result.explanation?.winner.confidence).toBe(1.0);
+      expect(result.explanation?.matchType).toBe('exact');
+      expect(result.explanation?.calibrationMetadata.calibrated).toBe(false);
+      expect(result.explanation?.narrative).toContain('greeter');
+    });
+
+    it('route() explanation includes all matched alternatives sorted by confidence', async () => {
+      const config: RoutingConfig = {
+        defaultAgent: 'default',
+        rules: [
+          {
+            id: 'exact-match',
+            agent: 'exact-agent',
+            patterns: ['^test message$'],
+          },
+          {
+            id: 'regex-match',
+            agent: 'regex-agent',
+            patterns: ['test.*'],
+          },
+          {
+            id: 'keyword-match',
+            agent: 'keyword-agent',
+            keywords: ['test'],
+          },
+        ],
+      };
+
+      const router = createRouter(config, [
+        { id: 'default' },
+        { id: 'exact-agent' },
+        { id: 'regex-agent' },
+        { id: 'keyword-agent' },
+      ]);
+      const result = await Effect.runPromise(router.route('test message'));
+
+      expect(result.explanation).toBeDefined();
+      expect(result.explanation?.winner.targetId).toBe('exact-agent');
+      expect(result.explanation?.alternatives.length).toBeGreaterThan(0);
+      // Alternatives should be sorted by confidence descending
+      const alts = result.explanation!.alternatives;
+      for (let i = 1; i < alts.length; i++) {
+        expect(alts[i - 1].confidence).toBeGreaterThanOrEqual(alts[i].confidence);
+      }
+      // Winner should not be in alternatives
+      expect(alts.find((a) => a.targetId === 'exact-agent')).toBeUndefined();
+    });
+
+    it('route() fallback decision has explanation with 0.5 confidence', async () => {
+      const config: RoutingConfig = {
+        defaultAgent: 'default',
+        rules: [
+          {
+            id: 'specific',
+            agent: 'specific-agent',
+            keywords: ['specific'],
+          },
+        ],
+      };
+
+      const router = createRouter(config, [{ id: 'default' }, { id: 'specific-agent' }]);
+      const result = await Effect.runPromise(router.route('no match here'));
+
+      expect(result.fallback).toBe(true);
+      expect(result.explanation).toBeDefined();
+      expect(result.explanation?.winner.targetId).toBe('default');
+      expect(result.explanation?.winner.confidence).toBe(0.5);
+      expect(result.explanation?.alternatives).toEqual([]);
+    });
+
+    it('testRoute() returns decision with explanation', async () => {
+      const config: RoutingConfig = {
+        defaultAgent: 'default',
+        rules: [
+          {
+            id: 'greeting',
+            agent: 'greeter',
+            patterns: ['^hello$'],
+          },
+        ],
+      };
+
+      const router = createRouter(config, [{ id: 'default' }, { id: 'greeter' }]);
+      const result = await Effect.runPromise(router.testRoute('hello'));
+
+      expect(result.explanation).toBeDefined();
+      expect(result.explanation?.winner.targetId).toBe('greeter');
+      expect(result.explanation?.narrative).toContain('greeter');
+    });
+
+    it('explanation alternatives exclude the winner', async () => {
+      const config: RoutingConfig = {
+        defaultAgent: 'default',
+        rules: [
+          {
+            id: 'pattern1',
+            agent: 'agent1',
+            patterns: ['test'],
+          },
+          {
+            id: 'pattern2',
+            agent: 'agent2',
+            patterns: ['test'],
+          },
+        ],
+      };
+
+      const router = createRouter(config, [{ id: 'default' }, { id: 'agent1' }, { id: 'agent2' }]);
+      const result = await Effect.runPromise(router.route('test'));
+
+      expect(result.explanation).toBeDefined();
+      const winnerId = result.explanation!.winner.targetId;
+      const hasWinnerInAlternatives = result.explanation!.alternatives.some(
+        (alt) => alt.targetId === winnerId
+      );
+      expect(hasWinnerInAlternatives).toBe(false);
+    });
+
+    it('explanation alternatives never include zero-confidence items', async () => {
+      const config: RoutingConfig = {
+        defaultAgent: 'default',
+        rules: [
+          {
+            id: 'high-conf',
+            agent: 'high-agent',
+            patterns: ['^test$'],
+          },
+        ],
+      };
+
+      const router = createRouter(config, [{ id: 'default' }, { id: 'high-agent' }]);
+      const result = await Effect.runPromise(router.route('test'));
+
+      expect(result.explanation).toBeDefined();
+      const hasZeroConfidence = result.explanation!.alternatives.some(
+        (alt) => alt.confidence === 0
+      );
+      expect(hasZeroConfidence).toBe(false);
     });
   });
 });

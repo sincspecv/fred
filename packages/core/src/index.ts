@@ -29,6 +29,7 @@ import { WorkflowManager } from './workflow/manager';
 import { Workflow } from './workflow/types';
 import { buildObservabilityLayers, type ObservabilityLayers } from './observability/otel';
 import type { ObservabilityConfig } from './config/types';
+import type { ToolPoliciesConfig } from './config/types';
 import {
   GlobalVariablesService,
   GlobalVariablesServiceLive,
@@ -48,7 +49,16 @@ import {
   ContextStorageService,
   ProviderRegistryService,
   HookManagerService,
+  ToolGateService,
 } from './services';
+import { normalizeRunRecord, normalizeLegacyGoldenTrace } from './eval/normalizer';
+import { FileTraceStorageLive } from './eval/storage';
+import { compare } from './eval/comparator';
+import { createReplayOrchestrator, replay, replayWithStorage } from './eval/replay';
+import { runSuite, parseSuiteManifest, decodeSuiteManifest } from './eval/suite';
+import { calculateIntentMetrics } from './eval/metrics';
+import { MCPServerRegistry, MCPResourceService } from './mcp';
+import type { MCPGlobalServerConfig } from './config/types';
 
 /**
  * Fred - Main class for building AI agents
@@ -90,6 +100,10 @@ export class Fred implements FredLike {
   private providerService: ProviderService;
   private messageProcessor: MessageProcessor;
   private configInitializer: ConfigInitializer;
+
+  // MCP integration
+  private mcpServerRegistry: MCPServerRegistry;
+  private mcpResourceService: MCPResourceService;
 
   // Effect runtime for service execution (lazy initialized)
   private runtime: FredRuntime | null = null;
@@ -136,8 +150,17 @@ export class Fred implements FredLike {
       messageRouter: this.messageRouter,
       memoryDefaults: this.memoryDefaults,
       defaultAgentId: this.defaultAgentId,
+      hookManager: this.hookManager,
+      observabilityService: undefined, // Will be set via configureObservability if needed
     });
     this.configInitializer = new ConfigInitializer();
+
+    // Initialize MCP registry and resource service
+    this.mcpServerRegistry = new MCPServerRegistry();
+    this.mcpResourceService = new MCPResourceService(this.mcpServerRegistry);
+
+    // Wire MCP registry into agent factory
+    this.agentManager.getAgentFactory().setMCPServerRegistry(this.mcpServerRegistry);
 
     // Set tracer on hook manager if provided
     if (this.tracer) {
@@ -426,6 +449,32 @@ export class Fred implements FredLike {
     return Effect.runPromise(this.messageRouter.testRoute(message, metadata ?? {}));
   }
 
+  /**
+   * Routing API namespace for explainability and debugging.
+   */
+  get routing() {
+    return {
+      /**
+       * Get routing explanation for a message without executing the agent.
+       * Useful for debugging and understanding routing decisions.
+       *
+       * @param message - The message to route
+       * @param metadata - Optional message metadata
+       * @returns Routing explanation or null if no router configured
+       */
+      explain: async (
+        message: string,
+        metadata?: Record<string, unknown>
+      ): Promise<import('./routing/types').RoutingExplanation | null> => {
+        if (!this.messageRouter) return null;
+        const decision = await Effect.runPromise(
+          this.messageRouter.testRoute(message, metadata ?? {})
+        );
+        return decision?.explanation ?? null;
+      },
+    };
+  }
+
   // --- Workflow Configuration ---
 
   configureWorkflows(workflows: Workflow[]): void {
@@ -504,6 +553,16 @@ export class Fred implements FredLike {
     this.observabilityLayers = buildObservabilityLayers(config);
   }
 
+  async setToolPolicies(policies: ToolPoliciesConfig | undefined): Promise<void> {
+    await this.runEffect(
+      Effect.gen(function* () {
+        const toolGate = yield* ToolGateService;
+        yield* toolGate.reloadPolicies(policies);
+      }),
+      'Failed to apply tool policies'
+    );
+  }
+
   getObservabilityLayers(): ObservabilityLayers | undefined {
     return this.observabilityLayers;
   }
@@ -544,6 +603,55 @@ export class Fred implements FredLike {
     return this.providerService;
   }
 
+  getMCPServerRegistry(): MCPServerRegistry {
+    return this.mcpServerRegistry;
+  }
+
+  getMCPResourceService(): MCPResourceService {
+    return this.mcpResourceService;
+  }
+
+  /**
+   * Configure MCP servers from config.
+   *
+   * Registers servers in the global registry and starts health checks.
+   *
+   * @param configs - Array of MCP server configurations with IDs
+   */
+  async configureMCPServers(
+    configs: Array<MCPGlobalServerConfig & { id: string }>
+  ): Promise<void> {
+    for (const config of configs) {
+      // Convert MCPGlobalServerConfig to MCPServerConfig format
+      const serverConfig = {
+        id: config.id,
+        transport: config.transport,
+        command: config.command,
+        args: config.args,
+        env: config.env,
+        url: config.url,
+        headers: config.headers,
+        timeout: config.timeout,
+        enabled: config.enabled,
+        lazy: config.lazy,
+        retry: config.retry,
+      };
+
+      if (config.lazy) {
+        // Register lazy server (deferred connection)
+        this.mcpServerRegistry.registerLazyServer(config.id, serverConfig);
+      } else {
+        // Register and connect immediately (graceful failure handling)
+        await Effect.runPromise(
+          this.mcpServerRegistry.registerAndConnect(config.id, serverConfig)
+        );
+      }
+    }
+
+    // Start health checks for connected servers
+    this.mcpServerRegistry.startHealthChecks();
+  }
+
   /**
    * Shutdown Fred and release all resources.
    *
@@ -558,7 +666,10 @@ export class Fred implements FredLike {
    * ```
    */
   async shutdown(): Promise<void> {
-    // Cleanup existing class-based resources
+    // Cleanup MCP connections first
+    await Effect.runPromise(this.mcpServerRegistry.shutdown());
+
+    // Cleanup existing class-based resources (includes legacy MCP clients)
     await this.agentManager.clear();
 
     // Runtime cleanup happens automatically via Effect.scoped
@@ -567,6 +678,26 @@ export class Fred implements FredLike {
     this.runtimePromise = null;
   }
 }
+
+/**
+ * Public evaluation helpers exposed from the main Fred entrypoint.
+ *
+ * This keeps evaluation workflows available from `@fancyrobot/fred`
+ * without requiring internal path imports.
+ */
+export const evaluation = {
+  normalizeRunRecord,
+  normalizeLegacyGoldenTrace,
+  compare,
+  createReplayOrchestrator,
+  replay,
+  replayWithStorage,
+  runSuite,
+  parseSuiteManifest,
+  decodeSuiteManifest,
+  calculateIntentMetrics,
+  FileTraceStorageLive,
+} as const;
 
 // Re-export all types and classes
 export * from './exports';
@@ -600,3 +731,14 @@ export type {
   AgentNotFoundError,
   MaxHandoffDepthError,
 } from './message-processor/errors';
+
+// Re-export evaluation types
+export type {
+  SuiteManifest,
+  SuiteCaseDefinition,
+  SuiteCaseExecutionResult,
+  SuiteCaseReport,
+  SuiteReport,
+  SuiteCompareConfig,
+  SuiteReplayConfig,
+} from './eval';

@@ -3,6 +3,7 @@ import { Effect, Layer, Ref } from 'effect';
 import { AgentService, AgentServiceLive } from '../../../../packages/core/src/agent/service';
 import { ToolRegistryService, ToolRegistryServiceLive } from '../../../../packages/core/src/tool/service';
 import { ProviderRegistryService, ProviderRegistryServiceLive } from '../../../../packages/core/src/platform/service';
+import { ToolGateServiceLive } from '../../../../packages/core/src/tool-gate/service';
 import { AgentNotFoundError, AgentAlreadyExistsError, AgentCreationError } from '../../../../packages/core/src/agent/errors';
 import type { AgentConfig } from '../../../../packages/core/src/agent/agent';
 
@@ -17,11 +18,12 @@ describe('AgentService', () => {
   // Create test runtime with all dependencies
   const TestLayer = AgentServiceLive.pipe(
     Layer.provide(ToolRegistryServiceLive),
-    Layer.provide(ProviderRegistryServiceLive)
+    Layer.provide(ProviderRegistryServiceLive),
+    Layer.provide(ToolGateServiceLive.pipe(Layer.provide(ToolRegistryServiceLive)))
   );
 
-  const runTest = <A, E>(effect: Effect.Effect<A, E, AgentService>) =>
-    Effect.runPromise(effect.pipe(Effect.provide(TestLayer)));
+  const runTest = <A, E, R>(effect: Effect.Effect<A, E, R>): Promise<A> =>
+    Effect.runPromise(effect.pipe(Effect.provide(TestLayer)) as Effect.Effect<A, E, never>);
 
   describe('hasAgent', () => {
     it('should return false for non-existent agent', async () => {
@@ -198,4 +200,5 @@ describe('AgentService', () => {
       expect(result).toBe(false);
     });
   });
+
 });

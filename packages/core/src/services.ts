@@ -9,6 +9,8 @@ import { Effect, Layer, Runtime, Scope, Ref } from 'effect';
 
 // Import all services
 import { ToolRegistryService, ToolRegistryServiceLive } from './tool/service';
+import { ToolGateService, ToolGateServiceLive } from './tool-gate/service';
+import type { ToolGateServiceApi } from './tool-gate/types';
 import { HookManagerService, HookManagerServiceLive } from './hooks/service';
 import { ProviderRegistryService, ProviderRegistryServiceLive } from './platform/service';
 import { ContextStorageService, ContextStorageServiceLive } from './context/service';
@@ -21,6 +23,7 @@ import { MessageProcessorService, MessageProcessorServiceLive } from './message-
 import { IntentMatcherService, IntentMatcherServiceLive } from './intent/service';
 import { IntentRouterService, IntentRouterServiceLive } from './intent/service';
 import { MessageRouterService, MessageRouterServiceFromInstance } from './routing/service';
+import { ObservabilityService, ObservabilityServiceLive } from './observability/service';
 import type { CheckpointStorage, Checkpoint, CheckpointStatus } from './pipeline/checkpoint/types';
 
 /**
@@ -32,6 +35,7 @@ import type { CheckpointStorage, Checkpoint, CheckpointStatus } from './pipeline
  */
 export type FredServices =
   | ToolRegistryService
+  | ToolGateServiceApi
   | HookManagerService
   | ProviderRegistryService
   | ContextStorageService
@@ -39,7 +43,8 @@ export type FredServices =
   | CheckpointService
   | PauseService
   | PipelineService
-  | MessageProcessorService;
+  | MessageProcessorService
+  | ObservabilityService;
 
 /**
  * Fred runtime type with all services
@@ -199,11 +204,12 @@ const CheckpointServiceLive = Layer.effect(
 
 /**
  * Base layers with no external dependencies
- * Wave 1: ToolRegistry, HookManager
+ * Wave 1: ToolRegistry, HookManager, Observability
  */
 const baseLayer = Layer.mergeAll(
   ToolRegistryServiceLive,
-  HookManagerServiceLive
+  HookManagerServiceLive,
+  ObservabilityServiceLive
 );
 
 /**
@@ -214,6 +220,13 @@ const coreLayer = Layer.mergeAll(
   ProviderRegistryServiceLive,
   ContextStorageServiceLive,
   CheckpointServiceLive
+);
+
+/**
+ * ToolGate layer depends on ToolRegistry
+ */
+const toolGateLayer = ToolGateServiceLive.pipe(
+  Layer.provide(ToolRegistryServiceLive)
 );
 
 /**
@@ -229,6 +242,7 @@ const pauseLayer = PauseServiceLive.pipe(
  */
 const agentLayer = AgentServiceLive.pipe(
   Layer.provide(baseLayer),
+  Layer.provide(toolGateLayer),
   Layer.provide(ProviderRegistryServiceLive)
 );
 
@@ -264,6 +278,7 @@ const messageProcessorLayer = MessageProcessorServiceLive.pipe(
  * ```
  * ToolRegistryService (Wave 1)
  * HookManagerService (Wave 1)
+ * ObservabilityService (Wave 1)
  *       |
  *       v
  * ProviderRegistryService (Wave 2)
@@ -285,6 +300,7 @@ const messageProcessorLayer = MessageProcessorServiceLive.pipe(
  */
 export const FredLayers = Layer.mergeAll(
   baseLayer,
+  toolGateLayer,
   coreLayer,
   pauseLayer,
   agentLayer,
@@ -332,6 +348,8 @@ export const createScopedFredRuntime = (): Promise<FredRuntime> => {
 export {
   ToolRegistryService,
   ToolRegistryServiceLive,
+  ToolGateService,
+  ToolGateServiceLive,
   HookManagerService,
   HookManagerServiceLive,
   ProviderRegistryService,
@@ -354,4 +372,6 @@ export {
   IntentRouterServiceLive,
   MessageRouterService,
   MessageRouterServiceFromInstance,
+  ObservabilityService,
+  ObservabilityServiceLive,
 };

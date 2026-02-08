@@ -1,354 +1,317 @@
-import { GoldenTrace, GoldenTraceSpan, GoldenTraceToolCall, GoldenTraceHandoff } from './golden-trace';
+import { Schema } from 'effect';
+import { calculateSimilarity } from '../utils/semantic';
+import { validateGoldenTrace } from './golden-trace';
+import type { GoldenTrace } from './golden-trace';
 
-/**
- * Assertion result
- */
 export interface AssertionResult {
+  type: AssertionSpec['type'];
   passed: boolean;
   message: string;
-  details?: any;
+  details?: Record<string, unknown>;
 }
 
-/**
- * Assert that a tool was called
- */
-export function assertToolCalled(
-  trace: GoldenTrace,
-  toolId: string,
-  expectedArgs?: Record<string, any>
-): AssertionResult {
-  const toolCall = trace.trace.toolCalls.find(tc => tc.toolId === toolId);
-  
-  if (!toolCall) {
-    return {
-      passed: false,
-      message: `Expected tool "${toolId}" to be called, but it was not`,
-    };
+const UnknownRecordSchema = Schema.Record({ key: Schema.String, value: Schema.Unknown });
+
+const ToolCallExpectationSchema = Schema.Struct({
+  toolId: Schema.String.pipe(Schema.minLength(1)),
+  argsContains: Schema.optional(UnknownRecordSchema),
+});
+
+const ToolCallsAssertionSpecSchema = Schema.Struct({
+  type: Schema.Literal('tool.calls'),
+  expected: Schema.Array(ToolCallExpectationSchema).pipe(Schema.minItems(1)),
+});
+
+const RoutingAssertionSpecSchema = Schema.Struct({
+  type: Schema.Literal('routing'),
+  expected: Schema.Struct({
+    method: Schema.optional(Schema.Union(
+      Schema.Literal('agent.utterance'),
+      Schema.Literal('intent.matching'),
+      Schema.Literal('default.agent')
+    )),
+    agentId: Schema.optional(Schema.String),
+    intentId: Schema.optional(Schema.String),
+    matchType: Schema.optional(Schema.Union(
+      Schema.Literal('exact'),
+      Schema.Literal('regex'),
+      Schema.Literal('semantic')
+    )),
+  }),
+});
+
+const ResponseAssertionSpecSchema = Schema.Struct({
+  type: Schema.Literal('response'),
+  pathEquals: Schema.optional(UnknownRecordSchema),
+  text: Schema.optional(Schema.String),
+  semanticThreshold: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  caseSensitive: Schema.optional(Schema.Boolean),
+});
+
+const CheckpointAssertionSpecSchema = Schema.Struct({
+  type: Schema.Literal('checkpoint'),
+  expected: Schema.Struct({
+    step: Schema.optional(Schema.Number.pipe(Schema.int())),
+    stepName: Schema.optional(Schema.String),
+    status: Schema.optional(Schema.String),
+    minCount: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1))),
+  }),
+});
+
+const SchemaAssertionSpecSchema = Schema.Struct({
+  type: Schema.Literal('schema'),
+});
+
+export const AssertionSpecSchema = Schema.Union(
+  ToolCallsAssertionSpecSchema,
+  RoutingAssertionSpecSchema,
+  ResponseAssertionSpecSchema,
+  CheckpointAssertionSpecSchema,
+  SchemaAssertionSpecSchema
+);
+
+export const AssertionSuiteSchema = Schema.Array(AssertionSpecSchema).pipe(Schema.minItems(1));
+
+export type ToolCallsAssertionSpec = typeof ToolCallsAssertionSpecSchema.Type;
+export type RoutingAssertionSpec = typeof RoutingAssertionSpecSchema.Type;
+export type ResponseAssertionSpec = typeof ResponseAssertionSpecSchema.Type;
+export type CheckpointAssertionSpec = typeof CheckpointAssertionSpecSchema.Type;
+export type SchemaAssertionSpec = typeof SchemaAssertionSpecSchema.Type;
+
+export type AssertionSpec =
+  | ToolCallsAssertionSpec
+  | RoutingAssertionSpec
+  | ResponseAssertionSpec
+  | CheckpointAssertionSpec
+  | SchemaAssertionSpec;
+
+export function decodeAssertionSpecs(specs: unknown): AssertionSpec[] {
+  return Array.from(Schema.decodeUnknownSync(AssertionSuiteSchema, { errors: 'all' })(specs));
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function partialMatch(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual)) return false;
+    return expected.every((item, index) => partialMatch(actual[index], item));
   }
 
-  if (expectedArgs) {
-    // Check if args match (deep equality)
-    const argsMatch = JSON.stringify(toolCall.args) === JSON.stringify(expectedArgs);
-    if (!argsMatch) {
-      return {
-        passed: false,
-        message: `Tool "${toolId}" was called with different arguments than expected`,
-        details: {
-          expected: expectedArgs,
-          actual: toolCall.args,
-        },
-      };
+  if (isObject(expected)) {
+    if (!isObject(actual)) return false;
+    return Object.entries(expected).every(([key, expectedValue]) => partialMatch(actual[key], expectedValue));
+  }
+
+  return Object.is(actual, expected);
+}
+
+function getPathValue(value: unknown, path: string): unknown {
+  if (!path) return value;
+  return path
+    .split('.')
+    .filter(Boolean)
+    .reduce<unknown>((current, segment) => (isObject(current) ? current[segment] : undefined), value);
+}
+
+function assertToolCalls(trace: GoldenTrace, spec: ToolCallsAssertionSpec): AssertionResult {
+  const missingExpectedCalls: Array<{ toolId: string; argsContains?: Record<string, unknown> }> = [];
+
+  for (const expectation of spec.expected) {
+    const found = trace.trace.toolCalls.some((toolCall) => {
+      if (toolCall.toolId !== expectation.toolId) {
+        return false;
+      }
+
+      if (!expectation.argsContains) {
+        return true;
+      }
+
+      return partialMatch(toolCall.args, expectation.argsContains);
+    });
+
+    if (!found) {
+      missingExpectedCalls.push(expectation);
     }
   }
 
+  if (missingExpectedCalls.length > 0) {
+    return {
+      type: spec.type,
+      passed: false,
+      message: `Missing ${missingExpectedCalls.length} expected tool call(s)`,
+      details: {
+        missingExpectedCalls,
+        actualToolCalls: trace.trace.toolCalls.map((toolCall) => ({
+          toolId: toolCall.toolId,
+          args: toolCall.args,
+        })),
+      },
+    };
+  }
+
   return {
+    type: spec.type,
     passed: true,
-    message: `Tool "${toolId}" was called successfully`,
-    details: {
-      args: toolCall.args,
-      result: toolCall.result,
-      timing: toolCall.timing,
-    },
+    message: `All ${spec.expected.length} expected tool call(s) were found`,
   };
 }
 
-/**
- * Assert that a specific agent was selected
- */
-export function assertAgentSelected(
-  trace: GoldenTrace,
-  agentId: string
-): AssertionResult {
-  const routing = trace.trace.routing;
-  
-  if (routing.method === 'agent.utterance' && routing.agentId === agentId) {
-    return {
-      passed: true,
-      message: `Agent "${agentId}" was selected via agent utterance`,
-      details: {
-        method: routing.method,
-        confidence: routing.confidence,
-        matchType: routing.matchType,
-      },
-    };
+function assertRouting(trace: GoldenTrace, spec: RoutingAssertionSpec): AssertionResult {
+  const mismatches: Array<{ field: string; expected: unknown; actual: unknown }> = [];
+  const actual = trace.trace.routing;
+
+  for (const [field, expectedValue] of Object.entries(spec.expected)) {
+    if (expectedValue === undefined) continue;
+    const actualValue = actual[field as keyof typeof actual];
+    if (!Object.is(actualValue, expectedValue)) {
+      mismatches.push({ field, expected: expectedValue, actual: actualValue });
+    }
   }
 
-  if (routing.method === 'intent.matching' && routing.agentId === agentId) {
+  if (mismatches.length > 0) {
     return {
-      passed: true,
-      message: `Agent "${agentId}" was selected via intent matching`,
-      details: {
-        method: routing.method,
-        intentId: routing.intentId,
-      },
-    };
-  }
-
-  if (routing.method === 'default.agent' && routing.agentId === agentId) {
-    return {
-      passed: true,
-      message: `Agent "${agentId}" was selected as default agent`,
-      details: {
-        method: routing.method,
-      },
-    };
-  }
-
-  return {
-    passed: false,
-    message: `Expected agent "${agentId}" to be selected, but got "${routing.agentId || 'none'}"`,
-    details: {
-      actualRouting: routing,
-    },
-  };
-}
-
-/**
- * Assert that a handoff occurred
- */
-export function assertHandoff(
-  trace: GoldenTrace,
-  fromAgent?: string,
-  toAgent?: string
-): AssertionResult {
-  const handoffs = trace.trace.handoffs;
-  
-  if (handoffs.length === 0) {
-    return {
+      type: spec.type,
       passed: false,
-      message: 'Expected a handoff to occur, but none were found',
-    };
-  }
-
-  if (toAgent) {
-    const matchingHandoff = handoffs.find(h => h.toAgent === toAgent);
-    if (!matchingHandoff) {
-      return {
-        passed: false,
-        message: `Expected handoff to agent "${toAgent}", but it was not found`,
-        details: {
-          actualHandoffs: handoffs.map(h => ({ from: h.fromAgent, to: h.toAgent })),
-        },
-      };
-    }
-
-    if (fromAgent && matchingHandoff.fromAgent !== fromAgent) {
-      return {
-        passed: false,
-        message: `Expected handoff from "${fromAgent}" to "${toAgent}", but got from "${matchingHandoff.fromAgent}"`,
-        details: {
-          actualHandoff: matchingHandoff,
-        },
-      };
-    }
-
-    return {
-      passed: true,
-      message: `Handoff from "${matchingHandoff.fromAgent || 'unknown'}" to "${toAgent}" occurred`,
+      message: 'Routing assertion failed',
       details: {
-        handoff: matchingHandoff,
+        expected: spec.expected,
+        actual,
+        mismatches,
       },
     };
   }
 
   return {
+    type: spec.type,
     passed: true,
-    message: `Found ${handoffs.length} handoff(s)`,
-    details: {
-      handoffs,
-    },
+    message: 'Routing assertion passed',
   };
 }
 
-/**
- * Assert that the response contains specific text
- */
-export function assertResponseContains(
-  trace: GoldenTrace,
-  text: string,
-  caseSensitive: boolean = false
-): AssertionResult {
-  const responseContent = trace.trace.response.content;
-  const searchText = caseSensitive ? text : text.toLowerCase();
-  const responseText = caseSensitive ? responseContent : responseContent.toLowerCase();
+function assertResponse(trace: GoldenTrace, spec: ResponseAssertionSpec): AssertionResult {
+  const pathMismatches: Array<{ path: string; expected: unknown; actual: unknown }> = [];
 
-  if (responseText.includes(searchText)) {
-    return {
-      passed: true,
-      message: `Response contains "${text}"`,
-    };
+  if (spec.pathEquals) {
+    for (const [path, expected] of Object.entries(spec.pathEquals)) {
+      const actual = getPathValue(trace.trace.response, path);
+      if (!partialMatch(actual, expected)) {
+        pathMismatches.push({ path, expected, actual });
+      }
+    }
   }
 
-  return {
-    passed: false,
-    message: `Expected response to contain "${text}", but it did not`,
-    details: {
-      responsePreview: responseContent.substring(0, 200),
-    },
-  };
-}
+  let similarity: number | undefined;
+  if (spec.text !== undefined) {
+    const caseSensitive = spec.caseSensitive ?? false;
+    const threshold = spec.semanticThreshold ?? 0.75;
+    const expected = caseSensitive ? spec.text : spec.text.toLowerCase();
+    const actual = caseSensitive ? trace.trace.response.content : trace.trace.response.content.toLowerCase();
+    similarity = calculateSimilarity(actual, expected);
 
-/**
- * Assert that a span exists with specific attributes
- */
-export function assertSpan(
-  trace: GoldenTrace,
-  spanName: string,
-  expectedAttributes?: Record<string, any>
-): AssertionResult {
-  const span = trace.trace.spans.find(s => s.name === spanName);
-  
-  if (!span) {
+    if (similarity < threshold) {
+      return {
+        type: spec.type,
+        passed: false,
+        message: 'Response text semantic similarity below threshold',
+        details: {
+          expected: spec.text,
+          actual: trace.trace.response.content,
+          threshold,
+          similarity,
+          pathMismatches,
+        },
+      };
+    }
+  }
+
+  if (pathMismatches.length > 0) {
     return {
+      type: spec.type,
       passed: false,
-      message: `Expected span "${spanName}" to exist, but it was not found`,
+      message: 'Response structured path checks failed',
       details: {
-        availableSpans: trace.trace.spans.map(s => s.name),
+        pathMismatches,
+        similarity,
       },
     };
   }
 
-  if (expectedAttributes) {
-    const missingAttributes: string[] = [];
-    const mismatchedAttributes: Array<{ key: string; expected: any; actual: any }> = [];
+  return {
+    type: spec.type,
+    passed: true,
+    message: 'Response assertion passed',
+    details: similarity === undefined ? undefined : { similarity },
+  };
+}
 
-    for (const [key, expectedValue] of Object.entries(expectedAttributes)) {
-      if (!(key in span.attributes)) {
-        missingAttributes.push(key);
-      } else if (JSON.stringify(span.attributes[key]) !== JSON.stringify(expectedValue)) {
-        mismatchedAttributes.push({
-          key,
-          expected: expectedValue,
-          actual: span.attributes[key],
-        });
+function assertCheckpoint(trace: GoldenTrace, spec: CheckpointAssertionSpec): AssertionResult {
+  const minCount = spec.expected.minCount ?? 1;
+
+  const matches = trace.trace.spans.filter((span) => {
+    if (spec.expected.step !== undefined) {
+      const step = span.attributes.step;
+      if (typeof step !== 'number' || step !== spec.expected.step) {
+        return false;
       }
     }
 
-    if (missingAttributes.length > 0 || mismatchedAttributes.length > 0) {
-      return {
-        passed: false,
-        message: `Span "${spanName}" does not match expected attributes`,
-        details: {
-          missingAttributes,
-          mismatchedAttributes,
-          actualAttributes: span.attributes,
-        },
-      };
+    if (spec.expected.stepName !== undefined) {
+      if (span.name !== spec.expected.stepName) {
+        return false;
+      }
     }
-  }
 
-  return {
-    passed: true,
-    message: `Span "${spanName}" exists with expected attributes`,
-    details: {
-      span,
-    },
-  };
-}
+    if (spec.expected.status !== undefined) {
+      const status = typeof span.attributes.status === 'string' ? span.attributes.status : span.status.code;
+      if (status !== spec.expected.status) {
+        return false;
+      }
+    }
 
-/**
- * Assert timing constraints
- */
-export function assertTiming(
-  trace: GoldenTrace,
-  spanName: string,
-  maxDuration: number
-): AssertionResult {
-  const span = trace.trace.spans.find(s => s.name === spanName);
-  
-  if (!span) {
+    return true;
+  });
+
+  if (matches.length < minCount) {
     return {
+      type: spec.type,
       passed: false,
-      message: `Cannot assert timing for span "${spanName}" - span not found`,
-    };
-  }
-
-  if (span.duration > maxDuration) {
-    return {
-      passed: false,
-      message: `Span "${spanName}" took ${span.duration}ms, which exceeds maximum of ${maxDuration}ms`,
+      message: `Expected at least ${minCount} checkpoint-like span(s), found ${matches.length}`,
       details: {
-        actualDuration: span.duration,
-        maxDuration,
-        startTime: span.startTime,
-        endTime: span.endTime,
+        expected: spec.expected,
+        matched: matches.map((span) => ({
+          name: span.name,
+          attributes: span.attributes,
+          status: span.status,
+        })),
       },
     };
   }
 
   return {
+    type: spec.type,
     passed: true,
-    message: `Span "${spanName}" completed within ${maxDuration}ms (took ${span.duration}ms)`,
-    details: {
-      duration: span.duration,
-      maxDuration,
-    },
+    message: `Checkpoint assertion passed with ${matches.length} match(es)`,
   };
 }
 
-/**
- * Assert schema validity
- */
-export function assertSchema(trace: GoldenTrace): AssertionResult {
-  // Basic schema validation
-  if (!trace.version) {
-    return {
-      passed: false,
-      message: 'Trace missing version field',
-    };
+export function runAssertion(trace: GoldenTrace, spec: AssertionSpec): AssertionResult {
+  switch (spec.type) {
+    case 'tool.calls':
+      return assertToolCalls(trace, spec);
+    case 'routing':
+      return assertRouting(trace, spec);
+    case 'response':
+      return assertResponse(trace, spec);
+    case 'checkpoint':
+      return assertCheckpoint(trace, spec);
+    case 'schema':
+      const isValid = validateGoldenTrace(trace);
+      return {
+        type: spec.type,
+        passed: isValid,
+        message: isValid ? 'Trace schema is valid' : 'Trace schema is invalid',
+      };
   }
-
-  if (!trace.metadata) {
-    return {
-      passed: false,
-      message: 'Trace missing metadata field',
-    };
-  }
-
-  if (!trace.trace) {
-    return {
-      passed: false,
-      message: 'Trace missing trace data field',
-    };
-  }
-
-  if (!trace.trace.message) {
-    return {
-      passed: false,
-      message: 'Trace missing message field',
-    };
-  }
-
-  if (!Array.isArray(trace.trace.spans)) {
-    return {
-      passed: false,
-      message: 'Trace spans field is not an array',
-    };
-  }
-
-  if (!trace.trace.response) {
-    return {
-      passed: false,
-      message: 'Trace missing response field',
-    };
-  }
-
-  if (!Array.isArray(trace.trace.toolCalls)) {
-    return {
-      passed: false,
-      message: 'Trace toolCalls field is not an array',
-    };
-  }
-
-  if (!Array.isArray(trace.trace.handoffs)) {
-    return {
-      passed: false,
-      message: 'Trace handoffs field is not an array',
-    };
-  }
-
-  return {
-    passed: true,
-    message: 'Trace schema is valid',
-  };
 }

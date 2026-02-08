@@ -9,26 +9,29 @@
  */
 
 import {
-  PipelineStep,
-  AgentStep,
-  FunctionStep,
-  ConditionalStep,
-  PipelineRefStep,
-  RetryConfig,
+  type PipelineStep,
+  type AgentStep,
+  type FunctionStep,
+  type ConditionalStep,
+  type PipelineRefStep,
+  type RetryConfig,
 } from './steps';
-import { PipelineConfigV2 } from './pipeline';
-import { PipelineContext, PipelineContextManager, createPipelineContext } from './context';
+import type { PipelineConfigV2 } from './pipeline';
+import { PipelineContextManager, createPipelineContext } from './context';
+import type { PipelineContext } from './context';
 import { HookManager } from '../hooks/manager';
-import { HookEvent, StepHookEventData, PipelineHookEventData } from '../hooks/types';
+import type { HookEvent, StepHookEventData, PipelineHookEventData } from '../hooks/types';
 import { AgentManager } from '../agent/manager';
-import { AgentResponse } from '../agent/agent';
-import { Tracer } from '../tracing';
+import type { AgentResponse } from '../agent/agent';
+import type { Tracer } from '../tracing';
 import { SpanKind } from '../tracing/types';
 import type { CheckpointManager } from './checkpoint/manager';
 import { detectPauseSignal, type DetectedPause } from './pause';
 import { Effect } from 'effect';
 import { annotateSpan } from '../observability/otel';
 import { attachErrorToSpan } from '../observability/errors';
+import { getCurrentCorrelationContext, getCurrentSpanIds, getCorrelationContext } from '../observability/context';
+import { ObservabilityService } from '../observability/service';
 
 /**
  * Pipeline execution result
@@ -109,15 +112,24 @@ async function executeStepWithRetry(
     case 'conditional': {
       const conditionResult = await step.condition(context);
       const stepsToRun = conditionResult ? step.whenTrue : step.whenFalse;
+
+      // Record branch decision (taken and not-taken paths)
+      // This will be emitted via span events in the calling function
+      const branchInfo = {
+        conditionResult,
+        takenPath: conditionResult ? 'whenTrue' : 'whenFalse',
+        notTakenPath: conditionResult ? 'whenFalse' : 'whenTrue',
+      };
+
       if (!stepsToRun || stepsToRun.length === 0) {
-        return { conditionResult, skipped: true };
+        return { conditionResult, skipped: true, branchInfo };
       }
       // Execute nested steps in sequence
       let nestedResult: unknown;
       for (const nestedStep of stepsToRun) {
         nestedResult = await executeStepWithRetry(nestedStep, context, options, 0);
       }
-      return { conditionResult, result: nestedResult };
+      return { conditionResult, result: nestedResult, branchInfo };
     }
 
     case 'pipeline': {
@@ -151,6 +163,10 @@ async function executeStepWithHooks(
   const { hookManager, tracer } = options;
   const context = contextManager.getStepContext(step.contextView);
 
+  // Get correlation context for hook events
+  const correlationCtx = getCurrentCorrelationContext();
+  const spanIds = getCurrentSpanIds();
+
   // Create step event data
   const stepData: StepHookEventData = {
     pipelineId: config.id,
@@ -163,9 +179,23 @@ async function executeStepWithHooks(
     },
   };
 
-  // Execute beforeStep hooks
+  // Execute beforeStep hooks with correlation context
   if (hookManager) {
-    const beforeEvent: HookEvent = { type: 'beforeStep', data: stepData };
+    const beforeEvent: HookEvent = {
+      type: 'beforeStep',
+      data: stepData,
+      // Populate correlation fields
+      runId: runId || correlationCtx?.runId,
+      conversationId: context.conversationId || correlationCtx?.conversationId,
+      intentId: correlationCtx?.intentId,
+      agentId: (step.type === 'agent' ? (step as AgentStep).agentId : undefined) || correlationCtx?.agentId,
+      timestamp: new Date().toISOString(),
+      traceId: spanIds.traceId || correlationCtx?.traceId,
+      spanId: spanIds.spanId || correlationCtx?.spanId,
+      parentSpanId: spanIds.parentSpanId || correlationCtx?.parentSpanId,
+      pipelineId: config.id,
+      stepName: step.name,
+    };
     const beforeResult = await hookManager.executeHooksAndMerge('beforeStep', beforeEvent);
 
     if (beforeResult.metadata) {
@@ -196,7 +226,7 @@ async function executeStepWithHooks(
     }
   }
 
-  // Create tracing span
+  // Create tracing span with correlation attributes
   const stepSpan = tracer?.startSpan(`pipeline.step.${step.name}`, {
     kind: SpanKind.INTERNAL,
     attributes: {
@@ -204,6 +234,11 @@ async function executeStepWithHooks(
       'step.type': step.type,
       'step.index': stepIndex,
       'pipeline.id': config.id,
+      // Add correlation attributes
+      ...(runId ? { 'fred.runId': runId } : {}),
+      ...(context.conversationId ? { 'fred.conversationId': context.conversationId } : {}),
+      ...(correlationCtx?.intentId ? { 'fred.intentId': correlationCtx.intentId } : {}),
+      ...(context.metadata.workflowId ? { 'fred.workflowId': context.metadata.workflowId as string } : {}),
     },
   });
 
@@ -222,6 +257,7 @@ async function executeStepWithHooks(
 
   let result: unknown;
   let lastError: Error | undefined;
+  const stepStartTime = Date.now();
   const maxRetries = step.retry?.maxRetries ?? 0;
   const backoffMs = step.retry?.backoffMs ?? 100;
   const maxBackoffMs = step.retry?.maxBackoffMs ?? 10000;
@@ -261,14 +297,29 @@ async function executeStepWithHooks(
         });
       }
 
-      // Fire onStepError hook
+      // Fire onStepError hook with correlation context
       if (hookManager) {
         const errorData: StepHookEventData = {
           ...stepData,
           error: lastError,
           retryCount: attempt,
         };
-        const errorEvent: HookEvent = { type: 'onStepError', data: errorData };
+        const errorSpanIds = getCurrentSpanIds();
+        const errorEvent: HookEvent = {
+          type: 'onStepError',
+          data: errorData,
+          // Populate correlation fields
+          runId: runId || correlationCtx?.runId,
+          conversationId: context.conversationId || correlationCtx?.conversationId,
+          intentId: correlationCtx?.intentId,
+          agentId: (step.type === 'agent' ? (step as AgentStep).agentId : undefined) || correlationCtx?.agentId,
+          timestamp: new Date().toISOString(),
+          traceId: errorSpanIds.traceId || correlationCtx?.traceId,
+          spanId: errorSpanIds.spanId || correlationCtx?.spanId,
+          parentSpanId: errorSpanIds.parentSpanId || correlationCtx?.parentSpanId,
+          pipelineId: config.id,
+          stepName: step.name,
+        };
         const errorResult = await hookManager.executeHooksAndMerge('onStepError', errorEvent);
 
         if ((errorResult as any).abort) {
@@ -323,13 +374,101 @@ async function executeStepWithHooks(
     return { result, skipped: false, aborted: false, paused: pauseDetected };
   }
 
+  // Emit branch decision events for conditional steps
+  if (step.type === 'conditional' && typeof result === 'object' && result !== null) {
+    const branchInfo = (result as any).branchInfo;
+    if (branchInfo) {
+      const { conditionResult, takenPath, notTakenPath } = branchInfo;
+
+      // Emit taken path event
+      stepSpan?.addEvent('pipeline.branch_taken', {
+        'branch.condition': step.name,
+        'branch.result': conditionResult,
+        'branch.path': takenPath,
+        'branch.taken': true,
+      });
+
+      // Emit not-taken path event
+      stepSpan?.addEvent('pipeline.branch_not_taken', {
+        'branch.condition': step.name,
+        'branch.result': conditionResult,
+        'branch.path': notTakenPath,
+        'branch.taken': false,
+      });
+
+      // Record branch via ObservabilityService (best-effort)
+      if (runId) {
+        const recordBranchEffect = Effect.gen(function* () {
+          const service = yield* ObservabilityService;
+          const ctx = yield* getCorrelationContext;
+          yield* service.logStructured({
+            level: 'debug',
+            message: 'Pipeline branch decision',
+            metadata: {
+              pipelineId: config.id,
+              stepName: step.name,
+              conditionResult,
+              takenPath,
+              notTakenPath,
+              ...ctx,
+            },
+          });
+        });
+
+        Effect.runPromise(recordBranchEffect as any).catch(() => {
+          // Best-effort: ignore failures
+        });
+      }
+    }
+  }
+
   // Record step output
   contextManager.recordStepOutput(step.name, result);
 
-  // Execute afterStep hooks
+  // Record step in ObservabilityService (best-effort)
+  if (runId) {
+    const stepEndTime = Date.now();
+    const recordStepEffect = Effect.gen(function* () {
+      const service = yield* ObservabilityService;
+      const ctx = yield* getCorrelationContext;
+      yield* service.recordRunStepSpan(runId, {
+        stepName: step.name,
+        startTime: stepStartTime,
+        endTime: stepEndTime,
+        status: 'success',
+        metadata: {
+          pipelineId: config.id,
+          stepType: step.type,
+          stepIndex: stepIndex,
+          ...ctx,
+        },
+      });
+    });
+
+    Effect.runPromise(recordStepEffect as any).catch(() => {
+      // Best-effort: ignore failures
+    });
+  }
+
+  // Execute afterStep hooks with correlation context
   if (hookManager) {
     const afterData: StepHookEventData = { ...stepData, result };
-    const afterEvent: HookEvent = { type: 'afterStep', data: afterData };
+    const afterSpanIds = getCurrentSpanIds();
+    const afterEvent: HookEvent = {
+      type: 'afterStep',
+      data: afterData,
+      // Populate correlation fields
+      runId: runId || correlationCtx?.runId,
+      conversationId: context.conversationId || correlationCtx?.conversationId,
+      intentId: correlationCtx?.intentId,
+      agentId: (step.type === 'agent' ? (step as AgentStep).agentId : undefined) || correlationCtx?.agentId,
+      timestamp: new Date().toISOString(),
+      traceId: afterSpanIds.traceId || correlationCtx?.traceId,
+      spanId: afterSpanIds.spanId || correlationCtx?.spanId,
+      parentSpanId: afterSpanIds.parentSpanId || correlationCtx?.parentSpanId,
+      pipelineId: config.id,
+      stepName: step.name,
+    };
     const afterResult = await hookManager.executeHooksAndMerge('afterStep', afterEvent);
 
     if (afterResult.metadata) {
@@ -439,9 +578,23 @@ export async function executePipelineV2(
   };
 
   try {
-    // Execute beforePipeline hooks
+    // Execute beforePipeline hooks with correlation context
     if (hookManager) {
-      const beforeEvent: HookEvent = { type: 'beforePipeline', data: pipelineData };
+      const pipelineCorrelationCtx = getCurrentCorrelationContext();
+      const pipelineSpanIds = getCurrentSpanIds();
+      const beforeEvent: HookEvent = {
+        type: 'beforePipeline',
+        data: pipelineData,
+        // Populate correlation fields
+        runId: runId || pipelineCorrelationCtx?.runId,
+        conversationId: options.conversationId || pipelineCorrelationCtx?.conversationId,
+        intentId: pipelineCorrelationCtx?.intentId,
+        timestamp: new Date().toISOString(),
+        traceId: pipelineSpanIds.traceId || pipelineCorrelationCtx?.traceId,
+        spanId: pipelineSpanIds.spanId || pipelineCorrelationCtx?.spanId,
+        parentSpanId: pipelineSpanIds.parentSpanId || pipelineCorrelationCtx?.parentSpanId,
+        pipelineId: config.id,
+      };
       const beforeResult = await hookManager.executeHooksAndMerge('beforePipeline', beforeEvent);
 
       if (beforeResult.metadata) {
@@ -572,10 +725,24 @@ export async function executePipelineV2(
       }
     }
 
-    // Execute afterPipeline hooks
+    // Execute afterPipeline hooks with correlation context
     if (hookManager) {
       const afterData = { ...pipelineData, context: contextManager.getFullContext() };
-      const afterEvent: HookEvent = { type: 'afterPipeline', data: afterData };
+      const afterPipelineSpanIds = getCurrentSpanIds();
+      const afterPipelineCorrelationCtx = getCurrentCorrelationContext();
+      const afterEvent: HookEvent = {
+        type: 'afterPipeline',
+        data: afterData,
+        // Populate correlation fields
+        runId: runId || afterPipelineCorrelationCtx?.runId,
+        conversationId: options.conversationId || afterPipelineCorrelationCtx?.conversationId,
+        intentId: afterPipelineCorrelationCtx?.intentId,
+        timestamp: new Date().toISOString(),
+        traceId: afterPipelineSpanIds.traceId || afterPipelineCorrelationCtx?.traceId,
+        spanId: afterPipelineSpanIds.spanId || afterPipelineCorrelationCtx?.spanId,
+        parentSpanId: afterPipelineSpanIds.parentSpanId || afterPipelineCorrelationCtx?.parentSpanId,
+        pipelineId: config.id,
+      };
       await hookManager.executeHooksAndMerge('afterPipeline', afterEvent);
     }
 

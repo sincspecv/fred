@@ -1,0 +1,560 @@
+import { Context, Effect, Layer, Ref } from 'effect';
+import type {
+  ToolPolicyCondition,
+  ToolPoliciesConfig,
+  ToolPolicyMetadataPredicate,
+  ToolPolicyOverride,
+  ToolPolicyRule,
+} from '../config/types';
+import { ToolRegistryService } from '../tool/service';
+import type { Tool } from '../tool/tool';
+import { ToolGateToolNotFoundError } from './errors';
+import type {
+  ToolGateCandidateTool,
+  ToolGateContext,
+  ToolGateDecision,
+  ToolGateFilterResult,
+  ToolGateRuleEvaluation,
+  ToolGateScopedRule,
+  ToolGateServiceApi,
+  PolicyAuditEvent,
+} from './types';
+import type { HookManagerService } from '../hooks/service';
+import { HookManagerService as HookManagerServiceTag } from '../hooks/service';
+import { ObservabilityService as ObservabilityServiceTag } from '../observability/service';
+
+type ObservabilityServiceApi = {
+  hashPayload: (payload: unknown) => Effect.Effect<string>;
+};
+
+const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
+const isMetadataPredicate = (value: unknown): value is ToolPolicyMetadataPredicate =>
+  typeof value === 'object' &&
+  value !== null &&
+  (hasOwn(value as Record<string, unknown>, 'equals') ||
+    hasOwn(value as Record<string, unknown>, 'notEquals') ||
+    hasOwn(value as Record<string, unknown>, 'in') ||
+    hasOwn(value as Record<string, unknown>, 'notIn') ||
+    hasOwn(value as Record<string, unknown>, 'exists'));
+
+const asArray = (value: string | string[] | undefined): string[] | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  return Array.isArray(value) ? value : [value];
+};
+
+const matchesScalarCondition = (candidate: string | undefined, accepted: string | string[] | undefined): boolean => {
+  const acceptedValues = asArray(accepted);
+  if (!acceptedValues || acceptedValues.length === 0) {
+    return true;
+  }
+  return candidate !== undefined && acceptedValues.includes(candidate);
+};
+
+const valueMatchesPredicate = (value: unknown, predicate: ToolPolicyMetadataPredicate): boolean => {
+  if (predicate.exists !== undefined) {
+    const exists = value !== undefined;
+    if (exists !== predicate.exists) {
+      return false;
+    }
+  }
+
+  if (predicate.equals !== undefined && value !== predicate.equals) {
+    return false;
+  }
+
+  if (predicate.notEquals !== undefined && value === predicate.notEquals) {
+    return false;
+  }
+
+  if (predicate.in && !predicate.in.includes(value)) {
+    return false;
+  }
+
+  if (predicate.notIn && predicate.notIn.includes(value)) {
+    return false;
+  }
+
+  return true;
+};
+
+const matchesMetadataCondition = (
+  metadata: Record<string, unknown> | undefined,
+  condition: Record<string, unknown | ToolPolicyMetadataPredicate> | undefined
+): boolean => {
+  if (!condition) {
+    return true;
+  }
+
+  const target = metadata ?? {};
+
+  for (const [key, expected] of Object.entries(condition)) {
+    const actual = target[key];
+
+    if (isMetadataPredicate(expected)) {
+      if (!valueMatchesPredicate(actual, expected)) {
+        return false;
+      }
+      continue;
+    }
+
+    if (actual !== expected) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const matchesConditions = (context: ToolGateContext, conditions: ToolPolicyCondition | undefined): boolean => {
+  if (!conditions) {
+    return true;
+  }
+
+  if (!matchesScalarCondition(context.role, conditions.role)) {
+    return false;
+  }
+
+  if (!matchesScalarCondition(context.userId, conditions.userId)) {
+    return false;
+  }
+
+  return matchesMetadataCondition(context.metadata, conditions.metadata);
+};
+
+const toolHasRequiredCategories = (tool: ToolGateCandidateTool, requiredCategories: string[] | undefined): boolean => {
+  if (!requiredCategories || requiredCategories.length === 0) {
+    return true;
+  }
+
+  const capabilities = new Set(tool.capabilities ?? []);
+  return requiredCategories.every((required) => capabilities.has(required));
+};
+
+const cloneRule = (rule: ToolPolicyRule): ToolPolicyRule => ({
+  allow: rule.allow ? [...rule.allow] : undefined,
+  deny: rule.deny ? [...rule.deny] : undefined,
+  requireApproval: rule.requireApproval ? [...rule.requireApproval] : undefined,
+  requiredCategories: rule.requiredCategories ? [...rule.requiredCategories] : undefined,
+  conflictResolution: rule.conflictResolution,
+  conditions: rule.conditions
+    ? {
+        role: Array.isArray(rule.conditions.role) ? [...rule.conditions.role] : rule.conditions.role,
+        userId: Array.isArray(rule.conditions.userId) ? [...rule.conditions.userId] : rule.conditions.userId,
+        metadata: rule.conditions.metadata ? { ...rule.conditions.metadata } : undefined,
+      }
+    : undefined,
+});
+
+const clonePolicies = (policies: ToolPoliciesConfig | undefined): ToolPoliciesConfig | undefined => {
+  if (!policies) {
+    return undefined;
+  }
+
+  return {
+    default: policies.default ? cloneRule(policies.default) : undefined,
+    intents: policies.intents
+      ? Object.fromEntries(Object.entries(policies.intents).map(([id, rule]) => [id, cloneRule(rule)]))
+      : undefined,
+    agents: policies.agents
+      ? Object.fromEntries(Object.entries(policies.agents).map(([id, rule]) => [id, cloneRule(rule)]))
+      : undefined,
+    overrides: policies.overrides?.map((override) => ({
+      ...cloneRule(override),
+      id: override.id,
+      override: true,
+      target: {
+        intentId: override.target.intentId,
+        agentId: override.target.agentId,
+      },
+    })),
+  };
+};
+
+const matchesOverrideTarget = (context: ToolGateContext, override: ToolPolicyOverride): boolean => {
+  const intentMatch = !override.target.intentId || override.target.intentId === context.intentId;
+  const agentMatch = !override.target.agentId || override.target.agentId === context.agentId;
+  return intentMatch && agentMatch;
+};
+
+const collectScopedRules = (policies: ToolPoliciesConfig | undefined, context: ToolGateContext): ToolGateScopedRule[] => {
+  if (!policies) {
+    return [];
+  }
+
+  const inherited: ToolGateScopedRule[] = [];
+
+  if (policies.default && matchesConditions(context, policies.default.conditions)) {
+    inherited.push({ scope: 'default', source: 'default', rule: policies.default });
+  }
+
+  if (context.intentId) {
+    const intentRule = policies.intents?.[context.intentId];
+    if (intentRule && matchesConditions(context, intentRule.conditions)) {
+      inherited.push({ scope: 'intent', source: context.intentId, rule: intentRule });
+    }
+  }
+
+  if (context.agentId) {
+    const agentRule = policies.agents?.[context.agentId];
+    if (agentRule && matchesConditions(context, agentRule.conditions)) {
+      inherited.push({ scope: 'agent', source: context.agentId, rule: agentRule });
+    }
+  }
+
+  const matchedOverrides = (policies.overrides ?? [])
+    .filter((override) => matchesOverrideTarget(context, override) && matchesConditions(context, override.conditions))
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((override) => ({
+      scope: 'override' as const,
+      source: override.id,
+      rule: override,
+    }));
+
+  if (matchedOverrides.length > 0) {
+    return matchedOverrides;
+  }
+
+  return inherited;
+};
+
+const collectRuleEvaluations = (tool: ToolGateCandidateTool, rules: ToolGateScopedRule[]): ToolGateRuleEvaluation[] => {
+  const evaluations: ToolGateRuleEvaluation[] = [];
+
+  for (const scopedRule of rules) {
+    const { rule } = scopedRule;
+
+    if (!toolHasRequiredCategories(tool, rule.requiredCategories)) {
+      evaluations.push({
+        scope: scopedRule.scope,
+        source: scopedRule.source,
+        effect: 'deny',
+        reason: `missing-required-categories:${(rule.requiredCategories ?? []).join(',')}`,
+      });
+      continue;
+    }
+
+    if (rule.deny?.includes(tool.id)) {
+      evaluations.push({
+        scope: scopedRule.scope,
+        source: scopedRule.source,
+        effect: 'deny',
+      });
+      continue;
+    }
+
+    if (rule.allow?.includes(tool.id)) {
+      evaluations.push({
+        scope: scopedRule.scope,
+        source: scopedRule.source,
+        effect: 'allow',
+      });
+    }
+
+    if (rule.requireApproval?.includes(tool.id)) {
+      evaluations.push({
+        scope: scopedRule.scope,
+        source: scopedRule.source,
+        effect: 'requireApproval',
+      });
+    }
+  }
+
+  return evaluations;
+};
+
+const resolveApprovalSessionKey = (context: ToolGateContext): string | undefined => {
+  const conversationId = context.metadata?.conversationId;
+  if (typeof conversationId === 'string' && conversationId.length > 0) {
+    return conversationId;
+  }
+
+  if (context.userId && context.userId.length > 0) {
+    return context.userId;
+  }
+
+  return undefined;
+};
+
+class ToolGateServiceImpl implements ToolGateServiceApi {
+  constructor(
+    private readonly policiesRef: Ref.Ref<ToolPoliciesConfig | undefined>,
+    private readonly toolRegistry: ToolRegistryService,
+    private readonly approvalsRef: Ref.Ref<Map<string, import('./types').ToolApprovalRecord>>,
+    private readonly hookManager?: HookManagerService,
+    private readonly observability?: ObservabilityServiceApi
+  ) {}
+
+  evaluateTool(tool: ToolGateCandidateTool, context: ToolGateContext): Effect.Effect<ToolGateDecision> {
+    const self = this;
+    return Effect.gen(function* () {
+      const policies = yield* Ref.get(self.policiesRef);
+      const scopedRules = collectScopedRules(policies, context);
+      const matchedRules = collectRuleEvaluations(tool, scopedRules);
+
+      const deniedBy = matchedRules.find((rule) => rule.effect === 'deny');
+      const hasAllow = matchedRules.some((rule) => rule.effect === 'allow');
+      const requireApproval = matchedRules.some((rule) => rule.effect === 'requireApproval');
+
+      const decision: ToolGateDecision = {
+        toolId: tool.id,
+        allowed: !deniedBy && (hasAllow || requireApproval),
+        requireApproval,
+        deniedBy,
+        matchedRules,
+      };
+
+      // Emit audit hook event (best-effort, never fails gate decision)
+      if (self.hookManager) {
+        yield* self.emitAuditEvent(decision, context).pipe(
+          Effect.catchAll(() => Effect.succeed(undefined))
+        );
+      }
+
+      return decision;
+    });
+  }
+
+  private emitAuditEvent(decision: ToolGateDecision, context: ToolGateContext): Effect.Effect<void, unknown> {
+    const self = this;
+    return Effect.gen(function* () {
+      if (!self.hookManager) {
+        return;
+      }
+
+      // Determine outcome from decision
+      let outcome: 'allow' | 'deny' | 'requireApproval';
+      if (decision.deniedBy) {
+        outcome = 'deny';
+      } else if (decision.requireApproval) {
+        outcome = 'requireApproval';
+      } else {
+        outcome = 'allow';
+      }
+
+      // Hash arguments if ObservabilityService is available and args exist
+      let argsHash: string | undefined;
+      if (self.observability && context.metadata) {
+        argsHash = yield* self.observability.hashPayload(context.metadata);
+      }
+
+      const auditEvent: PolicyAuditEvent = {
+        toolId: decision.toolId,
+        outcome,
+        intentId: context.intentId,
+        agentId: context.agentId,
+        userId: context.userId,
+        role: context.role,
+        matchedRules: decision.matchedRules,
+        deniedBy: decision.deniedBy,
+        argsHash,
+        timestamp: new Date().toISOString(),
+      };
+
+      yield* self.hookManager.executeHooks('afterPolicyDecision', {
+        type: 'afterPolicyDecision',
+        data: auditEvent,
+        conversationId: context.metadata?.conversationId as string | undefined,
+        intentId: context.intentId,
+        agentId: context.agentId,
+        timestamp: auditEvent.timestamp,
+      });
+    });
+  }
+
+  evaluateToolById(toolId: string, context: ToolGateContext): Effect.Effect<ToolGateDecision, ToolGateToolNotFoundError> {
+    const self = this;
+    return Effect.gen(function* () {
+      const tool = yield* self.toolRegistry.getTool(toolId).pipe(
+        Effect.mapError(() => new ToolGateToolNotFoundError({ toolId }))
+      );
+
+      return yield* self.evaluateTool({
+        id: tool.id,
+        capabilities: tool.capabilities,
+      }, context);
+    });
+  }
+
+  filterTools(tools: Tool[], context: ToolGateContext): Effect.Effect<ToolGateFilterResult> {
+    const self = this;
+    return Effect.gen(function* () {
+      const decisions: ToolGateDecision[] = [];
+      const allowed: Tool[] = [];
+
+      for (const tool of tools) {
+        const decision = yield* self.evaluateTool(
+          {
+            id: tool.id,
+            capabilities: tool.capabilities,
+          },
+          context
+        );
+        decisions.push(decision);
+
+        if (decision.allowed) {
+          allowed.push(tool);
+        }
+      }
+
+      return {
+        allowed,
+        denied: decisions.filter((decision) => !decision.allowed),
+      };
+    });
+  }
+
+  getAllowedTools(context: ToolGateContext, toolIds?: string[]): Effect.Effect<Tool[]> {
+    const self = this;
+    return Effect.gen(function* () {
+      const tools = toolIds
+        ? yield* self.toolRegistry.getTools(toolIds)
+        : yield* self.toolRegistry.getAllTools();
+
+      const filtered = yield* self.filterTools(tools, context);
+      return filtered.allowed;
+    });
+  }
+
+  setPolicies(policies: ToolPoliciesConfig | undefined): Effect.Effect<void> {
+    return Ref.set(this.policiesRef, clonePolicies(policies));
+  }
+
+  reloadPolicies(policies: ToolPoliciesConfig | undefined): Effect.Effect<void> {
+    return this.setPolicies(policies);
+  }
+
+  getPolicies(): Effect.Effect<ToolPoliciesConfig | undefined> {
+    return Ref.get(this.policiesRef).pipe(Effect.map((policies) => clonePolicies(policies)));
+  }
+
+  hasApproval(toolId: string, sessionKey: string): Effect.Effect<boolean> {
+    const self = this;
+    return Effect.gen(function* () {
+      const approvals = yield* Ref.get(self.approvalsRef);
+      const key = `${sessionKey}:${toolId}`;
+      const record = approvals.get(key);
+      return record?.approved === true;
+    });
+  }
+
+  recordApproval(toolId: string, sessionKey: string, approved: boolean): Effect.Effect<void> {
+    const self = this;
+    return Effect.gen(function* () {
+      const key = `${sessionKey}:${toolId}`;
+      const record: import('./types').ToolApprovalRecord = {
+        toolId,
+        sessionKey,
+        approved,
+        timestamp: new Date().toISOString(),
+      };
+
+      yield* Ref.update(self.approvalsRef, (approvals) => {
+        const updated = new Map(approvals);
+        updated.set(key, record);
+        return updated;
+      });
+
+      // Emit audit hook event for approval response
+      if (self.hookManager) {
+        const auditEvent: import('./types').PolicyAuditEvent = {
+          toolId,
+          outcome: approved ? 'allow' : 'deny',
+          timestamp: record.timestamp,
+          matchedRules: [],
+        };
+
+        yield* self.hookManager.executeHooks('afterPolicyDecision', {
+          type: 'afterPolicyDecision',
+          data: {
+            ...auditEvent,
+            metadata: { approvalResponse: true, sessionKey },
+          },
+          timestamp: record.timestamp,
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      }
+    });
+  }
+
+  clearApprovals(sessionKey?: string): Effect.Effect<void> {
+    const self = this;
+    return Effect.gen(function* () {
+      if (sessionKey) {
+        // Remove only approvals for this session
+        yield* Ref.update(self.approvalsRef, (approvals) => {
+          const updated = new Map(approvals);
+          for (const [key] of approvals) {
+            if (key.startsWith(`${sessionKey}:`)) {
+              updated.delete(key);
+            }
+          }
+          return updated;
+        });
+      } else {
+        // Clear all approvals
+        yield* Ref.set(self.approvalsRef, new Map());
+      }
+    });
+  }
+
+  createApprovalRequest(
+    decision: import('./types').ToolGateDecision,
+    context: import('./types').ToolGateContext
+  ): Effect.Effect<import('./types').ToolApprovalRequest | undefined> {
+    const self = this;
+    return Effect.gen(function* () {
+      // Only create approval request for requireApproval decisions
+      if (!decision.requireApproval) {
+        return undefined;
+      }
+
+      // Derive session key from context
+      const sessionKey = resolveApprovalSessionKey(context);
+      if (!sessionKey) {
+        return undefined;
+      }
+
+      // Check if already approved in this session
+      const alreadyApproved = yield* self.hasApproval(decision.toolId, sessionKey);
+      if (alreadyApproved) {
+        return undefined;
+      }
+
+      // Generate approval request
+      const request: import('./types').ToolApprovalRequest = {
+        toolId: decision.toolId,
+        intentId: context.intentId,
+        agentId: context.agentId,
+        userId: context.userId,
+        reason: 'Tool requires explicit approval',
+        sessionKey,
+        ttlMs: 300000, // 5 minutes default
+      };
+
+      return request;
+    });
+  }
+}
+
+export const ToolGateService = Context.GenericTag<ToolGateServiceApi>('ToolGateService');
+
+export const ToolGateServiceLive = Layer.effect(
+  ToolGateService,
+  Effect.gen(function* () {
+    const toolRegistry = yield* ToolRegistryService;
+    const policiesRef = yield* Ref.make<ToolPoliciesConfig | undefined>(undefined);
+    const approvalsRef = yield* Ref.make<Map<string, import('./types').ToolApprovalRecord>>(new Map());
+
+    // Optionally resolve HookManagerService and ObservabilityService
+    const hookManagerOption = yield* Effect.serviceOption(HookManagerServiceTag);
+    const observabilityOption = yield* Effect.serviceOption(ObservabilityServiceTag);
+
+    const hookManager = hookManagerOption._tag === 'Some' ? hookManagerOption.value : undefined;
+    const observability = observabilityOption._tag === 'Some' ? observabilityOption.value : undefined;
+
+    return new ToolGateServiceImpl(policiesRef, toolRegistry, approvalsRef, hookManager, observability);
+  })
+);

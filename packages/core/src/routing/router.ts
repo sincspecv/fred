@@ -17,11 +17,19 @@ import {
   RouteMatch,
   RoutingDecision,
   MatchType,
+  RoutingAlternative,
+  CalibrationMetadata,
+  RoutingExplanation,
 } from './types';
 import { AgentManager } from '../agent/manager';
 import { HookManager } from '../hooks/manager';
 import { Effect } from 'effect';
 import { RoutingMatcherError, NoAgentsAvailableError } from './errors';
+import { getCurrentCorrelationContext, getCorrelationContext } from '../observability/context';
+import type { HookEvent } from '../hooks/types';
+import { generateRoutingExplanation } from './explainer';
+import type { AdaptiveCalibrationCoordinator } from './calibration/adaptive';
+import type { HistoricalAccuracyTracker } from './calibration/history';
 
 /**
  * Specificity base scores by match type.
@@ -42,15 +50,21 @@ export class MessageRouter {
   private readonly config: RoutingConfig;
   private readonly agentManager: AgentManager;
   private readonly hookManager?: HookManager;
+  private readonly calibrationCoordinator?: AdaptiveCalibrationCoordinator;
+  private readonly historyTracker?: HistoricalAccuracyTracker;
 
   constructor(
     agentManager: AgentManager,
     hookManager: HookManager | undefined,
-    config: RoutingConfig
+    config: RoutingConfig,
+    calibrationCoordinator?: AdaptiveCalibrationCoordinator,
+    historyTracker?: HistoricalAccuracyTracker
   ) {
     this.agentManager = agentManager;
     this.hookManager = hookManager;
     this.config = config;
+    this.calibrationCoordinator = calibrationCoordinator;
+    this.historyTracker = historyTracker;
   }
 
   /**
@@ -69,13 +83,18 @@ export class MessageRouter {
     return Effect.gen(function* () {
       const startTime = Date.now();
 
+      // Get correlation context for hooks
+      const correlationContext = yield* getCorrelationContext;
+
       // Emit beforeRouting hook (use Effect.tryPromise for async hook execution with error handling)
       if (self.hookManager) {
+        const hookEvent: HookEvent = {
+          type: 'beforeRouting',
+          data: { message, metadata },
+          ...correlationContext,
+        };
         yield* Effect.tryPromise({
-          try: () => self.hookManager!.executeHooks('beforeRouting', {
-            type: 'beforeRouting',
-            data: { message, metadata },
-          }),
+          try: () => self.hookManager!.executeHooks('beforeRouting', hookEvent),
           catch: (error) => {
             // Log hook error but don't fail routing - hooks are optional
             console.warn('beforeRouting hook failed:', error);
@@ -84,48 +103,178 @@ export class MessageRouter {
         }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
       }
 
-      const match = yield* self.findBestMatch(message, metadata);
+      const { best: match, allMatches } = yield* self.findBestMatch(message, metadata);
       let decision: RoutingDecision;
 
       if (match) {
+        // Build routing alternatives from all matches
+        const alternatives: RoutingAlternative[] = allMatches.map((m) => ({
+          targetId: m.rule.agent,
+          targetName: m.rule.agent,
+          confidence: m.confidence,
+          matchType: m.matchType,
+        }));
+
+        // Calibrate winner confidence if coordinator is available
+        let calibratedConfidence = match.confidence;
+        let calibrationMetadata: CalibrationMetadata = {
+          rawScore: match.confidence,
+          calibratedScore: match.confidence,
+          calibrated: false,
+        };
+
+        if (self.calibrationCoordinator) {
+          calibratedConfidence = yield* self.calibrationCoordinator.calibrate(
+            match.confidence,
+            'rule'
+          );
+
+          // Get historical accuracy if tracker is available
+          let historicalAccuracy: number | undefined;
+          let observationCount = 0;
+          if (self.historyTracker) {
+            historicalAccuracy = yield* self.historyTracker.getAccuracy(match.rule.agent);
+            observationCount = yield* self.historyTracker.getObservationCount(match.rule.agent);
+          }
+
+          calibrationMetadata = {
+            rawScore: match.confidence,
+            calibratedScore: calibratedConfidence,
+            historicalAccuracy,
+            calibrated: observationCount >= 100,
+            observationCount,
+          };
+        }
+
+        // Generate explanation
+        const winner: RoutingAlternative = {
+          targetId: match.rule.agent,
+          targetName: match.rule.agent,
+          confidence: calibratedConfidence,
+          matchType: match.matchType,
+        };
+
+        const explanation = generateRoutingExplanation(
+          winner,
+          alternatives,
+          calibrationMetadata,
+          match.matchType
+        );
+
+        // Generate HITL clarification pause signal if needed (use filtered alternatives from explanation)
+        let clarificationNeeded: import('../pipeline/pause/types').PauseSignal | undefined;
+        const filteredAlternatives = explanation.alternatives; // Already filtered to exclude winner
+        if (calibratedConfidence < 0.6 || (filteredAlternatives.length > 0 && calibratedConfidence - filteredAlternatives[0].confidence < 0.1)) {
+          const reason = calibratedConfidence < 0.6
+            ? `Low confidence (${(calibratedConfidence * 100).toFixed(1)}%)`
+            : `Close alternatives (gap: ${((calibratedConfidence - filteredAlternatives[0].confidence) * 100).toFixed(1)}%)`;
+
+          clarificationNeeded = {
+            __pause: true,
+            prompt: `Routing confidence is low. ${reason}. Please clarify your intent.\n\nSelected: ${match.rule.agent}\nAlternatives: ${filteredAlternatives.map(a => `${a.targetName} (${(a.confidence * 100).toFixed(1)}%)`).join(', ')}`,
+            resumeBehavior: 'continue',
+          };
+        }
+
         decision = {
           agent: match.rule.agent,
           rule: match.rule,
           matchType: match.matchType,
           fallback: false,
           specificity: match.specificity,
+          explanation,
+          clarificationNeeded,
         };
       } else {
         const fallbackAgent = yield* self.getFallbackAgentEffect();
+
+        // Generate fallback explanation
+        const winner: RoutingAlternative = {
+          targetId: fallbackAgent,
+          targetName: fallbackAgent,
+          confidence: 0.5,
+        };
+
+        const calibrationMetadata: CalibrationMetadata = {
+          rawScore: 0.5,
+          calibratedScore: 0.5,
+          calibrated: false,
+        };
+
+        const explanation = generateRoutingExplanation(
+          winner,
+          [],
+          calibrationMetadata,
+          'metadata-only'
+        );
+
         decision = {
           agent: fallbackAgent,
           fallback: true,
+          explanation,
         };
       }
 
       const durationMs = Date.now() - startTime;
 
-      // Debug logging using Effect.log
-      if (self.config.debug) {
-        yield* Effect.logDebug('Routing decision').pipe(
-          Effect.annotateLogs({
-            agent: decision.agent,
-            fallback: decision.fallback,
+      // Emit afterRoutingDecision hook ONLY when concerns are detected
+      if (self.hookManager && decision.explanation && decision.explanation.concerns.length > 0) {
+        const hookEvent: HookEvent = {
+          type: 'afterRoutingDecision',
+          data: {
+            message,
+            metadata,
+            decision,
+            explanation: decision.explanation,
+            concerns: decision.explanation.concerns,
             durationMs,
-            matchType: match?.matchType,
-            ruleId: match?.rule.id,
-            specificity: match?.specificity,
-          })
+          },
+          ...correlationContext,
+          agentId: decision.agent,
+        };
+        yield* Effect.tryPromise({
+          try: () => self.hookManager!.executeHooks('afterRoutingDecision', hookEvent),
+          catch: (error) => {
+            // Log hook error but don't fail routing - hooks are optional
+            console.warn('afterRoutingDecision hook failed:', error);
+            return error;
+          }
+        }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      }
+
+      // Debug logging using Effect.log with intent metadata if available
+      if (self.config.debug) {
+        const logAnnotations: Record<string, unknown> = {
+          agent: decision.agent,
+          fallback: decision.fallback,
+          durationMs,
+          matchType: match?.matchType,
+          ruleId: match?.rule.id,
+          specificity: match?.specificity,
+        };
+
+        // Add correlation context to logs
+        if (correlationContext) {
+          if (correlationContext.intentId) logAnnotations['intent.id'] = correlationContext.intentId;
+          if (correlationContext.runId) logAnnotations['run.id'] = correlationContext.runId;
+          if (correlationContext.conversationId) logAnnotations['conversation.id'] = correlationContext.conversationId;
+        }
+
+        yield* Effect.logDebug('Routing decision').pipe(
+          Effect.annotateLogs(logAnnotations)
         );
       }
 
       // Emit afterRouting hook (use Effect.tryPromise with error handling)
       if (self.hookManager) {
+        const hookEvent: HookEvent = {
+          type: 'afterRouting',
+          data: { message, metadata, decision, durationMs },
+          ...correlationContext,
+          agentId: decision.agent,
+        };
         yield* Effect.tryPromise({
-          try: () => self.hookManager!.executeHooks('afterRouting', {
-            type: 'afterRouting',
-            data: { message, metadata, decision, durationMs },
-          }),
+          try: () => self.hookManager!.executeHooks('afterRouting', hookEvent),
           catch: (error) => {
             // Log hook error but don't fail routing - hooks are optional
             console.warn('afterRouting hook failed:', error);
@@ -152,22 +301,99 @@ export class MessageRouter {
   ): Effect.Effect<RoutingDecision, NoAgentsAvailableError> {
     const self = this;
     return Effect.gen(function* () {
-      const match = yield* self.findBestMatch(message, metadata);
+      const { best: match, allMatches } = yield* self.findBestMatch(message, metadata);
 
       if (match) {
+        // Build routing alternatives from all matches
+        const alternatives: RoutingAlternative[] = allMatches.map((m) => ({
+          targetId: m.rule.agent,
+          targetName: m.rule.agent,
+          confidence: m.confidence,
+          matchType: m.matchType,
+        }));
+
+        // Calibrate winner confidence if coordinator is available
+        let calibratedConfidence = match.confidence;
+        let calibrationMetadata: CalibrationMetadata = {
+          rawScore: match.confidence,
+          calibratedScore: match.confidence,
+          calibrated: false,
+        };
+
+        if (self.calibrationCoordinator) {
+          calibratedConfidence = yield* self.calibrationCoordinator.calibrate(
+            match.confidence,
+            'rule'
+          );
+
+          // Get historical accuracy if tracker is available
+          let historicalAccuracy: number | undefined;
+          let observationCount = 0;
+          if (self.historyTracker) {
+            historicalAccuracy = yield* self.historyTracker.getAccuracy(match.rule.agent);
+            observationCount = yield* self.historyTracker.getObservationCount(match.rule.agent);
+          }
+
+          calibrationMetadata = {
+            rawScore: match.confidence,
+            calibratedScore: calibratedConfidence,
+            historicalAccuracy,
+            calibrated: observationCount >= 100,
+            observationCount,
+          };
+        }
+
+        // Generate explanation
+        const winner: RoutingAlternative = {
+          targetId: match.rule.agent,
+          targetName: match.rule.agent,
+          confidence: calibratedConfidence,
+          matchType: match.matchType,
+        };
+
+        const explanation = generateRoutingExplanation(
+          winner,
+          alternatives,
+          calibrationMetadata,
+          match.matchType
+        );
+
         return {
           agent: match.rule.agent,
           rule: match.rule,
           matchType: match.matchType,
           fallback: false,
           specificity: match.specificity,
+          explanation,
         };
       }
 
       const fallbackAgent = yield* self.getFallbackAgentSilentEffect();
+
+      // Generate fallback explanation
+      const winner: RoutingAlternative = {
+        targetId: fallbackAgent,
+        targetName: fallbackAgent,
+        confidence: 0.5,
+      };
+
+      const calibrationMetadata: CalibrationMetadata = {
+        rawScore: 0.5,
+        calibratedScore: 0.5,
+        calibrated: false,
+      };
+
+      const explanation = generateRoutingExplanation(
+        winner,
+        [],
+        calibrationMetadata,
+        'metadata-only'
+      );
+
       return {
         agent: fallbackAgent,
         fallback: true,
+        explanation,
       };
     });
   }
@@ -304,12 +530,12 @@ export class MessageRouter {
    *
    * @param message - The message to match
    * @param metadata - Message metadata for filtering
-   * @returns Best match or null if no rules match
+   * @returns Best match and all matches for explanation generation
    */
   findBestMatch(
     message: string,
     metadata: Record<string, unknown>
-  ): Effect.Effect<RouteMatch | null> {
+  ): Effect.Effect<{ best: RouteMatch | null; allMatches: RouteMatch[] }> {
     const self = this;
     return Effect.gen(function* () {
       const matches: RouteMatch[] = [];
@@ -327,13 +553,13 @@ export class MessageRouter {
       }
 
       if (matches.length === 0) {
-        return null;
+        return { best: null, allMatches: [] };
       }
 
       // Sort by specificity descending
       matches.sort((a, b) => b.specificity - a.specificity);
 
-      return matches[0];
+      return { best: matches[0], allMatches: matches };
     });
   }
 

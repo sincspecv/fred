@@ -93,6 +93,7 @@ describe('Handoff Validation', () => {
       expect(context.outputs).toEqual({ step1: 'result1' });
       expect(context.metadata.handoffFrom).toBe('triage');
       expect(context.metadata.handoffReason).toBe('billing inquiry');
+      expect(context.metadata.handoffDepth).toBe(0); // New: depth tracking for observability
       expect(context.metadata.priority).toBe('high');
       expect(context.metadata.sessionId).toBe('session-123');
     });
@@ -148,7 +149,8 @@ describe('Handoff Validation', () => {
 
       expect(context.metadata.handoffFrom).toBe('triage');
       expect(context.metadata.handoffReason).toBeUndefined();
-      expect(Object.keys(context.metadata)).toHaveLength(1);
+      expect(context.metadata.handoffDepth).toBe(0); // New: depth tracking for observability
+      expect(Object.keys(context.metadata)).toHaveLength(2); // handoffFrom + handoffDepth
     });
   });
 

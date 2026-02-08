@@ -1,18 +1,23 @@
-import { Tracer, Span } from '../tracing';
+import type { Tracer, Span } from '../tracing';
 import { NoOpTracer } from '../tracing/noop-tracer';
 import {
+  GOLDEN_TRACE_VERSION,
+  generateGoldenTraceFilename,
+} from './golden-trace';
+import type {
   GoldenTrace,
   GoldenTraceSpan,
   GoldenTraceToolCall,
   GoldenTraceHandoff,
-  GOLDEN_TRACE_VERSION,
-  generateGoldenTraceFilename,
 } from './golden-trace';
-import { AgentResponse } from '../agent/agent';
+import type { AgentResponse } from '../agent/agent';
 import { writeFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import packageJson from '../../package.json';
+import { Effect } from 'effect';
+import { EvaluationService, type EvaluationRecordOptions } from './service';
+import type { EvaluationArtifact } from './artifact';
 
 /**
  * Recorder for capturing traces into golden trace format
@@ -297,3 +302,26 @@ interface SpanData {
   startTime: number;
   endTime?: number;
 }
+
+/**
+ * Effect-native recording entrypoint for deterministic evaluation artifacts.
+ */
+export const recordEvaluationArtifact = (
+  runId: string,
+  options?: EvaluationRecordOptions
+): Effect.Effect<EvaluationArtifact, unknown, EvaluationService> =>
+  Effect.gen(function* () {
+    const service = yield* EvaluationService;
+    return yield* service.record(runId, options);
+  });
+
+/**
+ * Effect-native load entrypoint for deterministic evaluation artifacts.
+ */
+export const loadEvaluationArtifact = (
+  traceId: string
+): Effect.Effect<EvaluationArtifact, unknown, EvaluationService> =>
+  Effect.gen(function* () {
+    const service = yield* EvaluationService;
+    return yield* service.load(traceId);
+  });

@@ -82,7 +82,9 @@ export function validateHandoffTarget(
   request: HandoffRequest,
   config: HandoffConfig
 ): HandoffResult {
-  if (config.allowedTargets.includes(request.targetAgent)) {
+  const isAllowed = config.allowedTargets.includes(request.targetAgent);
+
+  if (isAllowed) {
     return {
       type: 'handoff',
       targetAgent: request.targetAgent,
@@ -119,9 +121,14 @@ export function prepareHandoffContext(
   // Preserve history based on config (default: true)
   const preserveHistory = config.preserveHistory !== false;
 
+  // Calculate handoff depth from chain
+  const handoffChain = (pipelineContext.metadata.handoffChain as string[] | undefined) || [];
+  const handoffDepth = handoffChain.length;
+
   // Prepare handoff metadata
   const handoffMetadata: Record<string, unknown> = {
     handoffFrom: config.sourceAgent,
+    handoffDepth,
     ...(request.reason ? { handoffReason: request.reason } : {}),
     ...(request.metadata ?? {}),
   };

@@ -1,4 +1,4 @@
-import { AgentResponse } from '../agent/agent';
+import type { AgentResponse } from '../agent/agent';
 
 /**
  * Golden trace format version
@@ -83,6 +83,7 @@ export interface GoldenTraceData {
 export interface GoldenTraceMetadata {
   timestamp: number;
   fredVersion: string;
+  gitCommit?: string;
   config?: {
     useSemanticMatching?: boolean;
     semanticThreshold?: number;
@@ -102,6 +103,11 @@ export interface GoldenTrace {
   metadata: GoldenTraceMetadata;
   trace: GoldenTraceData;
 }
+
+/**
+ * Legacy alias used by the deterministic eval normalizer.
+ */
+export type LegacyGoldenTrace = GoldenTrace;
 
 /**
  * Validate golden trace structure
@@ -159,7 +165,7 @@ export function validateGoldenTrace(trace: any): trace is GoldenTrace {
  * Expected format: trace-v1.0.0-{hash}.json
  */
 export function parseGoldenTraceVersion(filename: string): string | null {
-  const match = filename.match(/trace-v(\d+\.\d+\.\d+)-/);
+  const match = filename.match(/trace-v(\d+\.\d+(?:\.\d+)?)-/);
   return match ? match[1] : null;
 }
 

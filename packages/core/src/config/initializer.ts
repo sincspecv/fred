@@ -10,8 +10,11 @@ import {
   extractWorkflows,
   extractProviders,
   extractObservability,
+  extractToolPolicies,
+  extractMCPServers,
 } from './loader';
 import { loadPromptFile } from '../utils/prompt-loader';
+import type { ToolPoliciesConfig } from './types';
 import { PostgresContextStorage } from '../context/storage/postgres';
 import { SqliteContextStorage } from '../context/storage/sqlite';
 import {
@@ -38,6 +41,8 @@ export interface FredLike {
   configureRouting(config: import('../routing/types').RoutingConfig): void;
   configureWorkflows(workflows: import('../workflow/types').Workflow[]): void;
   configureObservability(config: import('./types').ObservabilityConfig): void;
+  setToolPolicies?(policies: ToolPoliciesConfig | undefined): Promise<void> | void;
+  configureMCPServers?(configs: Array<import('./types').MCPGlobalServerConfig & { id: string }>): Promise<void>;
 }
 
 /**
@@ -96,6 +101,11 @@ export class ConfigInitializer {
     const observabilityConfig = extractObservability(config);
     fred.configureObservability(observabilityConfig);
 
+    const toolPolicies = extractToolPolicies(config);
+    if (fred.setToolPolicies) {
+      await fred.setToolPolicies(toolPolicies);
+    }
+
     // Register providers
     const providers = extractProviders(config);
     if (providers.length > 0) {
@@ -110,6 +120,12 @@ export class ConfigInitializer {
       await providerService.loadDefaultProviders();
       providerRegistry.markInitialized();
       providerService.syncProviderRegistry();
+    }
+
+    // Configure MCP servers (before agent creation so agents can reference them)
+    const mcpConfigs = extractMCPServers(config);
+    if (mcpConfigs.length > 0 && fred.configureMCPServers) {
+      await fred.configureMCPServers(mcpConfigs);
     }
 
     // Register tools (need execute functions)

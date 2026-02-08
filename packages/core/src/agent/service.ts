@@ -12,6 +12,7 @@ import {
 import { AgentFactory } from './factory';
 import { ToolRegistryService } from '../tool/service';
 import { ProviderRegistryService } from '../platform/service';
+import { ToolGateService } from '../tool-gate/service';
 import type { Tracer } from '../tracing';
 
 /**
@@ -102,6 +103,7 @@ class AgentServiceImpl implements AgentService {
     private agents: Ref.Ref<Map<string, AgentInstance>>,
     private toolRegistryService: typeof ToolRegistryService.Service,
     private providerRegistryService: typeof ProviderRegistryService.Service,
+    private toolGateService: typeof ToolGateService.Service,
     private tracer?: Tracer
   ) {
     // AgentFactory is still used internally for actual agent creation logic
@@ -133,6 +135,7 @@ class AgentServiceImpl implements AgentService {
     };
 
     this.factory = new AgentFactory(legacyToolRegistry as any, tracer);
+    this.factory.setToolGateService(toolGateService);
   }
 
   createAgent(config: AgentConfig): Effect.Effect<AgentInstance, AgentCreationError | AgentAlreadyExistsError> {
@@ -153,8 +156,18 @@ class AgentServiceImpl implements AgentService {
       );
 
       // Resolve config with default system message
+      let resolvedTools = config.tools;
+      if (config.tools && config.tools.length > 0) {
+        const assignedTools = yield* self.toolRegistryService.getTools(config.tools);
+        const filteredTools = yield* self.toolGateService.filterTools(assignedTools, {
+          agentId: config.id,
+        });
+        resolvedTools = filteredTools.allowed.map((tool) => tool.id);
+      }
+
       const resolvedConfig = {
         ...config,
+        tools: resolvedTools,
         systemMessage: config.systemMessage ?? self.defaultSystemMessage,
       };
 
@@ -407,6 +420,7 @@ export const AgentServiceLive = Layer.effect(
     const agents = yield* Ref.make(new Map<string, AgentInstance>());
     const toolRegistryService = yield* ToolRegistryService;
     const providerRegistryService = yield* ProviderRegistryService;
-    return new AgentServiceImpl(agents, toolRegistryService, providerRegistryService);
+    const toolGateService = yield* ToolGateService;
+    return new AgentServiceImpl(agents, toolRegistryService, providerRegistryService, toolGateService);
   })
 );
