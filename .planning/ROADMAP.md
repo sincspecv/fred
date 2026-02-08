@@ -46,7 +46,7 @@ Roadmap is milestone-scoped; shipped milestones are archived under `.planning/mi
 
 Plans:
 - [x] 27-01-PLAN.md — Build project/config detection and actionable validation diagnostics (completed 2026-02-07, 4.25 min)
-- [ ] 27-02-PLAN.md — Add terminal lifecycle safety, help-first default, and `fred chat` command routing
+- [x] 27-02-PLAN.md — Add terminal lifecycle safety, help-first default, and `fred chat` command routing (completed 2026-02-07, 4.50 min)
 - [ ] 27-03-PLAN.md — Implement multi-pane TUI shell with keyboard focus and scroll navigation
 - [ ] 27-04-PLAN.md — Add phase smoke coverage and run blocking human verification checkpoint
 
