@@ -5,7 +5,8 @@
 
 import { Fred } from '@fancyrobot/fred';
 import { startDevChat } from '@fancyrobot/fred-dev';
-import { detectTerminalMode } from '../runtime/tty-mode';
+import { detectTerminalMode } from '../runtime/tty-mode.js';
+import { createFredTuiApp } from '../tui/app.js';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { pathToFileURL } from 'url';
@@ -50,21 +51,51 @@ async function loadProjectSetup(fred: Fred): Promise<void> {
  * Handle chat command
  *
  * Routes to interactive mode when TTY is available, or non-interactive mode otherwise.
- * Uses BunRuntime.runMain internally via startDevChat for proper signal handling.
+ * Launches TUI shell in interactive mode, or provides structured output otherwise.
  * This function never returns in interactive mode - it runs until interrupted.
  */
 export function handleChatCommand(): void {
   const mode = detectTerminalMode();
 
-  // Interactive TTY mode - start full chat interface
+  // Interactive TTY mode - start TUI shell
   if (mode.mode === 'interactive-tty') {
-    const setupHook = async (fred: Fred) => {
-      await loadProjectSetup(fred);
-    };
+    // Launch TUI app with terminal lifecycle hooks
+    const app = createFredTuiApp(
+      {
+        terminalWidth: process.stdout.columns || 120,
+        terminalHeight: process.stdout.rows || 40,
+        showStartupHint: true,
+      },
+      {
+        onStateChange: (state) => {
+          // State changes will be handled by rendering engine
+          // For now, this is a placeholder for future integration
+        },
+        onQuit: () => {
+          console.log('\nExiting Fred chat...');
+          process.exit(0);
+        },
+        onError: (error) => {
+          console.error('TUI error:', error);
+          process.exit(1);
+        },
+      }
+    );
 
-    // startDevChat uses BunRuntime.runMain internally
-    // It will handle signals and cleanup, and never returns
-    startDevChat(setupHook);
+    // Set up keyboard input handling (placeholder for full implementation)
+    // In Phase 28, this will be enhanced with proper raw mode and stdin reading
+
+    // For now, just show that the TUI app was created and started
+    console.log('TUI shell initialized. Press Ctrl+C to exit.');
+
+    // Keep process alive
+    process.stdin.resume();
+
+    // Handle Ctrl+C for now
+    process.on('SIGINT', () => {
+      app.stop();
+    });
+
     // This line is never reached in interactive mode
     return;
   }

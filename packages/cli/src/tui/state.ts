@@ -118,13 +118,10 @@ export function setFocusedPane(state: TuiState, pane: FocusablePaneId): TuiState
  * Scroll transcript viewport
  */
 export function scrollTranscript(state: TuiState, delta: number): TuiState {
-  const newOffset = Math.max(
-    0,
-    Math.min(
-      state.transcript.viewport.totalLines - state.transcript.viewport.visibleLines,
-      state.transcript.viewport.scrollOffset + delta
-    )
-  );
+  const { scrollOffset, totalLines, visibleLines } = state.transcript.viewport;
+  const maxOffset = Math.max(0, totalLines - visibleLines);
+
+  const newOffset = Math.max(0, Math.min(maxOffset, scrollOffset + delta));
 
   return {
     ...state,
@@ -153,17 +150,22 @@ export function updateInputText(state: TuiState, text: string, cursorPosition?: 
 }
 
 /**
- * Navigate input history (Up/Down when input is empty)
+ * Navigate input history (Up/Down when input is empty or already navigating history)
  */
 export function navigateInputHistory(state: TuiState, direction: 'up' | 'down'): TuiState {
   const { history, text } = state.input;
 
-  // Only navigate history when input is empty
-  if (text.length > 0) {
+  if (history.entries.length === 0) {
     return state;
   }
 
-  if (history.entries.length === 0) {
+  // Allow history navigation if:
+  // 1. Input is empty, OR
+  // 2. We're already navigating history (currentIndex !== -1)
+  const isNavigatingHistory = history.currentIndex !== -1;
+  const textIsEmpty = text.length === 0;
+
+  if (!textIsEmpty && !isNavigatingHistory) {
     return state;
   }
 
