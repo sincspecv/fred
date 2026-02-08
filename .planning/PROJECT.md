@@ -93,7 +93,19 @@ Route any message to the right agent and execute multi-step pipelines with share
 - **AI SDK**: Full Effect replacement — no Vercel AI SDK dependencies
 - **Persistence**: In-memory by default; SQL optional — no persistence without explicit adapter
 
-## Current Milestone: v0.3.0 Observability & Safety
+## Current Milestone: v0.3.1 CLI/TUI Developer Experience
+
+**Goal:** Transform `@fancyrobot/fred-cli` into a production-grade CLI + TUI that any Fred project can install and instantly use.
+
+**Target features:**
+- OpenCode-style TUI with sidebar, streaming transcript, inspector panel, and keyboard-first interaction
+- Full CLI command parity (`fred run`, `fred init`, `fred dev`, `fred providers`, `fred tools`, `fred sessions`, `fred export`)
+- Project auto-detection with `fred.config.ts`/`.json` support and high-quality validation errors
+- Extensible plugin architecture for commands, TUI panels, config schemas, and runtime hooks
+- Effect Layers throughout (ConfigService, ProjectRootService, ProviderRegistry, SessionStore, Runner, UIAdapter)
+- Persistent sessions with export to Markdown/JSON
+
+## Previous Milestone: v0.3.0 Observability & Safety
 
 **Status:** ✅ Shipped 2026-02-07
 **Archive:** `.planning/milestones/v0.3.0-ROADMAP.md`, `.planning/milestones/v0.3.0-REQUIREMENTS.md`
@@ -104,16 +116,6 @@ Route any message to the right agent and execute multi-step pipelines with share
 - Intent-aware tool gating with audit hooks and HITL approvals
 - MCP server lifecycle + tool/resource integration under safety policies
 - Routing explainability with confidence alternatives and `fred.routing.explain()`
-
-## Next Milestone: v0.3.1 CLI/TUI Developer Experience
-
-**Goal:** Transform `@fancyrobot/fred-cli` into a production-grade CLI + TUI that any Fred project can install and use.
-
-**Planned for after v0.3.0:**
-- TUI-first experience with OpenCode-style interface
-- CLI command parity for scripting
-- Project auto-detection and config validation
-- Plugin architecture for extensibility
 
 ## Key Decisions
 
@@ -129,4 +131,4 @@ Route any message to the right agent and execute multi-step pipelines with share
 | Monorepo with Changesets | Version management and changelogs | ✓ Good — Automated publishing |
 
 ---
-*Last updated: 2026-02-07 after v0.3.0 milestone completion*
+*Last updated: 2026-02-07 after v0.3.1 milestone start*

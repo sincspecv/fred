@@ -5,19 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Core value:** Route any message to the right agent and execute multi-step pipelines with shared context, without developers stitching orchestration together themselves.
-**Current focus:** Planning v0.3.1 CLI/TUI Developer Experience milestone
-**Milestone:** v0.3.1 CLI/TUI Developer Experience (next)
+**Current focus:** v0.3.1 CLI/TUI Developer Experience
+**Milestone:** v0.3.1 CLI/TUI Developer Experience
 
 ---
 
 ## Current Position
 
-**Phase:** Not started (next milestone planning)
-**Plan:** Not started
-**Status:** Ready to plan
-**Last activity:** 2026-02-07 — Completed v0.3.0 milestone archival
-
-**Progress:** ████████░░░░ 66% overall roadmap maturity (v0.3.0 shipped, v0.3.1 unplanned)
+**Phase:** Not started (defining requirements)
+**Plan:** —
+**Status:** Defining requirements
+**Last activity:** 2026-02-07 — Milestone v0.3.1 started
 
 | Phase | Name | Requirements | Plans | Status |
 |-------|------|--------------|-------|--------|
@@ -348,4 +346,4 @@ Resume file: None
 
 *State file tracks current milestone progress*
 *Archives in .planning/milestones/ contain historical data*
-*Last updated: 2026-02-07 — v0.3.0 archived and shipped, ready to plan v0.3.1*
+*Last updated: 2026-02-07 — Milestone v0.3.1 started*
