@@ -214,6 +214,69 @@ export function navigateInputHistory(state: TuiState, direction: 'up' | 'down'):
 }
 
 /**
+ * Submit the current input: clears input, resets cursor, adds to history
+ * Returns both the new state and the submitted text
+ */
+export function submitInput(state: TuiState): { state: TuiState; submittedText: string } {
+  const text = state.input.text;
+  const newState: TuiState = {
+    ...state,
+    input: {
+      ...state.input,
+      text: '',
+      cursorPosition: 0,
+      history: text.trim()
+        ? {
+            entries: [...state.input.history.entries, text],
+            currentIndex: -1,
+          }
+        : {
+            ...state.input.history,
+            currentIndex: -1,
+          },
+    },
+  };
+  return { state: newState, submittedText: text };
+}
+
+/**
+ * Remove character before cursor (backspace behavior)
+ */
+export function backspaceAtCursor(state: TuiState): TuiState {
+  const { text, cursorPosition } = state.input;
+  if (cursorPosition === 0) {
+    return state;
+  }
+  const newText = text.slice(0, cursorPosition - 1) + text.slice(cursorPosition);
+  return {
+    ...state,
+    input: {
+      ...state.input,
+      text: newText,
+      cursorPosition: cursorPosition - 1,
+    },
+  };
+}
+
+/**
+ * Remove character at cursor position (delete key behavior)
+ */
+export function deleteAtCursor(state: TuiState): TuiState {
+  const { text, cursorPosition } = state.input;
+  if (cursorPosition >= text.length) {
+    return state;
+  }
+  const newText = text.slice(0, cursorPosition) + text.slice(cursorPosition + 1);
+  return {
+    ...state,
+    input: {
+      ...state.input,
+      text: newText,
+    },
+  };
+}
+
+/**
  * Add entry to input history
  */
 export function addToInputHistory(state: TuiState, entry: string): TuiState {

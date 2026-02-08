@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import type { KeyEvent } from '@opentui/core';
 import {
-  parseKeyEvent,
   mapKeyToAction,
   applyKeyAction,
   handleKeyEvent,
-  createKeymap,
 } from '../../../packages/cli/src/tui/keymap.js';
 import {
   createInitialTuiState,
@@ -13,13 +12,29 @@ import {
   addToInputHistory,
 } from '../../../packages/cli/src/tui/state.js';
 
+/**
+ * Helper to create an OpenTUI KeyEvent for testing
+ */
+function makeKey(overrides: Partial<KeyEvent> & { name: string }): KeyEvent {
+  return {
+    name: overrides.name,
+    sequence: overrides.sequence ?? '',
+    ctrl: overrides.ctrl ?? false,
+    shift: overrides.shift ?? false,
+    meta: overrides.meta ?? false,
+    option: overrides.option ?? false,
+    eventType: overrides.eventType ?? 'press',
+    repeated: overrides.repeated ?? false,
+  };
+}
+
 describe('TUI Keymap', () => {
   describe('Focus cycle with Tab', () => {
     test('Tab cycles focus forward from input to sidebar', () => {
       const state = createInitialTuiState();
       expect(state.focusedPane).toBe('input');
 
-      const event = parseKeyEvent('\t');
+      const event = makeKey({ name: 'tab' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('focus-next');
 
@@ -47,9 +62,7 @@ describe('TUI Keymap', () => {
       const state = createInitialTuiState();
       state.focusedPane = 'input';
 
-      const event = parseKeyEvent('\t');
-      event.shift = true; // Simulate Shift+Tab
-
+      const event = makeKey({ name: 'tab', shift: true });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('focus-prev');
 
@@ -69,10 +82,8 @@ describe('TUI Keymap', () => {
 
   describe('Status bar never receives focus', () => {
     test('focus cycle skips status bar', () => {
-      // Verify status is not in focusable panes list
       const state = createInitialTuiState();
 
-      // Cycle through all panes
       let current = state.focusedPane;
       const visited = [current];
 
@@ -98,9 +109,9 @@ describe('TUI Keymap', () => {
       const state = createInitialTuiState();
       state.focusedPane = 'transcript';
       state.transcript.viewport.scrollOffset = 10;
-      state.transcript.viewport.totalLines = 100; // Set totalLines for scrolling
+      state.transcript.viewport.totalLines = 100;
 
-      const event = parseKeyEvent('\x1b[A'); // Up arrow ANSI sequence
+      const event = makeKey({ name: 'up' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('scroll-up');
       expect(action.lines).toBe(1);
@@ -113,9 +124,9 @@ describe('TUI Keymap', () => {
       const state = createInitialTuiState();
       state.focusedPane = 'transcript';
       state.transcript.viewport.scrollOffset = 5;
-      state.transcript.viewport.totalLines = 100; // Set totalLines for scrolling
+      state.transcript.viewport.totalLines = 100;
 
-      const event = parseKeyEvent('\x1b[B'); // Down arrow
+      const event = makeKey({ name: 'down' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('scroll-down');
 
@@ -127,9 +138,9 @@ describe('TUI Keymap', () => {
       const state = createInitialTuiState();
       state.focusedPane = 'transcript';
       state.transcript.viewport.scrollOffset = 20;
-      state.transcript.viewport.totalLines = 100; // Set totalLines for scrolling
+      state.transcript.viewport.totalLines = 100;
 
-      const event = parseKeyEvent('\x1b[5~'); // PgUp
+      const event = makeKey({ name: 'pageup' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('scroll-up');
       expect(action.lines).toBe(10);
@@ -144,7 +155,7 @@ describe('TUI Keymap', () => {
       state.transcript.viewport.scrollOffset = 5;
       state.transcript.viewport.totalLines = 100;
 
-      const event = parseKeyEvent('\x1b[6~'); // PgDn
+      const event = makeKey({ name: 'pagedown' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('scroll-down');
       expect(action.lines).toBe(10);
@@ -158,11 +169,10 @@ describe('TUI Keymap', () => {
       state.focusedPane = 'transcript';
       state.transcript.viewport.scrollOffset = 0;
 
-      const event = parseKeyEvent('\x1b[A'); // Up arrow
+      const event = makeKey({ name: 'up' });
       const action = mapKeyToAction(event, state);
       const newState = applyKeyAction(state, action);
 
-      // Should not go below 0
       expect(newState.transcript.viewport.scrollOffset).toBe(0);
     });
   });
@@ -174,7 +184,7 @@ describe('TUI Keymap', () => {
       state.input.text = '';
       state.input.history.entries = ['command 1', 'command 2'];
 
-      const event = parseKeyEvent('\x1b[A'); // Up arrow
+      const event = makeKey({ name: 'up' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('history-up');
 
@@ -188,21 +198,20 @@ describe('TUI Keymap', () => {
       state.input.text = 'hello';
       state.input.cursorPosition = 5;
 
-      const event = parseKeyEvent('\x1b[A'); // Up arrow
+      const event = makeKey({ name: 'up' });
       const action = mapKeyToAction(event, state);
 
-      // When input has text, up arrow is treated as cursor movement
       expect(action.type).toBe('cursor-left');
     });
 
-    test('Down arrow navigates history forward when input is empty', () => {
+    test('Down arrow navigates history forward when navigating', () => {
       const state = createInitialTuiState();
       state.focusedPane = 'input';
       state.input.text = '';
       state.input.history.entries = ['command 1', 'command 2'];
       state.input.history.currentIndex = 0;
 
-      const event = parseKeyEvent('\x1b[B'); // Down arrow
+      const event = makeKey({ name: 'down' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('history-down');
 
@@ -216,7 +225,7 @@ describe('TUI Keymap', () => {
       state.input.text = 'hello';
       state.input.cursorPosition = 0;
 
-      const event = parseKeyEvent('\x1b[B'); // Down arrow
+      const event = makeKey({ name: 'down' });
       const action = mapKeyToAction(event, state);
 
       expect(action.type).toBe('cursor-right');
@@ -227,18 +236,17 @@ describe('TUI Keymap', () => {
       state = addToInputHistory(state, 'first command');
       state = addToInputHistory(state, 'second command');
 
-      // Start with empty input
       state.input.text = '';
       state.focusedPane = 'input';
 
       // Press up - should get most recent
-      const event1 = parseKeyEvent('\x1b[A');
+      const event1 = makeKey({ name: 'up' });
       const action1 = mapKeyToAction(event1, state);
       state = applyKeyAction(state, action1);
       expect(state.input.text).toBe('second command');
 
       // Press up again - should get older
-      const event2 = parseKeyEvent('\x1b[A');
+      const event2 = makeKey({ name: 'up' });
       const action2 = mapKeyToAction(event2, state);
       state = applyKeyAction(state, action2);
       expect(state.input.text).toBe('first command');
@@ -252,7 +260,7 @@ describe('TUI Keymap', () => {
       state.input.text = '';
       state.input.cursorPosition = 0;
 
-      const event = parseKeyEvent('a');
+      const event = makeKey({ name: 'a' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('input-text');
 
@@ -265,9 +273,9 @@ describe('TUI Keymap', () => {
       const state = createInitialTuiState();
       state.focusedPane = 'input';
       state.input.text = 'helo';
-      state.input.cursorPosition = 3; // After 'hel'
+      state.input.cursorPosition = 3;
 
-      const event = parseKeyEvent('l');
+      const event = makeKey({ name: 'l' });
       const action = mapKeyToAction(event, state);
       const newState = applyKeyAction(state, action);
 
@@ -282,13 +290,13 @@ describe('TUI Keymap', () => {
       state.input.cursorPosition = 3;
 
       // Move left
-      const leftEvent = parseKeyEvent('\x1b[D');
+      const leftEvent = makeKey({ name: 'left' });
       const leftAction = mapKeyToAction(leftEvent, state);
       const leftState = applyKeyAction(state, leftAction);
       expect(leftState.input.cursorPosition).toBe(2);
 
       // Move right
-      const rightEvent = parseKeyEvent('\x1b[C');
+      const rightEvent = makeKey({ name: 'right' });
       const rightAction = mapKeyToAction(rightEvent, state);
       const rightState = applyKeyAction(leftState, rightAction);
       expect(rightState.input.cursorPosition).toBe(3);
@@ -301,7 +309,7 @@ describe('TUI Keymap', () => {
       state.input.cursorPosition = 0;
 
       // Try to move left from position 0
-      const leftEvent = parseKeyEvent('\x1b[D');
+      const leftEvent = makeKey({ name: 'left' });
       const leftAction = mapKeyToAction(leftEvent, state);
       const leftState = applyKeyAction(state, leftAction);
       expect(leftState.input.cursorPosition).toBe(0);
@@ -310,53 +318,139 @@ describe('TUI Keymap', () => {
       state.input.cursorPosition = 2;
 
       // Try to move right from end
-      const rightEvent = parseKeyEvent('\x1b[C');
+      const rightEvent = makeKey({ name: 'right' });
       const rightAction = mapKeyToAction(rightEvent, state);
       const rightState = applyKeyAction(state, rightAction);
       expect(rightState.input.cursorPosition).toBe(2);
     });
   });
 
+  describe('Backspace and Delete', () => {
+    test('backspace removes character before cursor', () => {
+      const state = createInitialTuiState();
+      state.focusedPane = 'input';
+      state.input.text = 'hello';
+      state.input.cursorPosition = 5;
+
+      const event = makeKey({ name: 'backspace' });
+      const action = mapKeyToAction(event, state);
+      expect(action.type).toBe('backspace');
+
+      const newState = applyKeyAction(state, action);
+      expect(newState.input.text).toBe('hell');
+      expect(newState.input.cursorPosition).toBe(4);
+    });
+
+    test('backspace at position 0 does nothing', () => {
+      const state = createInitialTuiState();
+      state.focusedPane = 'input';
+      state.input.text = 'hello';
+      state.input.cursorPosition = 0;
+
+      const event = makeKey({ name: 'backspace' });
+      const action = mapKeyToAction(event, state);
+      const newState = applyKeyAction(state, action);
+
+      expect(newState.input.text).toBe('hello');
+      expect(newState.input.cursorPosition).toBe(0);
+    });
+
+    test('delete removes character at cursor', () => {
+      const state = createInitialTuiState();
+      state.focusedPane = 'input';
+      state.input.text = 'hello';
+      state.input.cursorPosition = 0;
+
+      const event = makeKey({ name: 'delete' });
+      const action = mapKeyToAction(event, state);
+      expect(action.type).toBe('delete');
+
+      const newState = applyKeyAction(state, action);
+      expect(newState.input.text).toBe('ello');
+      expect(newState.input.cursorPosition).toBe(0);
+    });
+
+    test('delete at end of text does nothing', () => {
+      const state = createInitialTuiState();
+      state.focusedPane = 'input';
+      state.input.text = 'hello';
+      state.input.cursorPosition = 5;
+
+      const event = makeKey({ name: 'delete' });
+      const action = mapKeyToAction(event, state);
+      const newState = applyKeyAction(state, action);
+
+      expect(newState.input.text).toBe('hello');
+    });
+  });
+
+  describe('Submit handling', () => {
+    test('Enter triggers submit action', () => {
+      const state = createInitialTuiState();
+      state.focusedPane = 'input';
+      state.input.text = 'hello';
+
+      const event = makeKey({ name: 'enter' });
+      const action = mapKeyToAction(event, state);
+      expect(action.type).toBe('submit');
+
+      const newState = applyKeyAction(state, action);
+      expect(newState.input.text).toBe('');
+      expect(newState.input.cursorPosition).toBe(0);
+    });
+
+    test('submit adds text to history', () => {
+      const state = createInitialTuiState();
+      state.focusedPane = 'input';
+      state.input.text = 'test command';
+
+      const event = makeKey({ name: 'enter' });
+      const action = mapKeyToAction(event, state);
+      const newState = applyKeyAction(state, action);
+
+      expect(newState.input.history.entries).toContain('test command');
+    });
+
+    test('submit with empty text does not add to history', () => {
+      const state = createInitialTuiState();
+      state.focusedPane = 'input';
+      state.input.text = '';
+
+      const event = makeKey({ name: 'enter' });
+      const action = mapKeyToAction(event, state);
+      const newState = applyKeyAction(state, action);
+
+      expect(newState.input.history.entries).toHaveLength(0);
+    });
+  });
+
   describe('Quit handling', () => {
     test('Esc triggers quit action', () => {
       const state = createInitialTuiState();
-      const event = parseKeyEvent('\x1b');
+      const event = makeKey({ name: 'escape' });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('quit');
 
-      const { shouldQuit } = handleKeyEvent(state, event);
-      expect(shouldQuit).toBe(true);
+      const { action: resultAction } = handleKeyEvent(state, event);
+      expect(resultAction.type).toBe('quit');
     });
 
     test('Ctrl+C triggers quit action', () => {
       const state = createInitialTuiState();
-      const event = parseKeyEvent('\x03'); // Ctrl+C
-      event.ctrl = true;
-
+      const event = makeKey({ name: 'c', ctrl: true });
       const action = mapKeyToAction(event, state);
       expect(action.type).toBe('quit');
     });
   });
 
-  describe('Keymap creation', () => {
-    test('createKeymap returns all handlers', () => {
-      const keymap = createKeymap();
-
-      expect(keymap.parseKeyEvent).toBeDefined();
-      expect(keymap.mapKeyToAction).toBeDefined();
-      expect(keymap.applyKeyAction).toBeDefined();
-      expect(keymap.handleKeyEvent).toBeDefined();
-    });
-
-    test('keymap handles complete key event flow', () => {
-      const keymap = createKeymap();
+  describe('handleKeyEvent convenience wrapper', () => {
+    test('returns state and action together', () => {
       const state = createInitialTuiState();
+      const event = makeKey({ name: 'tab' });
+      const result = handleKeyEvent(state, event);
 
-      const event = keymap.parseKeyEvent('\t');
-      const action = keymap.mapKeyToAction(event, state);
-      const newState = keymap.applyKeyAction(state, action);
-
-      expect(newState.focusedPane).not.toBe(state.focusedPane);
+      expect(result.state.focusedPane).not.toBe(state.focusedPane);
+      expect(result.action.type).toBe('focus-next');
     });
   });
 });

@@ -144,10 +144,8 @@ async function main(): Promise<void> {
     switch (command) {
       case 'chat':
       case 'tui':
-        // handleChatCommand uses BunRuntime.runMain internally (via startDevChat) and never returns
-        // It handles signals and cleanup, and exits the process
-        handleChatCommand();
-        // This line is never reached
+        // handleChatCommand is async — OpenTUI manages terminal lifecycle
+        await handleChatCommand();
         return;
 
       case 'dev':

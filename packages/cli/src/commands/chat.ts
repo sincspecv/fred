@@ -10,30 +10,23 @@ import { createFredTuiApp } from '../tui/app.js';
  * Handle chat command
  *
  * Routes to interactive TUI when TTY is available, or non-interactive mode otherwise.
- * This function never returns in interactive mode — it runs until the user quits.
+ * In interactive mode, OpenTUI manages the terminal lifecycle (alternate screen, raw mode, cleanup).
  */
-export function handleChatCommand(): void {
+export async function handleChatCommand(): Promise<void> {
   const mode = detectTerminalMode();
 
   // Interactive TTY mode — launch TUI shell
   if (mode.mode === 'interactive-tty') {
-    const app = createFredTuiApp(
-      {
-        terminalWidth: process.stdout.columns || 120,
-        terminalHeight: process.stdout.rows || 40,
-        showStartupHint: true,
+    const app = await createFredTuiApp({
+      onQuit: () => {
+        console.log('Exiting Fred chat...');
+        process.exit(0);
       },
-      {
-        onQuit: () => {
-          console.log('Exiting Fred chat...');
-          process.exit(0);
-        },
-        onError: (error) => {
-          console.error('TUI error:', error);
-          process.exit(1);
-        },
-      }
-    );
+      onError: (error) => {
+        console.error('TUI error:', error);
+        process.exit(1);
+      },
+    });
 
     // Handle SIGINT as backup (app also handles Ctrl+C via keymap)
     process.on('SIGINT', () => {

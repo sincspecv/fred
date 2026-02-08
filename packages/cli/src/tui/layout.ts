@@ -1,121 +1,20 @@
 /**
- * TUI layout composition
+ * TUI layout content providers
  *
- * Defines the multi-pane shell structure:
- * - Left sidebar pane
- * - Main transcript pane
- * - Bottom input bar pane
- * - Bottom status bar (display-only, never focusable)
- *
- * This module provides a framework-agnostic layout specification.
- * Actual rendering is abstracted to allow OpenTUI integration later.
+ * Provides content data for each pane. Actual layout and rendering
+ * is handled by OpenTUI's Yoga flexbox engine in app.ts.
  */
 
-import type { TuiState, PaneId } from './state.js';
-
-/**
- * Pane layout specification
- */
-export interface PaneLayout {
-  id: PaneId;
-  focusable: boolean;
-  region: {
-    x: number;
-    y: number;
-    width: number | 'auto';
-    height: number | 'auto';
-  };
-}
-
-/**
- * Layout configuration for the TUI shell
- */
-export interface LayoutConfig {
-  sidebarWidth: number;
-  inputHeight: number;
-  statusHeight: number;
-}
+import type { TuiState } from './state.js';
 
 /**
  * Default layout configuration
  */
-export const DEFAULT_LAYOUT: LayoutConfig = {
+export const DEFAULT_LAYOUT = {
   sidebarWidth: 30,
   inputHeight: 3,
   statusHeight: 1,
 };
-
-/**
- * Calculate pane layouts based on terminal dimensions
- */
-export function calculatePaneLayouts(
-  terminalWidth: number,
-  terminalHeight: number,
-  config: LayoutConfig = DEFAULT_LAYOUT
-): PaneLayout[] {
-  const { sidebarWidth, inputHeight, statusHeight } = config;
-
-  // Calculate main content area dimensions
-  const mainWidth = terminalWidth - sidebarWidth;
-  const mainHeight = terminalHeight - inputHeight - statusHeight;
-
-  return [
-    // Sidebar: left column, full height minus input/status
-    {
-      id: 'sidebar',
-      focusable: true,
-      region: {
-        x: 0,
-        y: 0,
-        width: sidebarWidth,
-        height: mainHeight,
-      },
-    },
-    // Transcript: right column, full height minus input/status
-    {
-      id: 'transcript',
-      focusable: true,
-      region: {
-        x: sidebarWidth,
-        y: 0,
-        width: mainWidth,
-        height: mainHeight,
-      },
-    },
-    // Input: bottom, full width, above status
-    {
-      id: 'input',
-      focusable: true,
-      region: {
-        x: 0,
-        y: mainHeight,
-        width: terminalWidth,
-        height: inputHeight,
-      },
-    },
-    // Status: very bottom, full width, never focusable
-    {
-      id: 'status',
-      focusable: false,
-      region: {
-        x: 0,
-        y: mainHeight + inputHeight,
-        width: terminalWidth,
-        height: statusHeight,
-      },
-    },
-  ];
-}
-
-/**
- * Get pane layout by ID
- */
-export function getPaneLayout(
-  layouts: PaneLayout[],
-  paneId: PaneId
-): PaneLayout | undefined {
-  return layouts.find((layout) => layout.id === paneId);
-}
 
 /**
  * Render content for a pane (framework-agnostic content model)
@@ -169,28 +68,6 @@ export function renderTranscriptContent(state: TuiState, focused: boolean): Pane
 }
 
 /**
- * Generate input bar content
- */
-export function renderInputContent(state: TuiState, focused: boolean): PaneContent {
-  const { text, cursorPosition } = state.input;
-
-  const prompt = '> ';
-  const displayText = text || '';
-
-  // Show cursor position if focused
-  const cursorIndicator = focused ? `[${cursorPosition}]` : '';
-
-  return {
-    lines: [
-      '',
-      prompt + displayText + cursorIndicator,
-      '',
-    ],
-    focusIndicator: focused ? '*' : undefined,
-  };
-}
-
-/**
  * Generate status bar content
  */
 export function renderStatusContent(state: TuiState): PaneContent {
@@ -206,27 +83,3 @@ export function renderStatusContent(state: TuiState): PaneContent {
  * Startup hint displayed before entering full shell
  */
 export const STARTUP_HINT = 'Starting Fred chat... Press Tab to cycle focus, Esc to quit.';
-
-/**
- * Main TUI app component (framework-agnostic structure)
- */
-export interface FredTuiAppProps {
-  state: TuiState;
-  onKeyPress?: (key: string) => void;
-}
-
-/**
- * Render all panes for the current state
- */
-export function renderAllPanes(
-  state: TuiState,
-  terminalWidth: number,
-  terminalHeight: number
-): Record<PaneId, PaneContent> {
-  return {
-    sidebar: renderSidebarContent(state, state.focusedPane === 'sidebar'),
-    transcript: renderTranscriptContent(state, state.focusedPane === 'transcript'),
-    input: renderInputContent(state, state.focusedPane === 'input'),
-    status: renderStatusContent(state),
-  };
-}

@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This repository uses specialized skills. When working here, always prefer using a relevant skill before ad-hoc implementation.
 
 ## Project Overview
 
@@ -159,20 +159,16 @@ Key provider API keys (auto-detected in dev-chat):
 - `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`
 - `FRED_POSTGRES_URL` or `FRED_SQLITE_PATH` for persistence
 
-## Skill Usage
-
-This repository uses specialized skills. When working here, always prefer using a relevant skill before ad-hoc implementation.
-
-### Skill Usage Rule
+## Skill Usage Rule
 
 - Before starting work, quickly classify the task (TUI, Effect, docs lookup, architecture, etc.).
 - If a matching skill exists, use it first.
 - If multiple skills apply, use the most specific one first, then supporting skills.
 - Document in your response which skill(s) you used and why.
 
-### Primary Skills For This Project
+## Primary Skills For This Project
 
-#### `opentui`
+### `opentui`
 
 Use for terminal UI work in CLI/TUI features, including:
 - Layout and pane composition
@@ -180,7 +176,7 @@ Use for terminal UI work in CLI/TUI features, including:
 - Streaming UI updates and rendering behavior
 - TUI component patterns and testing
 
-#### `effect-ts`
+### `effect-ts`
 
 Use for Effect-based TypeScript implementation, including:
 - Services, Layers, and dependency wiring
@@ -188,7 +184,7 @@ Use for Effect-based TypeScript implementation, including:
 - Stream and concurrency primitives
 - Correct API usage for current Effect versions
 
-#### `effect-best-practices`
+### `effect-best-practices`
 
 Use as a guardrail whenever writing or reviewing Effect code, especially:
 - Service/tag design
@@ -196,41 +192,41 @@ Use as a guardrail whenever writing or reviewing Effect code, especially:
 - Layer composition and modular boundaries
 - Avoiding anti-patterns in Effect-based code
 
-### Supporting Skills Also Relevant Here
+## Supporting Skills Also Relevant Here
 
-#### `context7`
+### `context7`
 
 Use for up-to-date documentation checks when integrating or validating:
 - Effect ecosystem packages
 - Bun/platform APIs
 - TUI libraries and related dependencies
 
-#### `prompt-engineering-patterns`
+### `prompt-engineering-patterns`
 
 Use when editing system prompts, agent instructions, or routing prompt templates to improve:
 - Reliability
 - Controllability
 - Output consistency
 
-#### `architecture-patterns`
+### `architecture-patterns`
 
 Use for larger refactors or new subsystems that benefit from:
 - Clean architecture boundaries
 - Domain modeling clarity
 - Maintainable service decomposition
 
-#### `sql-optimization-patterns`
+### `sql-optimization-patterns`
 
 Use when working on persistence/query performance areas (SQLite/Postgres), including:
 - Slow query analysis
 - Index strategy
 - Schema/query optimization
 
-#### `resolve-conflicts`
+### `resolve-conflicts`
 
 Use immediately when merge conflicts appear. Do not resolve conflicts ad-hoc first.
 
-### Practical Selection Cheatsheet
+## Practical Selection Cheatsheet
 
 - TUI or keyboard UX change -> `opentui`
 - Effect service/layer/stream change -> `effect-ts` + `effect-best-practices`
@@ -240,7 +236,7 @@ Use immediately when merge conflicts appear. Do not resolve conflicts ad-hoc fir
 - DB perf issue -> `sql-optimization-patterns`
 - Merge conflict work -> `resolve-conflicts`
 
-### Default Workflow Expectation
+## Default Workflow Expectation
 
 1. Identify applicable skill(s)
 2. Load and apply skill guidance

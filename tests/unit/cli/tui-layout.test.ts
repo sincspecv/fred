@@ -1,76 +1,25 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  calculatePaneLayouts,
-  getPaneLayout,
   renderSidebarContent,
   renderTranscriptContent,
-  renderInputContent,
   renderStatusContent,
-  renderAllPanes,
   DEFAULT_LAYOUT,
   STARTUP_HINT,
 } from '../../../packages/cli/src/tui/layout.js';
 import { createInitialTuiState } from '../../../packages/cli/src/tui/state.js';
 
 describe('TUI Layout', () => {
-  describe('Pane layout calculation', () => {
-    test('calculates correct pane regions for standard terminal', () => {
-      const layouts = calculatePaneLayouts(120, 40);
-
-      expect(layouts).toHaveLength(4);
-      expect(layouts.map((l) => l.id)).toEqual(['sidebar', 'transcript', 'input', 'status']);
+  describe('Default layout config', () => {
+    test('has expected sidebar width', () => {
+      expect(DEFAULT_LAYOUT.sidebarWidth).toBe(30);
     });
 
-    test('sidebar is focusable with correct dimensions', () => {
-      const layouts = calculatePaneLayouts(120, 40);
-      const sidebar = getPaneLayout(layouts, 'sidebar');
-
-      expect(sidebar).toBeDefined();
-      expect(sidebar?.focusable).toBe(true);
-      expect(sidebar?.region.width).toBe(DEFAULT_LAYOUT.sidebarWidth);
-      expect(sidebar?.region.x).toBe(0);
+    test('has expected input height', () => {
+      expect(DEFAULT_LAYOUT.inputHeight).toBe(3);
     });
 
-    test('transcript is focusable and occupies main area', () => {
-      const layouts = calculatePaneLayouts(120, 40);
-      const transcript = getPaneLayout(layouts, 'transcript');
-
-      expect(transcript).toBeDefined();
-      expect(transcript?.focusable).toBe(true);
-      expect(transcript?.region.x).toBe(DEFAULT_LAYOUT.sidebarWidth);
-    });
-
-    test('input bar is focusable at bottom', () => {
-      const layouts = calculatePaneLayouts(120, 40);
-      const input = getPaneLayout(layouts, 'input');
-
-      expect(input).toBeDefined();
-      expect(input?.focusable).toBe(true);
-      expect(input?.region.height).toBe(DEFAULT_LAYOUT.inputHeight);
-    });
-
-    test('status bar is NOT focusable', () => {
-      const layouts = calculatePaneLayouts(120, 40);
-      const status = getPaneLayout(layouts, 'status');
-
-      expect(status).toBeDefined();
-      expect(status?.focusable).toBe(false);
-      expect(status?.region.height).toBe(DEFAULT_LAYOUT.statusHeight);
-    });
-
-    test('custom layout configuration', () => {
-      const customConfig = {
-        sidebarWidth: 40,
-        inputHeight: 5,
-        statusHeight: 2,
-      };
-
-      const layouts = calculatePaneLayouts(120, 40, customConfig);
-      const sidebar = getPaneLayout(layouts, 'sidebar');
-      const input = getPaneLayout(layouts, 'input');
-
-      expect(sidebar?.region.width).toBe(40);
-      expect(input?.region.height).toBe(5);
+    test('has expected status height', () => {
+      expect(DEFAULT_LAYOUT.statusHeight).toBe(1);
     });
   });
 
@@ -125,35 +74,6 @@ describe('TUI Layout', () => {
       expect(content.lines.join('\n')).toContain('Hi there!');
     });
 
-    test('renders input bar with empty input', () => {
-      const state = createInitialTuiState();
-      const content = renderInputContent(state, false);
-
-      expect(content.lines.join('\n')).toContain('>');
-    });
-
-    test('renders input bar with text', () => {
-      const state = createInitialTuiState();
-      state.input.text = 'test message';
-      state.input.cursorPosition = 12;
-
-      const content = renderInputContent(state, false);
-
-      expect(content.lines.join('\n')).toContain('test message');
-    });
-
-    test('input bar shows cursor indicator when focused', () => {
-      const state = createInitialTuiState();
-      state.input.text = 'test';
-      state.input.cursorPosition = 4;
-
-      const focused = renderInputContent(state, true);
-      const unfocused = renderInputContent(state, false);
-
-      expect(focused.lines.join('\n')).toContain('[4]');
-      expect(unfocused.lines.join('\n')).not.toContain('[4]');
-    });
-
     test('renders status bar with focus indicator', () => {
       const state = createInitialTuiState();
       state.focusedPane = 'transcript';
@@ -170,21 +90,6 @@ describe('TUI Layout', () => {
       const state = createInitialTuiState();
 
       expect(state.focusedPane).toBe('input');
-    });
-
-    test('renders all panes with correct initial focus', () => {
-      const state = createInitialTuiState();
-      const panes = renderAllPanes(state, 120, 40);
-
-      // Input should show focus indicator
-      expect(panes.input.focusIndicator).toBe('*');
-
-      // Others should not
-      expect(panes.sidebar.focusIndicator).toBeUndefined();
-      expect(panes.transcript.focusIndicator).toBeUndefined();
-
-      // Status never has focus indicator
-      expect(panes.status.focusIndicator).toBeUndefined();
     });
   });
 
@@ -205,17 +110,15 @@ describe('TUI Layout', () => {
 
     test('transcript viewport shows visible lines subset', () => {
       const state = createInitialTuiState();
-      // Add enough messages to require scrolling
       state.transcript.messages = Array.from({ length: 30 }, (_, i) => ({
         role: 'user',
         content: `Message ${i}`,
       }));
-      state.transcript.viewport.totalLines = 90; // 3 lines per message
+      state.transcript.viewport.totalLines = 90;
       state.transcript.viewport.scrollOffset = 10;
 
       const content = renderTranscriptContent(state, false);
 
-      // Should render a subset based on viewport
       expect(content.lines.length).toBeLessThanOrEqual(state.transcript.viewport.visibleLines);
     });
   });

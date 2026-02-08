@@ -1,14 +1,19 @@
 /**
  * Keyboard event handling and key bindings
  *
+ * Uses OpenTUI KeyEvent for structured key parsing.
+ *
  * Implements focus cycle and navigation rules:
  * - Tab: cycle focus forward with wraparound
  * - Shift+Tab: cycle focus backward with wraparound
  * - Status bar excluded from focus order
  * - Transcript: Up/Down and PgUp/PgDn for scrolling
  * - Input: Up/Down for history when empty, cursor movement otherwise
+ * - Enter: submit input
+ * - Backspace/Delete: character removal
  */
 
+import type { KeyEvent } from '@opentui/core';
 import type { TuiState } from './state.js';
 import {
   nextFocusablePane,
@@ -17,35 +22,10 @@ import {
   scrollTranscript,
   navigateInputHistory,
   updateInputText,
+  submitInput,
+  backspaceAtCursor,
+  deleteAtCursor,
 } from './state.js';
-
-/**
- * Key event representation
- */
-export interface KeyEvent {
-  key: string;
-  shift: boolean;
-  ctrl: boolean;
-  alt: boolean;
-  meta: boolean;
-}
-
-/**
- * Parse raw key input into KeyEvent
- */
-export function parseKeyEvent(raw: string): KeyEvent {
-  // Basic key parsing (can be enhanced with full ANSI sequence support)
-  // Control characters start with ASCII codes < 32
-  const isCtrl = raw.length > 0 && raw.charCodeAt(0) < 32 && raw !== '\t' && raw !== '\n' && raw !== '\r';
-
-  return {
-    key: raw,
-    shift: false,
-    ctrl: isCtrl,
-    alt: false,
-    meta: false,
-  };
-}
 
 /**
  * Key action types
@@ -60,6 +40,9 @@ export type KeyAction =
   | { type: 'input-text'; text: string }
   | { type: 'cursor-left' }
   | { type: 'cursor-right' }
+  | { type: 'backspace' }
+  | { type: 'delete' }
+  | { type: 'submit' }
   | { type: 'quit' }
   | { type: 'noop' };
 
@@ -67,18 +50,18 @@ export type KeyAction =
  * Map key events to actions based on current state
  */
 export function mapKeyToAction(event: KeyEvent, state: TuiState): KeyAction {
-  const { key, shift, ctrl } = event;
+  const { name, shift, ctrl, meta } = event;
 
   // Global keybindings (work regardless of focus)
-  if (key === '\t' || key === 'tab') {
+  if (name === 'tab') {
     return shift ? { type: 'focus-prev' } : { type: 'focus-next' };
   }
 
-  if (key === '\x1b' || key === 'escape') {
+  if (name === 'escape') {
     return { type: 'quit' };
   }
 
-  if (ctrl && (key === 'c' || key === '\x03')) {
+  if (ctrl && name === 'c') {
     return { type: 'quit' };
   }
 
@@ -87,16 +70,16 @@ export function mapKeyToAction(event: KeyEvent, state: TuiState): KeyAction {
 
   // Transcript pane: scroll navigation
   if (focusedPane === 'transcript') {
-    if (key === 'up' || key === '\x1b[A') {
+    if (name === 'up') {
       return { type: 'scroll-up', lines: 1 };
     }
-    if (key === 'down' || key === '\x1b[B') {
+    if (name === 'down') {
       return { type: 'scroll-down', lines: 1 };
     }
-    if (key === 'pageup' || key === '\x1b[5~') {
+    if (name === 'pageup') {
       return { type: 'scroll-up', lines: 10 };
     }
-    if (key === 'pagedown' || key === '\x1b[6~') {
+    if (name === 'pagedown') {
       return { type: 'scroll-down', lines: 10 };
     }
   }
@@ -107,22 +90,39 @@ export function mapKeyToAction(event: KeyEvent, state: TuiState): KeyAction {
     const isNavigatingHistory = state.input.history.currentIndex !== -1;
     const shouldUseHistory = inputIsEmpty || isNavigatingHistory;
 
-    if (key === 'up' || key === '\x1b[A') {
+    if (name === 'enter' || name === 'return') {
+      return { type: 'submit' };
+    }
+
+    if (name === 'backspace') {
+      return { type: 'backspace' };
+    }
+
+    if (name === 'delete') {
+      return { type: 'delete' };
+    }
+
+    if (name === 'up') {
       return shouldUseHistory ? { type: 'history-up' } : { type: 'cursor-left' };
     }
-    if (key === 'down' || key === '\x1b[B') {
+    if (name === 'down') {
       return shouldUseHistory ? { type: 'history-down' } : { type: 'cursor-right' };
     }
-    if (key === 'left' || key === '\x1b[D') {
+    if (name === 'left') {
       return { type: 'cursor-left' };
     }
-    if (key === 'right' || key === '\x1b[C') {
+    if (name === 'right') {
       return { type: 'cursor-right' };
     }
 
-    // Printable characters
-    if (key.length === 1 && !ctrl) {
-      return { type: 'input-text', text: key };
+    // Printable characters: single char name, no ctrl/meta modifiers
+    if (name.length === 1 && !ctrl && !meta) {
+      return { type: 'input-text', text: name };
+    }
+
+    // Space key
+    if (name === 'space') {
+      return { type: 'input-text', text: ' ' };
     }
   }
 
@@ -180,6 +180,15 @@ export function applyKeyAction(state: TuiState, action: KeyAction): TuiState {
       };
     }
 
+    case 'backspace':
+      return backspaceAtCursor(state);
+
+    case 'delete':
+      return deleteAtCursor(state);
+
+    case 'submit':
+      return submitInput(state).state;
+
     case 'quit':
       // Handled by app, just return state
       return state;
@@ -195,22 +204,9 @@ export function applyKeyAction(state: TuiState, action: KeyAction): TuiState {
 /**
  * Handle key event (convenience wrapper)
  */
-export function handleKeyEvent(state: TuiState, event: KeyEvent): { state: TuiState; shouldQuit: boolean } {
+export function handleKeyEvent(state: TuiState, event: KeyEvent): { state: TuiState; action: KeyAction } {
   const action = mapKeyToAction(event, state);
   const newState = applyKeyAction(state, action);
-  const shouldQuit = action.type === 'quit';
 
-  return { state: newState, shouldQuit };
-}
-
-/**
- * Create keymap handler for TUI app
- */
-export function createKeymap() {
-  return {
-    parseKeyEvent,
-    mapKeyToAction,
-    applyKeyAction,
-    handleKeyEvent,
-  };
+  return { state: newState, action };
 }
