@@ -1,5 +1,12 @@
 # @fred/provider-openai
 
+## 2.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`4b72cf1`](https://github.com/TheFancyRobot/fred/commit/4b72cf1793f3bbadc6356888abdcdf7011ba1d2b)]:
+  - @fancyrobot/fred@0.2.0
+
 ## 1.0.0
 
 ### Minor Changes
