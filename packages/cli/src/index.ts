@@ -87,7 +87,7 @@ Usage:
   fred <command> [options]
 
 Commands:
-  chat                    Start interactive chat interface
+  chat, tui               Start interactive chat interface
                           - Full-screen TUI with streaming output
                           - If your project exports setup(fred) from src/index.(ts|js) or index.(ts|js), it will be executed before chat starts
   dev                     Start development chat interface with hot reload (deprecated - use 'chat')
@@ -143,6 +143,7 @@ async function main(): Promise<void> {
 
     switch (command) {
       case 'chat':
+      case 'tui':
         // handleChatCommand uses BunRuntime.runMain internally (via startDevChat) and never returns
         // It handles signals and cleanup, and exits the process
         handleChatCommand();
