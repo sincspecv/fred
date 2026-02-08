@@ -107,8 +107,9 @@ describe('phase 27 smoke', () => {
     });
 
     test('chat command in TTY mode creates TUI app', () => {
-      // Mock fully capable TTY
+      // Mock fully capable TTY with all methods the TUI app needs
       let rawMode = false;
+      const dataListeners: Function[] = [];
       const mockStdin = {
         isTTY: true,
         isRaw: false,
@@ -116,12 +117,24 @@ describe('phase 27 smoke', () => {
           rawMode = mode;
         }),
         resume: mock(() => {}),
+        setEncoding: mock(() => {}),
+        on: mock((event: string, handler: Function) => {
+          if (event === 'data') dataListeners.push(handler);
+        }),
+        removeListener: mock(() => {}),
+        pause: mock(() => {}),
       } as any;
 
+      const writeBuffer: string[] = [];
       const mockStdout = {
         isTTY: true,
         columns: 120,
         rows: 40,
+        write: mock((data: string) => {
+          writeBuffer.push(data);
+          return true;
+        }),
+        on: mock(() => {}),
       } as any;
 
       Object.defineProperty(process, 'stdin', {
@@ -134,27 +147,26 @@ describe('phase 27 smoke', () => {
         configurable: true,
       });
 
-      // Mock console.log to capture startup output
-      const logs: string[] = [];
-      const originalLog = console.log;
-      console.log = mock((...args: any[]) => {
-        logs.push(args.join(' '));
-      });
-
       try {
         // Call handleChatCommand - it should not exit in TTY mode
         handleChatCommand();
 
-        // Verify TUI initialization message was shown
-        expect(logs.some(log => log.includes('TUI shell initialized'))).toBe(true);
+        // Verify raw mode was entered (interactive TUI needs it)
+        expect(mockStdin.setRawMode).toHaveBeenCalled();
 
-        // Verify stdin.resume was called (keeps process alive)
+        // Verify stdin.resume was called (keeps process alive for key input)
         expect(mockStdin.resume).toHaveBeenCalled();
+
+        // Verify stdout.write was called (TUI renders to terminal)
+        expect(mockStdout.write).toHaveBeenCalled();
+
+        // Verify stdin data listener was registered (for key handling)
+        expect(dataListeners.length).toBeGreaterThan(0);
 
         // Verify no exit was called (interactive mode stays running)
         expect(exitCode).toBeUndefined();
       } finally {
-        console.log = originalLog;
+        // Clean up
       }
     });
   });
