@@ -1,6 +1,6 @@
 {
   "name": "@fancyrobot/fred-groq",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Groq provider for Fred AI framework",
   "type": "module",
   "main": "./src/index.ts",
