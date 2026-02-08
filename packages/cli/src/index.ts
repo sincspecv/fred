@@ -8,6 +8,7 @@
 import { handleTestCommand } from './test';
 import { handleDevCommand } from './dev';
 import { handleEvalCommand } from './eval';
+import { handleChatCommand } from './commands/chat';
 
 /**
  * Options that require a value
@@ -86,7 +87,10 @@ Usage:
   fred <command> [options]
 
 Commands:
-  dev                     Start development chat interface with hot reload
+  chat                    Start interactive chat interface
+                          - Full-screen TUI with streaming output
+                          - If your project exports setup(fred) from src/index.(ts|js) or index.(ts|js), it will be executed before chat starts
+  dev                     Start development chat interface with hot reload (deprecated - use 'chat')
                           - If your project exports setup(fred) from src/index.(ts|js) or index.(ts|js), it will be executed before chat starts
   test                    Run golden trace tests
   test --record <message>  Record a new golden trace
@@ -105,6 +109,7 @@ Options:
   --traces-dir <dir>       Directory for golden traces (default: tests/golden-traces)
 
 Examples:
+  fred chat
   fred dev
   fred test
   fred test --record "Hello, world!"
@@ -114,6 +119,9 @@ Examples:
   fred eval replay --trace-id trace-abc --from-step 2
   fred eval compare --baseline trace-a --candidate trace-b
   fred eval suite --suite ./eval/suite.yaml --output json
+
+Get started:
+  Run 'fred chat' to start an interactive session with your AI agents.
   `);
 }
 
@@ -134,6 +142,13 @@ async function main(): Promise<void> {
     let exitCode = 0;
 
     switch (command) {
+      case 'chat':
+        // handleChatCommand uses BunRuntime.runMain internally (via startDevChat) and never returns
+        // It handles signals and cleanup, and exits the process
+        handleChatCommand();
+        // This line is never reached
+        return;
+
       case 'dev':
         // handleDevCommand uses BunRuntime.runMain internally and never returns
         // It handles signals and cleanup, and exits the process
