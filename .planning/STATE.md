@@ -11,28 +11,28 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 27 of 32 (Terminal Foundation & Project Detection)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-07 — Completed 27-02-PLAN.md (terminal lifecycle and chat command)
+Last activity: 2026-02-08 — Completed 27-03-PLAN.md (TUI shell layout and keyboard model)
 
-Progress: [██░░░░░░░░] 20%
+Progress: [███░░░░░░░] 30%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2 (v0.3.1 milestone)
-- Average duration: 4.38 min
-- Total execution time: 0.15 hours
+- Total plans completed: 3 (v0.3.1 milestone)
+- Average duration: 5.28 min
+- Total execution time: 0.26 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 27 | 2 | 8.75 min | 4.38 min |
+| 27 | 3 | 15.55 min | 5.18 min |
 
 **Recent Trend:**
-- Last 2 plans: 4.25 min (27-01), 4.50 min (27-02)
-- Trend: Excellent velocity on foundation work
+- Last 3 plans: 4.25 min (27-01), 4.50 min (27-02), 6.80 min (27-03)
+- Trend: Strong velocity; 27-03 longer due to TUI complexity
 
 **Previous Milestones:**
 - v0.3.0: 32 plans, ~4.2 min/plan (2 days)
@@ -47,7 +47,8 @@ Progress: [██░░░░░░░░] 20%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- OpenTUI for TUI framework (user preference; TypeScript-native terminal UI) — Pending implementation in Phase 27-28
+- Framework-agnostic TUI implementation (27-03) — OpenTUI not yet available; clean abstraction allows future swap-in
+- History navigation continuation (27-03) — Allow Up/Down to continue navigating after first selection matches shell UX
 - Effect.acquireUseRelease for terminal lifecycle (27-02) — Guarantees cleanup on success/error/interruption
 - fred chat as explicit interactive entrypoint (27-02) — Help-first default, chat is opt-in
 
@@ -75,8 +76,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-07
-Stopped at: Plan 27-02 execution complete
-Resume file: .planning/phases/27-terminal-foundation-project-detection/27-02-SUMMARY.md
+Last session: 2026-02-08
+Stopped at: Plan 27-03 execution complete
+Resume file: .planning/phases/27-terminal-foundation-project-detection/27-03-SUMMARY.md
 
-**Next step:** Continue with plan 27-03 (OpenTUI integration)
+**Next step:** Continue with plan 27-04 (final phase 27 plan)
