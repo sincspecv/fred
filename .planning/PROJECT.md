@@ -129,6 +129,7 @@ Route any message to the right agent and execute multi-step pipelines with share
 | Dual API (Promise + Effect) | Maintain Promise ease, offer Effect power | ✓ Good — Smooth migration path |
 | Independent versioning | Separate package evolution | ✓ Good — Flexible releases |
 | Monorepo with Changesets | Version management and changelogs | ✓ Good — Automated publishing |
+| OpenTUI for TUI framework | User preference; TypeScript-native terminal UI | — Pending |
 
 ---
 *Last updated: 2026-02-07 after v0.3.1 milestone start*
